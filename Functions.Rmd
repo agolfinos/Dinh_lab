@@ -1,0 +1,1773 @@
+---
+title: "Functions"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Seurat single-cell data
+
+## • [DEPRECATED] Seurat pre-processing helper 0
+```{r}
+seu_pp0 <- function(seu, nFeature_min = 200, nFeature_max = 4000, batch_id = 'orig.ident') {
+  print(VlnPlot(seu, features = c("nCount_RNA", "nFeature_RNA")))
+  seu <- subset(seu, subset = nFeature_RNA > nFeature_min & nFeature_RNA < nFeature_max)
+  print(table(seu[[batch_id]]))
+  return(seu)
+}
+```
+
+## • Seurat pre-processing helper 1 (normalize through PC selection)
+
+Run this function in the CONSOLE as it has figure outputs that cannot be seen if you are running code in-line
+NOTE: this function requires user input that you can determine the values of based on the output figures
+
+seu: seurat object (individual sample, pre-processing)
+out: path to output a log of pre-processing steps
+pct_doublets: expected doublet percentage. Please reference the 10X documentation for appropriate values for this argument
+feature_subset: would you like to be presented with the nCount_RNA, nFeature_RNA, and % mitochondrial cells to set cutoffs for filtering? If FALSE, there will be no opportunity to do so 
+normalize: set this to TRUE if the data is raw. Set to FALSE if the data has been integrated, as you cannot normalize again
+```{r}
+seu_pp1 <- function(seu, out, remove_doublets = TRUE, pct_doublets, feature_subset = TRUE, batch_id = 'orig.ident', reduction = 'pca', harmony = TRUE, seurat_integration = FALSE, normalize = TRUE, test_npcs = 100, assay = 'RNA'){
+  
+  require(dplyr)
+  require(Seurat)
+  require(harmony)
+  require(grid)
+  require(DoubletFinder)
+  
+  sink(paste(out, '_preprocessing_console_output.txt', sep = ''), append = T)
+  
+  cat('\nNEW ANALYSIS\n')
+  cat(paste('Date of analysis: ', Sys.Date(), "\n"))
+  cat(paste("Output directory: ", out, "\n"))
+  cat(paste("Batch_ID: ", batch_id, "\n"))
+  cat(paste("Assay used: ", assay, "\n"))
+  
+  if (isTRUE(feature_subset)){
+    
+    seu[["percent.mt"]] <- PercentageFeatureSet(seu, pattern = "^MT-")
+    print(VlnPlot(seu, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3))
+  
+    min <- as.integer(readline("Enter the minimum number of RNA features: "))
+    max <- as.integer(readline("Enter the maximum number of RNA features: "))
+    num_mt <- as.numeric(readline("Enter the maximum percentage of MT genes allowed: "))
+    
+    cat(paste("Enter the minimum number of RNA features: ", min, "\n"))
+    cat(paste("Enter the maximum number of RNA features: ", max, "\n"))
+    cat(paste("Enter the maximum percentage of MT genes allowed:", num_mt, "\n"))
+    
+    seu <- subset(seu, subset = nFeature_RNA > min & nFeature_RNA < max & percent.mt < num_mt)
+  }
+  
+  
+  if (isTRUE(seurat_integration)){
+    print(paste('Now performing seurat integration based on the metadata column', batch_id))
+    objects <- list()
+    for (x in unique(seu[[c(batch_id)]][,1])){
+      seu_mini <- seu[,which(seu[[c(batch_id)]] == x)]
+      objects <- c(objects, seu_mini)
+
+    }
+    features <- SelectIntegrationFeatures(object.list = objects)
+    immune.anchors <- FindIntegrationAnchors(object.list = objects, anchor.features = features)
+    seu <- IntegrateData(anchorset = immune.anchors)
+    DefaultAssay(seu) <- 'integrated'
+    #print(DimPlot(seu, group.by = batch_id))
+    normalize = FALSE
+  }  
+  if (isTRUE(normalize)) {
+    seu <- NormalizeData(seu, assay = assay)
+  }
+  seu <- FindVariableFeatures(seu, assay = assay)
+  seu <- ScaleData(seu, assay = assay)
+  seu <- RunPCA(seu, verbose = FALSE, npcs = test_npcs, assay = assay)
+  if (isTRUE(harmony)){
+    seu <- seu %>% harmony::RunHarmony(batch_id, plot_convergence = TRUE, reduction.save = paste('harmony', assay, sep = ''))
+  }
+  if (isTRUE(harmony)){
+    print(ElbowPlot(seu, ndims = test_npcs, reduction = paste('harmony', assay, sep = '')))
+  }
+  if (isFALSE(harmony)){
+    print(ElbowPlot(seu, ndims = test_npcs))
+  }
+  
+  npcs2 <- as.integer(readline("Enter the number of PCs to use: "))
+  
+  seu <- FindNeighbors(seu, dims = 1:npcs2, reduction = reduction, assay = assay)
+  seu <- RunUMAP(seu, dims = 1:npcs2, reduction = reduction, assay = assay)
+  for (x in seq.int(0.1, 3, by = 0.1)){
+    seu <- FindClusters(seu, resolution = x, verbose = FALSE)
+  }
+  
+  if (isTRUE(remove_doublets)){
+    sweep.res <- DoubletFinder::paramSweep_v3(seu) 
+    sweep.stats <-DoubletFinder::summarizeSweep(sweep.res, GT = FALSE) 
+    bcmvn <- DoubletFinder::find.pK(sweep.stats)
+    write.csv(bcmvn, file = paste(out, 'DF_stats.csv', sep = ''))
+    print(barplot(bcmvn$BCmetric, names.arg = bcmvn$pK, las=2))
+    
+    nExp <- round(ncol(seu) * pct_doublets) 
+    
+    pk <- as.numeric(readline("Enter the pK value to use: "))
+  
+    cat(paste("Pre-defined pN value: 0.25", "\n"))
+    cat(paste("Enter the pK value to use: ", pk, "\n"))
+    
+    seu <- DoubletFinder::doubletFinder_v3(seu, pN = 0.25, pK = pk, nExp = nExp, PCs = 1:npcs2)
+  }
+  sink()
+  
+  pdf(paste(out, 'preprocessing_plots.pdf'), width = 12, height = 7)
+  
+    print(VlnPlot(seu, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, group.by = batch_id))
+  
+  if (isTRUE(harmony)){
+    print(ElbowPlot(seu, ndims = test_npcs, reduction = paste('harmony', assay, sep = '')))
+  }
+  if (isFALSE(harmony)){
+    print(ElbowPlot(seu, ndims = test_npcs))
+  }
+  
+  dev.off()
+  
+  saveRDS(seu, file = paste(out, Sys.Date(), '.RDS', sep = ''))
+  
+  return(seu)
+}
+```
+
+## • SoupX run
+```{r}
+soupX_run <- function(seu, tmpDir, outdir = './outputs/', seuout = './seurat_objs/', sample){
+  
+  require(SoupX)
+  require(Seurat)
+  require(DescTools)
+  
+  toc1 = Seurat::Read10X_h5(paste(tmpDir, "sample_filtered_feature_bc_matrix.h5", sep = ''))
+  toc1 = toc1[rownames(toc1) %in% rownames(seu),colnames(toc1) %in% colnames(seu)]
+  
+  tod1 = Seurat::Read10X_h5(paste(tmpDir, "sample_raw_feature_bc_matrix.h5", sep = ''))
+  tod1 <- tod1[rownames(tod1) %in% rownames(toc1),colnames(tod1) %in% colnames(toc1)]
+  tod1 = tod1[rownames(tod1) %in% rownames(seu),colnames(tod1) %in% colnames(seu)]
+  
+  v1t_counts = SoupChannel(tod1, toc1, calcSoupProfile = F)
+  
+  for (x in seq(100, 2000, by = 100)){
+    print(paste("Range of UMI: 0-", as.character(x), sep = ''))
+    print(length(v1t_counts$nDropUMIs[v1t_counts$nDropUMIs < x]))
+  }
+  
+  input <- readline("Enter upper range value: ")
+  
+  v1t_counts <- estimateSoup(v1t_counts, soupRange = c(0, input))
+  
+  clusters <- seu$global.cluster
+  clusters <- clusters[names(clusters) %in% colnames(v1t_counts$toc)]
+  
+  v1t_counts = setClusters(v1t_counts, clusters)
+  v1t_counts = autoEstCont(v1t_counts)
+  v1t_soupx = adjustCounts(v1t_counts)
+  
+  v1t <- CreateSeuratObject(v1t_soupx, project = sample, assay = "RNA", names.field = 1, names.delim = "_",meta.data = NULL)
+  
+  save(toc1, tod1, v1t, v1t_counts, v1t_soupx, clusters, tmpDir, file = paste(outdir, 'SoupX_env_', sample, '.rda', sep = ''))
+  
+  saveRDS(v1t, paste(seuout, sample, '_', Sys.Date(), '.RDS', sep = ''))
+}
+```
+
+## • Marker plotting (VlnPlot, DotPlot, DimPlot, FeaturePlot)
+```{r}
+marker_plotting <- function(seu, features, group.by){
+  
+  color_clusters <- c("#DC050C", "#FB8072", "#1965B0", "#7BAFDE", 
+                      "#882E72", "#B17BA6", "#FF7F00", "#FDB462",
+                      "#E7298A", "#E78AC3","#33A02C", "#B2DF8A", 
+                      "#55A1B1", "#8DD3C7", "#A6761D", "#E6AB02", 
+                      "#7570B3", "#BEAED4", "#666666", "#999999", 
+                      "#AA8282", "#D4B7B7", "#8600BF", "#BA5CE3", 
+                      "#808000","#AEAE5C", "#1E90FF", "#00BFFF", 
+                      "#56FF0D", "#FFFF00")
+  
+  require(Seurat)
+  require(cowplot)
+  require(ggplot2)
+  
+  p1 <- FeaturePlot(seu, features = features)
+  p2 <- VlnPlot(seu, features = features, group.by = group.by, cols = color_clusters, pt.size = 0) + theme(axis.title = element_blank())
+  p3 <- DotPlot(seu, features = features, group.by = group.by, col.min = 0) + 
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+  p4 <- DimPlot(seu, group.by = group.by, cols = color_clusters, label = T, label.box = T, repel = T)
+  plot_grid(p1, p2, p3, p4, nrow = 2, ncol = 2)
+}
+```
+
+## • Cluster evaluation (nCount, nFeature, doublet score)
+```{r}
+cluster_eval <- function(seu, group.by, batch.id){
+  
+  seu = my2
+  group.by = 'predicted.id'
+  batch.id = 'orig.ident'
+  
+  require(Seurat)
+  require(ComplexHeatmap)
+  require(grid)
+  require(DescTools)
+
+  test <- as.data.frame(table(seu[[group.by]], 
+        seu[[batch.id]])) %>% tidyr::pivot_wider(names_from = 'Var2', 
+        values_from = 'Freq') 
+  rnames <- test$Var1
+  test$Var1 <- NULL
+  rownames(test) <- rnames
+  total <- as.numeric(ncol(seu))
+  pct_df <- as.matrix(test[,1:ncol(test)]/total * 100)
+  p1 <- ComplexHeatmap::Heatmap(pct_df, 
+        name = 'Cluster %', 
+        row_title = 'cluster ID', column_title = 'sample', 
+        column_title_side = 'bottom', 
+        cell_fun = function(j, i, x, y, width, height, fill) 
+        {grid.text(sprintf("%.4f", pct_df[i, j]), x, y, gp = gpar(fontsize=10))
+  })
+  
+  p2 <- VlnPlot(seu, features = c('nCount_RNA', 'nFeature_RNA'), 
+        group.by = group.by)
+  df_meta <- as.vector(colnames(seu@meta.data)[colnames(seu@meta.data) 
+                                              %like% 'pANN_%'])
+  p3 <- FeaturePlot(seu, features = df_meta)
+  #cowplot::plot_grid(p1, p2, p3, ncol = 2, nrow = 2)
+  
+  p4 <- DimPlot(seu, group.by = group.by)
+  figure1 <- multi_panel_figure(
+  width = 180, height = 180,
+  columns = 2, rows = 2)
+  figure1 %<>% fill_panel(p1, row = 1, column = 1)
+  figure1 %<>% fill_panel(p2, row = 1, column = 2)
+  #figure1 %<>% fill_panel(p4, row = 2, column = 1)
+  figure1 %<>% fill_panel(p3, row = 2, column = 1:2)
+  figure1
+}
+```
+
+
+## • [DEPRECATED] Seurat pre-processing helper 2 (Find Neighbors through UMAP)
+
+Completes the following steps: Find neighbors, run harmony, run UMAP with the harmony reduction, and then find cluster resolutions from 0.1 to 3
+```{r}
+#seu <- seu
+#npcs <- 50
+#reduction = 'harmony'
+
+#seu_pp2 <- function(seu, npcs = 20, reduction, assay = 'RNA'){
+  #seu <- FindNeighbors(seu, dims = 1:npcs, reduction = reduction, assay = assay)
+  #seu <- RunUMAP(seu, dims = 1:npcs, reduction = reduction, assay = assay)
+  #for (x in seq.int(0.1, 3, by = 0.1)){
+    #seu <- FindClusters(seu, resolution = x, verbose = FALSE)
+  #}
+  #return(seu)
+#}
+```
+
+## • Add clustering resolutions 0.1-3
+
+```{r}
+add_cluster_res <- function(seu, start = 0.1, end = 3){
+  # getting clustering resolutions from 0.1-3
+  for (x in seq.int(start, end, by = 0.1)){
+    seu <- FindClusters(seu, resolution = x, verbose = FALSE)
+  }
+  return(seu)
+}
+```
+
+## • DE genes DotPlot (all clusters)
+
+```{r}
+#de_dotplot(seu, 'global.cluster')
+#seu <- fbs[,fbs$RNA_snn_res.0.5 %in% c(0,1,2)]
+#metadata <- 'RNA_snn_res.0.5'
+#n_marks = 10
+
+de_dotplot <- function(seu, metadata, out = './figures/', n_marks = 10, min_pct = 0.1){
+  require(Seurat)
+  require(DescTools)
+  require(ggplot2)
+  # getting differentially expressed genes for each subset
+  all_g <- c()
+  marker_df <- data.frame()
+  for (y in as.character(sort(unique(seu[[metadata]][,1])))){
+    seu@active.assay
+    fm <- FindMarkers(seu, ident.1 = y, group.by = metadata, test.use = 'MAST', only.pos = TRUE, logfc.threshold = 0.05, min.pct = min_pct)
+    if (nrow(fm) > 0){
+      fm <- fm[order(-fm$avg_log2FC, fm$p_val_adj),]
+      fm <- fm[!rownames(fm) %like any% c('^RPL%', '^RPS%', '^MT%'),]
+      g <- rownames(fm[1:n_marks,])
+      all_g <- c(all_g, g)
+      gene_list <- fm[1:n_marks,]
+      gene_list$cluster <- y
+      marker_df <- rbind(marker_df, gene_list)
+    }
+    if (nrow(fm) == 0){
+      print(paste('No markers for cluster', y, sep = ' '))
+    }
+      
+  }
+  all_g <- unique(all_g)
+  plot <- DotPlot(seu, features = rev(all_g), col.min = 0, group.by = metadata) + coord_flip() +  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1))
+  saveRDS(list(marker_df, plot), file = paste(out, Sys.Date(), '_de_dotplot_markers.RDS', sep = ''))
+  return(list(marker_df, plot))
+}
+```
+
+## • DE genes DotPlot (1 vs 1 clusters)
+
+```{r}
+library(Seurat)
+library(DescTools)
+
+x = 0
+y = 2
+
+de_dotplot_1v1 <- function(seu, metadata, x, y){
+  
+  seu <- seu[,which(seu[[metadata]][,1] %in% c(x, y))]
+  
+  # getting differentially expressed genes for each subset
+  all_g <- c()
+  fm1 <- FindMarkers(seu, ident.1 = x, ident.2 = y, group.by = metadata, logfc.threshold = 0.1, test.use = 'wilcox', min.pct = 0.1, min.diff.pct = 0.05, only.pos = TRUE)
+  fm1 <- fm1[order(-fm1$avg_log2FC, fm1$p_val_adj),]
+  fm1 <- fm1[!rownames(fm1) %like any% c('^RPL%', '^RPS%', '^MT%'),]
+  g <- rownames(fm1[1:5,])
+  all_g <- c(all_g, g)
+  
+  fm2 <- FindMarkers(seu, ident.1 = y, ident.2 = x, group.by = metadata, logfc.threshold = 0.1, test.use = 'wilcox', min.pct = 0.1, min.diff.pct = 0.05, only.pos = TRUE)
+  fm2 <- fm2[order(-fm2$avg_log2FC, fm2$p_val_adj),]
+  fm2 <- fm2[!rownames(fm2) %like any% c('^RPL%', '^RPS%', '^MT%'),]
+  g <- rownames(fm2[1:5,])
+  all_g <- c(all_g, g)
+  
+  all_g <- unique(all_g)
+  DotPlot(seu, features = rev(all_g), col.min = 0, group.by = metadata) + coord_flip() +  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1))
+}
+```
+
+## • frequency plots
+
+```{r}
+#freqs <- freq_boxplot(seu, metadata = 'global.cluster', split.meta = 'hpv_status', out = './figures/global_cluster_all_', out_width = 19, out_height = 10)
+
+SEU = epi_moc2
+metadata = 'RNA_snn_res.0.4'
+split.meta = 'K17.status'
+out = './figures/epi_moc2_'
+out_width = 8
+out_height = 8
+out_units = 'in'
+out_res = 300
+#freq_boxplot(seurat, celltype = c('N0_Retnlg', 'N1_Tnf', 'N2_Isg', 'N3_Npm1'), metadata = 'global.cluster2', split.meta = 'tissue', out = '/Volumes/hqdinh2/Projects/HNC_SPORE/Golfinosetal2022/neut_freq_boxplot.png')
+
+##################################################################
+freq_plot <- function(SEU, metadata, split.meta = 'tissue_hpv', graph_type = c('stacked_barplot', 'freq_boxplot'), out, out_width = 12, out_height = 8, out_units = 'in', out_res = 300){
+
+  require(ggplot2)
+  require(DescTools)
+  require(Seurat)
+  #cellid <- paste('%', celltype, '%', sep = '')
+  #myeloid_id <- as.character(unique(Idents(SEU))[unique(Idents(SEU)) %like any% c(cellid)])
+
+  Idents(SEU) <- metadata
+  new.ident <- sort(unique(Idents(SEU)))
+  samples <- unique(SEU@meta.data$orig.ident)
+  tmp <- match(SEU$orig.ident, samples)
+  sample_ind <- unique(tmp)
+  ids <- Idents(SEU)
+  tmp_v <- matrix(0, nrow = length(samples), ncol = length(new.ident))
+  rownames(tmp_v) <- samples
+  total_in_sample <- rep(0, length(samples))
+  tmp <- SEU$orig.ident
+  tmp <- plyr::count(tmp)
+  total_in_sample = tmp$freq
+  names(total_in_sample) <- tmp$x
+  total_in_sample <- total_in_sample[match(samples, names(total_in_sample))]
+  for (i in 1:length(new.ident)) {
+    tmp <- ids[which(ids == new.ident[i])]
+    tmp <- SEU$orig.ident[match(names(tmp), rownames(SEU@meta.data))]
+    tmp <- plyr::count(tmp)
+    for (j in 1:nrow(tmp)) {
+      ind <- which(rownames(tmp_v) == tmp$x[j])
+      tmp_v[ind,i] <- tmp$freq[j]
+    }
+  }
+  colnames(tmp_v) <- new.ident
+  ind <- order(colnames(tmp_v))
+  t2 <- tmp_v
+  for (i in 1:nrow(t2)) {
+    t2[i,] = t2[i,]/sum(t2[i,])
+  }
+  t2 <- as.data.frame(t2)
+  #t2 <- t2[colnames(t2) %in% celltype]
+  t2 <- as.matrix(t2)
+
+  meta <- SEU@meta.data[,c('orig.ident', split.meta)]
+  rownames(meta) <- NULL
+  meta <- unique(meta)
+  df <- NULL
+  for (i in 1:nrow(t2)) {
+    for (j in 1:ncol(t2)) {
+      df <- rbind(df, c(rownames(t2)[i], meta[[split.meta]][which(meta$orig.ident == rownames(t2)[i])], colnames(t2)[j], as.numeric(t2[i,j])))
+    }
+  }
+  colnames(df) <- c('Sample', 'Group', 'Cluster', 'Freqs')
+  df <- as.data.frame(df)
+  df$Group <- as.character(df$Group)
+  df$Freqs <- as.numeric(as.character(df$Freqs))
+  
+  all_p <- data.frame(subset = character(), p = numeric())
+
+  for (x in unique(df$Cluster)) {
+    f <- df[df$Cluster == x,]
+    groups <- unique(df$Group)
+    f1 <- f[f$Group == groups[1],]$Freqs
+    f2 <- f[f$Group == groups[2],]$Freqs
+    wcx <- wilcox.test(f1, f2, paired = FALSE)
+    row <- c(x, wcx$p.value)
+    all_p <- rbind(all_p, row)
+    all_p[,2] <- format(round(as.numeric(all_p[,2]), 2), nsmall = 2)
+  }
+  
+  p_filtered <- all_p
+  
+  sub_title <- paste(p_filtered[,1], p_filtered[,2], sep = '=')
+  
+  if (graph_type == 'freq_boxplot'){
+    png(paste(out, 'freq_boxplot.png', sep = ''), width = out_width, height = out_height, units = out_units, res = out_res)
+    ggplot(df) +geom_boxplot(aes(x = Group, y = Freqs, color = Group, fill = Group), position = position_dodge(), alpha = 0.5, outlier.color = NA) + geom_point(aes(x = Group, y = Freqs, color = Group), alpha = 0.8, position = position_jitterdodge()) + facet_wrap(~ Cluster, scales = 'free', nrow = 2) + theme_bw() + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(), strip.text = element_text(size = 12)) + scale_shape_manual(values = 1:5) + ggtitle(label = paste('Subset frequency by', split.meta, sep = ' ')) + theme(legend.key.size = unit(1, 'cm'), legend.title = element_text(size=30), legend.text = element_text(size=20), axis.text=element_text(size=16),axis.title=element_text(size=30)) + labs(y= "Cell Type Frequency")
+    
+    ggsave(paste(out, 'freq_boxplot.png', sep = ''), width = out_width, height = out_height, units = out_units, dpi = out_res)
+    dev.off()
+    write.csv(df, file = paste(out, 'freq_boxplot_data.csv', sep = ''))
+    return(df)
+  }
+  if (graph_type == 'stacked_barplot'){
+    png(paste(out, 'stacked_barplot.png', sep = ''), width = out_width, height = out_height, units = out_units, res = out_res)
+    ggplot(df) +geom_bar(aes(x = Group, y = Freqs, fill = Cluster), position = 'stack', stat = 'identity') + scale_fill_manual(values=color_clusters[1:as.numeric(length(unique(df$Cluster)))]) + theme_classic() + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+    
+    ggsave(paste(out, 'stacked_barplot.png', sep = ''), width = out_width, height = out_height, units = out_units, dpi = out_res)
+    dev.off()
+    write.csv(df, file = paste(out, 'stacked_barplot_data.csv', sep = ''))
+    return(df)
+  }
+  
+  
+}
+############################################################################
+```
+
+## ™ Testing new function
+```{r}
+SEU = zhou_myeloid
+metadata = 'predicted.id'
+split.meta = 'predicted.id'
+out = '/Volumes/hqdinh2/Projects/HNC_SPORE/Zhou_HNC_mice/Figures/zhou_myeloid_freq_boxplots.png'
+out_width = 7
+out_height = 8
+out_units = 'in'
+out_res = 300
+
+Idents(SEU) <- metadata
+new.ident <- sort(unique(Idents(SEU)))
+samples <- unique(SEU[['predicted.id']][,1])
+tmp <- match(SEU@meta.data[['predicted.id']], samples)
+sample_ind <- unique(tmp)
+ids <- Idents(SEU)
+tmp_v <- matrix(0, nrow = length(samples), ncol = length(new.ident))
+rownames(tmp_v) <- samples
+total_in_sample <- rep(0, length(samples))
+tmp <- SEU$orig.ident
+tmp <- plyr::count(tmp)
+total_in_sample = tmp$freq
+names(total_in_sample) <- tmp$x
+total_in_sample <- total_in_sample[match(samples, names(total_in_sample))]
+for (i in 1:length(new.ident)) {
+  tmp <- ids[which(ids == new.ident[i])]
+  tmp <- SEU[['treatment']][,1][match(names(tmp), rownames(SEU@meta.data))]
+  tmp <- plyr::count(tmp)
+  for (j in 1:nrow(tmp)) {
+    ind <- which(rownames(tmp_v) == tmp$x[j])
+    tmp_v[ind,i] <- tmp$freq[j]
+  }
+}
+colnames(tmp_v) <- new.ident
+ind <- order(colnames(tmp_v))
+t2 <- tmp_v
+for (i in 1:nrow(t2)) {
+  t2[i,] = t2[i,]/sum(t2[i,])
+}
+t2 <- as.data.frame(t2)
+t2 <- as.matrix(t2)
+
+meta <- SEU[[c('nCount_RNA' ,'treatment')]]
+rownames(meta) <- NULL
+meta <- unique(meta)
+df <- NULL
+for (i in 1:nrow(t2)) {
+  for (j in 1:ncol(t2)) {
+    df <- rbind(df, c(rownames(t2)[i], meta[['treatment']][which(meta$orig.ident == rownames(t2)[i])], colnames(t2)[j], as.numeric(t2[i,j])))
+  }
+}
+colnames(df) <- c('Sample', 'Group', 'Cluster', 'Freqs')
+df <- as.data.frame(df)
+df$Group <- as.character(df$Group)
+df$Freqs <- as.numeric(as.character(df$Freqs))
+
+all_p <- data.frame(subset = character(), p = numeric())
+
+for (x in unique(df$Cluster)) {
+  f <- df[df$Cluster == x,]
+  groups <- unique(df$Group)
+  f1 <- f[f$Group == groups[1],]$Freqs
+  f2 <- f[f$Group == groups[2],]$Freqs
+  wcx <- wilcox.test(f1, f2, paired = FALSE)
+  row <- c(x, wcx$p.value)
+  all_p <- rbind(all_p, row)
+  all_p[,2] <- format(round(as.numeric(all_p[,2]), 2), nsmall = 2)
+}
+
+p_filtered <- all_p
+
+sub_title <- paste(p_filtered[,1], p_filtered[,2], sep = '=')
+
+
+png(out, width = out_width, height = out_height, units = out_units, res = out_res)
+ggplot(df) +geom_boxplot(aes(x = Group, y = Freqs, color = Group, fill = Group), position = position_dodge(), alpha = 0.5, outlier.color = NA) + geom_point(aes(x = Group, y = Freqs, color = Group), alpha = 0.8, position = position_jitterdodge()) + facet_wrap(~ Cluster, scales = 'free', nrow = 2) + theme_bw() + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(), strip.text = element_text(size = 12)) + scale_shape_manual(values = 1:5) + ggtitle(label = paste('Subset frequency by', split.meta, sep = ' '))
+
+ggsave(out, width = out_width, height = out_height, units = out_units, dpi = out_res)
+dev.off()
+return(df)
+```
+
+
+### •• Wilcox test for frequency boxplots
+
+Input: dataframe that is a direct output from the previous function (frequency boxplots), out folder where you want the csv file stored
+
+What it does: It takes the dataframe and looks for every combination of two conditions (found in the Group column). For each unique combination of two conditions, it does a wilcox test for every cluster (from Cluster column) between those conditions. It makes a file that contains cluster name, the pvalue for that cluster, the comparison that produced that p-value for that cluster, and a convenience column that indicates significance/level of significance. The csv file will be saved in the out directory you provide
+
+Output: None. Only saves a file to the directory of your choice. 
+
+```{r}
+wilcox_by_condition <- function(df = df, out){
+  group1 <- as.character(unique(df$Group))
+  group2 <- group1
+  
+  wilcox <- data.frame(Cluster=character(), pval = numeric(), Comparison = character())
+  for (z in group1){
+    gp1 <- z
+    for (y in group2) {
+      gp2 <- y
+      if (!gp1 == gp2){
+        for (x in unique(df$Cluster)){
+          df2 <- df[df$Cluster == x,]
+          l <- df2[df2$Group == gp1, 'Freqs']
+          h <- df2[df2$Group == c(gp2), 'Freqs']
+          wc <- wilcox.test(l, h)
+          p <- wc$p.value
+          row <- c(x, p, paste(gp1, ' vs ', gp2, sep = ''))
+          wilcox <- rbind(wilcox, row)
+        }
+      } 
+    }
+  }
+    colnames(wilcox) <- c('Cluster', 'pval', 'Comparison')
+    wilcox$pval[wilcox$pval == 'NaN'] <- 1000000000000000
+    wilcox$pval <- as.numeric(wilcox$pval)
+    wilcox <- wilcox %>% mutate(significance = case_when(
+    pval < 0.01 ~ "Very significant", 
+    pval < 0.05 ~ "Sigificant", 
+    pval < 0.15 ~ 'Nearly significant',
+    pval > 0.05 ~ "Not significant"
+    ))
+    wilcox <- wilcox[!duplicated(wilcox[,c('Cluster','pval')]),]
+    write.csv(wilcox, file = paste(out, Sys.Date(), 'wilcox_test_results.csv', sep = ''), row.names = F)
+}
+```
+
+## • Volcano plots: plotting comparisons
+
+```{r Volcano plot of two metadata}
+seu <- seu
+seu_name <- 'hnc_CITESEQ_FB'
+meta <- 'orig.ident'
+cell1 <- 'D70774'
+cell2 <- 'D70792'
+out='/Volumes/hqdinh2/Projects/HNC_SPORE/Golfinosetal2022/'
+test.use = 'wilcox'
+logfc = 0.1
+pval_adj = 0.05
+fccutoff = 0.1
+pcutoff = 0.05
+
+
+volcPlot <- function(seu, seu_name, meta, cell1, cell2, select_labs=NULL, out='/Volumes/hqdinh2/Projects/HNC_SPORE/Golfinosetal2022/', test.use = 'wilcox', logfc = 0.1, pval_adj = 0.05, fccutoff = 0.1, pcutoff = 0.05) {
+  
+  require(EnhancedVolcano)
+  require(Seurat)
+  require(DescTools)
+  
+  Seurat::Idents(object = seu) <- seu[[meta]]
+  ids <- unique(seu@active.ident)
+  
+  marks_all <- Seurat::FindMarkers(seu, ident.1 = cell1, ident.2 = cell2, group.by = meta, test.use = test.use, logfc.threshold = logfc, only.pos = FALSE)
+  
+  marks_all$p_val_adj <- as.numeric(marks_all$p_val_adj)
+  marks_all <- marks_all[!rownames(marks_all) %like any% c('%^RP%', '%^RPS%', '%^RPL%'),]
+  
+  xlab <- paste('<-----', cell2, 'genes', '     log2 fold change     ', cell1, 'genes', '-----> ', sep = ' ')
+  
+  nums <- as.data.frame(table(seu@active.ident))
+  nums$fin <- paste(nums$Var1, nums$Freq, sep = '=')
+  nums2 <- as.character(nums$fin)
+  
+  marks_all$avg_log2FC[marks_all$avg_log2FC == c(-Inf)] <- sort(unique(marks_all$avg_log2FC))[2] - 100
+  marks_all$avg_log2FC[marks_all$avg_log2FC == c(Inf)] <- sort(unique(marks_all$avg_log2FC))[length(marks_all$avg_log2FC) - 1] + 100
+  marks_all$avg_log2FC <- as.numeric(marks_all$avg_log2FC)
+  
+  if (is.null(select_labs)){
+    EnhancedVolcano(marks_all, lab = rownames(marks_all), x = 'avg_log2FC',
+    y = 'p_val_adj', title = paste(as.character(cell2), 'vs.', as.character(cell1),
+    sep = ' '), subtitle = paste('DE logfc =', logfc, 'Vln fc-cutoff =', fccutoff, 
+    'Vln p-cutoff =', pcutoff), caption = paste(nums2[1], nums2[2], sep = "   "),
+    FCcutoff = fccutoff, pCutoff = pcutoff, legendLabels = NULL, legendIconSize = 0,
+    legendDropLevels = TRUE, legendPosition = 'right', xlab = xlab)
+  }
+  
+  if (!is.null(select_labs)){
+    EnhancedVolcano(marks_all, lab = rownames(marks_all), x = 'avg_log2FC',
+    y = 'p_val_adj', title = paste(as.character(cell2), 'vs.', as.character(cell1),
+    sep = ' '), subtitle = paste('DE logfc =', logfc, 'Vln fc-cutoff =', fccutoff, 
+    'Vln p-cutoff =', pcutoff), caption = paste(nums2[1], nums2[2], sep = "   "),
+    FCcutoff = fccutoff, pCutoff = pcutoff, legendLabels = NULL, legendIconSize = 0,
+    legendDropLevels = TRUE, legendPosition = 'right', xlab = xlab, selectLab = select_labs)
+  }
+  
+  ggsave(paste(out, seu_name, paste(as.character(ids[1]), 'vs.', as.character(ids[2]), 'logfc', logfc, 'pvaladj', pval_adj, 'volcano_plot.png', sep = '_')), width = 12, height = 12)
+  write.csv(marks_all, file = paste(out, seu_name, paste(as.character(ids[1]), 'vs.', as.character(ids[2]), 'logfc', logfc, 'pvaladj', pval_adj, 'volcano_plot.csv', sep = '_')))
+  return(marks_all)
+}
+```
+
+## • cellphoneDB functions
+
+```{r pre-run}
+#gets counts for cellphoneDB from your seurat object
+cellphonedb_counts <- function(ser, meta){
+
+  Idents(ser) <- meta
+
+  musGenes <- rownames(ser)
+
+  counts <- as.data.frame(as.matrix(ser@assays$RNA[,1:ncol(ser@assays$RNA)]))
+  rows <- data.frame(rownames(ser))
+
+  metadata <- data.frame(Cell = rownames(ser@meta.data),cell_type = Idents(ser))
+  #cellcols <- colnames(counts)
+  #cellcols <- cellcols[-1]
+  #cellrows <- metadata$Cell
+  #setdiff(cellcols, cellrows)
+  counts
+  #write.table(counts, file = paste(out, ser, "/counts.txt", sep = ''), quote = F, col.names = T, row.names = T, sep = "\t")
+  #write.table(metadata, file = paste(out, ser, "/metadata.txt", sep = ''), quote = F, col.names = T, row.names = F, sep = "\t")
+}
+
+
+
+#gets metadata for cellphoneDB from your seurat object
+cellphonedb_meta <- function(ser, meta){
+
+  Idents(ser) <- meta
+
+  musGenes <- rownames(ser)
+
+  #counts <- as.data.frame(as.matrix(ser@assays$RNA[,1:ncol(ser@assays$RNA)]))
+  rows <- data.frame(rownames(ser))
+
+  metadata <- data.frame(Cell = rownames(ser@meta.data),cell_type = Idents(ser))
+  #metadata$Cell <- NULL
+  #cellcols <- colnames(counts)
+  #cellcols <- cellcols[-1]
+  #cellrows <- metadata$Cell
+  #setdiff(cellcols, cellrows)
+  metadata
+  #write.table(counts, file = paste(out, ser, "/counts.txt", sep = ''), quote = F, col.names = T, row.names = T, sep = "\t")
+  #write.table(metadata, file = paste(out, ser, "/metadata.txt", sep = ''), quote = F, col.names = T, row.names = F, sep = "\t")
+}
+
+# usage 
+#both combined
+#hnc_til1 <- hnc[,hnc$tissue == 'TIL']
+#hnc_til1 <- hnc_til1[,hnc_til1$global.cluster4 %in% c('CD4', 'CD8', 'Treg', 'cDC2_CD1C', 'DC3_LAMP3', 'cDC2_CD33', 'cDC1_CLEC9A')]
+#hnc_til1$global.cluster5 <- Idents(hnc_til1)
+
+#counts <- cellphonedb_counts(hnc_til1, 'global.cluster5')
+#meta <- cellphonedb_meta(hnc_til1, 'global.cluster5')
+
+#write.table(counts, file = paste('/Volumes/hdlab/Projects/HNC_SPORE/CellphoneDB/05042022_HNC_HPV+vsHPV-toTsubsets/', 'cillo_til_counts.txt', sep = ''), quote = F, col.names = T, row.names = T, sep = "\t")
+#write.table(meta, file = paste('/Volumes/hdlab/Projects/HNC_SPORE/CellphoneDB/05042022_HNC_HPV+vsHPV-toTsubsets/', "/cillo_til_metadata.txt", sep = ''), quote = F, col.names = T, row.names = F, sep = "\t")
+
+```
+
+```{r cpdb summary (does not use receptor a/b annotation)}
+cpdb_summary <- function(path = "", senders = "all", receivers = "all", drop = "none"){
+
+  outs <- list()
+  expected_files <- c("significant_means.txt", "pvalues.txt")
+  
+  if(sum(expected_files %in% list.files(path)) !=2){
+    message(paste("missing file(s):", expected_files[!expected_files %in% list.files(path)]))
+    break
+  }
+  
+  # file read in (sm for significant means, pv for pvalues)
+  sm <- read.table(paste(path, "/", expected_files[1], sep = ""), check.names = FALSE, header = TRUE, sep = "\t")
+  pv <- read.table(paste(path, "/", expected_files[2], sep = ""), check.names = FALSE, header = TRUE, sep = "\t")
+
+  # reshaping wide to long and merging sig_means
+  sm2 <- sm %>% 
+    pivot_longer(cols = contains("|"), names_to = "pops") %>%
+    separate(col = "pops", into = c("pop1", "pop2"), sep = "\\|") %>% 
+    mutate(sender = "", receiver = "", ligand = "", receptor = "") %>% 
+    dplyr::filter(!is.na(value))
+  
+  # reshaping wide to long and merging pvalues
+  pv2 <- pv %>%
+    pivot_longer(cols = contains("|"), names_to = "pops") %>%
+    separate(col = "pops", into = c("pop1", "pop2"), sep = "\\|") %>%
+    mutate(sender = "", receiver = "", ligand = "", receptor = "") %>% 
+    dplyr::filter(value != 1)
+  
+  # this is hard coded because SELL and SELPLG are backwards in cpdb database
+  sm2[sm2$interacting_pair == "SELL_SELPLG","receptor_a"] <- "True"
+  pv2[pv2$interacting_pair == "SELL_SELPLG","receptor_a"] <- "True"
+  
+  sm2[sm2$interacting_pair == "SELL_SELPLG","receptor_b"] <- "False"
+  pv2[pv2$interacting_pair == "SELL_SELPLG","receptor_b"] <- "False"
+  
+  # separating ligands and receptors, separating senders and receivers
+  # for significant means
+  for (i in 1:nrow(sm2)){
+    this_row <- sm2[i,]
+    #status <- sum(this_row$receptor_a == "True", this_row$receptor_b == "True")
+    #if (status != 1){
+      #next
+    #} else if (this_row$receptor_a == "True"){
+      #sm2[i,"sender"] <- this_row$pop2
+      #sm2[i,"receiver"] <- this_row$pop1
+      #sm2[i, "ligand"] <- str_split(this_row$interacting_pair, pattern = "_", simplify = TRUE)[2]
+      #sm2[i, "receptor"] <- str_split(this_row$interacting_pair, pattern = "_", simplify = TRUE)[1]
+    #} else {
+      #sm2[i,"sender"] <- this_row$pop1
+      #sm2[i,"receiver"] <- this_row$pop2
+      #sm2[i, "ligand"] <- str_split(this_row$interacting_pair, pattern = "_", simplify = TRUE)[1]
+      #sm2[i, "receptor"] <- str_split(this_row$interacting_pair, pattern = "_", simplify = TRUE)[2]
+    #}
+    sm2[i,"sender"] <- this_row$pop1
+    sm2[i,"receiver"] <- this_row$pop2
+    sm2[i, "ligand"] <- str_split(this_row$interacting_pair, pattern = "_", simplify = TRUE)[2]
+    sm2[i, "receptor"] <- str_split(this_row$interacting_pair, pattern = "_", simplify = TRUE)[1]
+  }
+  
+  # for p-values
+  for (i in 1:nrow(pv2)){
+    this_row <- pv2[i,]
+    #status <- sum(this_row$receptor_a == "True", this_row$receptor_b == "True")
+    #if (status != 1){
+      #next
+    #} else if (this_row$receptor_a == "True"){
+      #pv2[i,"sender"] <- this_row$pop2
+      #pv2[i,"receiver"] <- this_row$pop1
+      #pv2[i, "ligand"] <- str_split(this_row$interacting_pair, pattern = "_", simplify = TRUE)[2]
+      #pv2[i, "receptor"] <- str_split(this_row$interacting_pair, pattern = "_", simplify = TRUE)[1]
+    #} else {
+      #pv2[i,"sender"] <- this_row$pop1
+      #pv2[i,"receiver"] <- this_row$pop2
+      #pv2[i, "ligand"] <- str_split(this_row$interacting_pair, pattern = "_", simplify = TRUE)[1]
+      #pv2[i, "receptor"] <- str_split(this_row$interacting_pair, pattern = "_", simplify = TRUE)[2]
+    #}
+    pv2[i,"sender"] <- this_row$pop1
+    pv2[i,"receiver"] <- this_row$pop2
+    pv2[i, "ligand"] <- str_split(this_row$interacting_pair, pattern = "_", simplify = TRUE)[2]
+    pv2[i, "receptor"] <- str_split(this_row$interacting_pair, pattern = "_", simplify = TRUE)[1]
+  }
+  
+  # these interactions, don't have sender and reciever identified
+  dropped_interactions <- sm2 %>% filter(sender == ""|receiver == "") %>% dplyr::select(interacting_pair, pop1, pop2, value)
+
+  # pre merge sig_means
+  sm_pre <- sm2 %>% filter(sender != "" & !grepl("complex", interacting_pair)) %>%
+    filter(receiver != "") %>% 
+    mutate(sr = paste(sender, receiver, sep = " -> "), lr = paste(ligand, receptor, sep = " -> ")) %>%
+    dplyr::select(interacting_pair, sender, receiver, ligand, receptor, sr, lr, value, rank) %>%
+    arrange(sender, receiver) %>% distinct() %>% as.data.frame()
+  
+  # pre merge pvalues
+  pv_pre <- pv2 %>% filter(sender != "" & !grepl("complex", interacting_pair)) %>%
+    filter(receiver != "") %>% mutate(sr = paste(sender, receiver, sep = " -> "), 
+           lr = paste(ligand, receptor, sep = " -> ")) %>%
+    dplyr::select(sender, receiver, ligand, receptor, sr, lr, value) %>%
+    arrange(sender, receiver) %>% distinct() %>% as.data.frame()
+  
+  colnames(pv_pre)[which(colnames(pv_pre) == "value")] <- "pvalue"
+  
+  # appending pvalues onto significant means
+  merged_out <- merge(sm_pre, pv_pre %>% dplyr::select(sr, lr, pvalue), type = "left", by = c("sr", "lr"))
+  
+  # writing to outs
+  outs[["merged_data"]] <- merged_out
+  outs[["dropped_interactions"]] <- dropped_interactions
+
+    # if not filtering at all
+  if (isTRUE(senders[1] == "all" & receivers[1] == "all" & drop[1] == "none")){
+    outs[["filtered"]] <- NULL
+  } else {
+  
+    # filtering parameters
+    if(isTRUE(senders[1] == "all")){
+      senders <- outs$merged_data$sender %>% unique()
+    }  
+    if(isTRUE(receivers == "all")){
+      receivers <- outs$merged_data$receiver %>% unique()
+    }  
+    if(isTRUE(drop == "none")){
+      drop <- ""
+    }
+    
+    outs[["filtered"]] <- outs$merged_data %>% dplyr::filter(sender %in% senders, receiver %in% receivers)
+  }
+  return(outs)
+}
+```
+
+```{r cpdb dotplot}
+cpdb_dotplot <- function(cpdb_list, filtered = FALSE, senders = "all",
+                         receivers = "all", drop = "none", dendro = TRUE){
+  
+  # selecting data source
+  if(isTRUE(filtered)){
+    plot_data <- cpdb_list$filtered
+    if (is.null(plot_data)){
+      return(message(paste("Mising filtered data slot")))
+    }
+  } else {
+    plot_data <- cpdb_list$merged_data
+  }
+  # filtering
+  if (isTRUE(senders == "all" & receivers == "all" & drop == "none")){
+    plot_data2 <- plot_data
+  } else {
+    # filtering parameters
+    if(isTRUE(senders == "all")){
+      senders <- plot_data$sender %>% unique()
+    }
+    if(isTRUE(receivers == "all")){
+      receivers <- plot_data$receiver %>% unique()
+    }
+    if(isTRUE(drop == "none")){
+      drop <- ""
+    }
+    plot_data2 <- plot_data[plot_data$sender %in% senders &
+                              plot_data$receiver %in% receivers &
+                              !plot_data$interacting_pair %in% drop,]
+  }
+  # arranging by factor
+clst <- data.frame(lr= plot_data2$lr, value = plot_data2$value, sr = plot_data2$sr) %>%
+  pivot_wider(names_from = lr, values_fill = 0) %>%
+  column_to_rownames(var = "sr") %>%
+  as.matrix() %>%
+  t() %>%
+  dist()
+temp_clust <- hclust(clst)
+plot.new()
+p1 <- temp_clust %>%
+             as.dendrogram() %>%
+             raise.dendrogram(10) %>%
+             set("labels_cex", 0.5) %>%
+      ggdendrogram(., rotate = TRUE, labels = FALSE) + theme_dendro() + scale_y_reverse()
+# color scaling
+plot_data2$value <- ifelse(plot_data2$value > 2.5, 2.5, plot_data2$value)
+p2 <-  plot_data2 %>%
+          mutate(pvalue = replace(pvalue, pvalue == 0, 0.000999),
+                 lr = factor(lr, levels = temp_clust$labels[temp_clust$order])) %>%
+          ggplot(aes(x = receiver, y = lr)) +
+          geom_point(aes(fill = value, size = -log10(pvalue)), shape = 21, color = "black") +
+          theme_bw(base_size = 8) +
+          theme(axis.text.x = element_text(angle = 90, hjust = 0.95, vjust = 0.2)) +
+          scale_fill_gradient2(high = muted("red"), low = "royalblue4", mid = "white",
+                               midpoint = 1, breaks = c(0, 1, 2), limits = c(0,2.5)) +
+          facet_wrap(.~sender, scales = "free_x", ncol = 500) +
+          scale_size(range = c(0.5, 2)) + xlab("") + ylab("")
+plot.new()
+if (isTRUE(dendro)){
+cowplot::plot_grid(p1, NULL, p2, rel_widths = c(0.2, 0, 1), align = "h", scale = c(1.065, 1, 1), axis = "btlr", nrow = 1)
+  } else {
+    p2
+  }
+}
+```
+
+## • Seurat to annData (for Python)
+
+```{r}
+#load('/Volumes/hdlab/Projects/HNC_SPORE/Seurat_Objs/MOC2_mouse/Seurat_MOC2_K17KO_2021-11-01**.rda')
+
+#out <- '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/ck17_27.h5Seurat'
+#DefaultAssay(ck17_27) <- 'SCT'
+#seu <- DietSeurat(ck17_27, counts = FALSE, data = TRUE, scale.data = TRUE, assays = c('SCT', 'SCDC_onemreg'))
+
+seurat_to_adata <- function(out, seu){
+  seu <- Seurat::UpdateSeuratObject(seu)
+  SeuratDisk::SaveH5Seurat(seu, filename = out)
+  SeuratDisk::Convert(out, dest = 'h5ad')
+}
+
+seurat_to_adata(out, seu)
+```
+
+# saving images
+
+```{r saving png--best for single janky plots where you cannot use ggsave}
+# usage:
+#p1 <- pheatmap::pheatmap(hpvp1, cluster_rows = FALSE, cluster_cols = FALSE)
+#p2 <- pheatmap::pheatmap(hpvp2, cluster_rows = FALSE, cluster_cols = FALSE)
+
+#a <- list(pheatmap::pheatmap(hpvp1, cluster_rows = FALSE, cluster_cols = FALSE, main = 'ligands')[[4]])
+#a[[2]] <- pheatmap::pheatmap(hpvp2, cluster_rows = FALSE, cluster_cols = FALSE, main = 'receptors')[[4]]
+#z <- do.call(grid.arrange,a)
+#z <- do.call("grid.arrange", c(a, ncol=2)) 
+#save_img(outname = '/Volumes/hdlab/Projects/HNC_SPORE/CellphoneDB/05042022_HNC_HPVstatusCombined_DCstoTsubsets_out/SEUdatamean_ligs_recs.png', width = 550, height = 900, plot = z) 
+
+save_img <- function(outname, width, height, plot) {
+  png(outname, width = width, height = height)
+  plot(plot)
+  dev.off()
+}
+```
+
+```{r saving png from ComplexHeatmap heatmap function}
+#plts <- Heatmap(as.matrix(hpvp1), cluster_rows = FALSE, cluster_columns = FALSE, 
+                #name = 'ligands', column_title = 'ligands', column_names_gp = grid::gpar(fontsize = axis_lab_size), 
+                #row_names_gp = grid::gpar(fontsize = axis_lab_size), column_title_gp = grid::gpar(fontsize = title_size)) + 
+          #Heatmap(as.matrix(hpvp2), cluster_rows = FALSE, cluster_columns = FALSE, 
+                #name = 'receptors', column_title = 'receptors', column_names_gp = grid::gpar(fontsize = axis_lab_size),
+                #row_names_gp = grid::gpar(fontsize = axis_lab_size), column_title_gp = grid::gpar(fontsize = title_size), row_names_side = 'left')
+
+save_img <- function(outname, width, height, plot) {
+  png(outname, width = width, height = height, units = 'in', res = 1200)
+  draw(plot, auto_adjust = FALSE)
+  dev.off()
+}
+```
+
+# Monocle3 Pseudotime
+
+```{r}
+monocle3_pseudotime <- function(SEU, ROOT, out) {
+  cds <- SeuratWrappers::as.cell_data_set(SEU)
+  cds <- monocle3::cluster_cells(cds = cds, reduction_method = "UMAP")
+  cds <- monocle3::learn_graph(cds, use_partition = TRUE)
+  
+  #subsetting so to get our root
+  root <- subset(SEU, subset = global.cluster4 == ROOT)
+  root_cells <- colnames(root)
+  
+  #computing and plotting the pseudotime graph
+  cds <- monocle3::order_cells(cds, reduction_method = "UMAP", root_cells = root_cells)
+  monocle3::plot_cells(cds = cds, color_cells_by = 'pseudotime', show_trajectory_graph = TRUE)
+  ggsave(out)
+  return(cds)
+}
+```
+
+# Create CellChat
+```{r}
+creat_cellchat <- function(seurat) {
+  data.input<-GetAssayData(seurat,assay = "RNA", slot = "data")
+
+  #extract cell type labels
+  labels<-seurat$cluster
+  meta <- data.frame(group = labels, row.names = names(labels))
+  cellchat <- createCellChat(object = data.input, meta = meta, group.by = "group")
+  cellchat@DB <- CellChatDB.human
+  cellchat <- subsetData(cellchat)
+  cellchat <- identifyOverExpressedGenes(cellchat,thresh.p = 0.1)
+  cellchat <- identifyOverExpressedInteractions(cellchat)
+  cellchat <- computeCommunProb(cellchat)
+  cellchat <- computeCommunProbPathway(cellchat)
+  cellchat <- filterCommunication(cellchat, min.cells = 5)
+
+  cellchat <- aggregateNet(cellchat)
+  cellchat  
+}
+```
+
+# GeoMx
+
+## • Volcano plot
+
+```{r}
+split.meta = c('Response')
+splitmeta_oi = c('responder', 'non responder')
+topmeta = c('t_vs_s')
+topmeta_oi = c('tumor')
+out_dir = '/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/RvsNR_tumor_volcplot/'
+paired = FALSE
+top.split = FALSE
+subtitle = FALSE
+pic_width = 13
+pic_height = 10
+add_labels = 'KRT17'
+
+geomx_vp <- function(split.meta, splitmeta_oi, top.split = FALSE, topmeta = NULL, topmeta_oi='all samples', out_dir, paired = FALSE, subtitle = FALSE, pic_width = 13, pic_height = 10, add_labels = NULL){
+  
+  geomx_test <- geomx[,pData(geomx)[[split.meta]] %in% splitmeta_oi]
+  
+  if (paired == TRUE){
+    geomx_test <- geomx_test[,pData(geomx_test)$roi %in% names(which(table(pData(geomx_test)$roi) == 2))]
+  }
+
+  if (top.split == TRUE){
+    geomx_test <- geomx_test[,pData(geomx_test)[[topmeta]] %in% topmeta_oi]
+  }
+  if (top.split == FALSE){
+    geomx_test <- geomx_test
+  }
+  
+  readCount <- assayDataElement(geomx_test, elt = 'q_norm')
+  conditions <- pData(geomx_test)
+  conditions <- factor(conditions[[split.meta]])
+  y <- edgeR::DGEList(counts=readCount,group=conditions)
+  
+  #count_norm <- as.data.frame(y)
+  ##Perform TMM normalization and transfer to CPM (Counts Per Million)
+  y <- edgeR::calcNormFactors(y,method="TMM")
+  count_norm=edgeR::cpm(y)
+  count_norm<-as.data.frame(count_norm)
+  
+  if (paired == FALSE){
+      #run the Wilcoxon rank-sum test for each gene
+    pvalues <- sapply(1:nrow(count_norm),function(i){
+       data<-cbind.data.frame(gene=as.numeric(t(count_norm[i,])),conditions)
+       p=wilcox.test(gene~conditions, data, paired = FALSE)$p.value
+       return(p)
+     })
+  }
+  
+  if (paired == TRUE){
+      #run the Wilcoxon rank-sum test for each gene
+    pvalues <- sapply(1:nrow(count_norm),function(i){
+       data<-cbind.data.frame(gene=as.numeric(t(count_norm[i,])),conditions)
+       p=wilcox.test(gene~conditions, data, paired = TRUE)$p.value
+       return(p)
+     })
+  }
+
+  fdr=p.adjust(pvalues,method = "fdr")
+  
+  #calculate fold-change for each gene
+  conditionsLevel<-levels(conditions)
+  dataCon1=count_norm[,c(which(conditions==conditionsLevel[1]))]
+  dataCon2=count_norm[,c(which(conditions==conditionsLevel[2]))]
+  
+  conditionsLevel[1]
+  conditionsLevel[2]
+  
+  count1 <- paste(conditionsLevel[1], '=', as.numeric(ncol(dataCon1)), sep = '')
+  count2 <- paste(conditionsLevel[2], '=', as.numeric(ncol(dataCon2)), sep = '')
+  
+  #positive logfc will mean a gene representative of 
+  foldChanges=log2(rowMeans(dataCon2)/rowMeans(dataCon1))
+  
+  #output based on FDR threshold
+  outRst<-data.frame(log2foldChange=foldChanges, pValues=pvalues, FDR=fdr)
+  rownames(outRst)=rownames(count_norm)
+  outRst=na.omit(outRst)
+  fdrThres=0.05
+  outRst_filtered <- outRst[outRst$FDR<fdrThres,]
+  
+  outRst$Gene <- rownames(outRst)
+  
+  outRst$Color <- "NS or FC < 0.5"
+  outRst$Color[outRst$FDR < 0.05] <- "FDR < 0.05"
+  outRst$Color[outRst$FDR < 0.001] <- "FDR < 0.001"
+  outRst$Color[abs(outRst$log2foldChange) < 0.5] <- "NS or FC < 0.5"
+  outRst$Color <- factor(outRst$Color, levels = c("NS or FC < 0.5", "P < 0.05","FDR < 0.05", "FDR < 0.001"))
+  if (is.null(add_labels)){
+    sub <- unique(rbind(subset(outRst, abs(log2foldChange) > 0.5 & FDR < 0.05)))
+  }
+  if (!is.null(add_labels)){
+    sub <- unique(rbind(subset(outRst, abs(log2foldChange) > 0.5 & FDR < 0.05), subset(outRst, rownames(outRst) %like any% add_labels)))
+  }
+   
+  write.csv(outRst, file = paste(out_dir, Sys.Date(), 'paired=', paired, 'volcano_plot_input.csv', sep = ''))
+  if (subtitle == TRUE){
+    # Graph outRst
+    ggplot(outRst, aes(x = log2foldChange, y = -log10(FDR), color = Color, label = Gene)) +
+  geom_vline(xintercept = c(0.5, -0.5), lty = "dashed") + geom_hline(yintercept = -log10(0.05), lty = "dashed") + geom_point() + labs(x = paste("Enriched in ", conditionsLevel[1], " <-----  log2(FC)  ------> Enriched in ",   conditionsLevel[2], sep = ''), y = "Significance, -log10(FDR)", color = "Significance") + scale_color_manual(values = c(`FDR < 0.001` = "dodgerblue", `FDR < 0.05` = "lightblue",`P < 0.05` = "orange2", `NS or FC < 0.5` = "gray"), guide = guide_legend(override.aes = list(size = 4))) + scale_y_continuous(expand = expansion(mult = c(0,0.05))) + ggrepel::geom_text_repel(data = sub, size = 4, point.padding = 0.15, color = "black", min.segment.length = .1, box.padding = .2, lwd = 2,max.overlaps = 50) + theme_classic(base_size = 16) + theme(legend.position = "bottom") + ggtitle(paste('Significantly upregulated genes in', topmeta_oi, sep = ' '), subtitle = paste(count1, '|', count2, '|', 'paired =', paired))
+    ggsave(paste(out_dir, Sys.Date(), conditionsLevel[1], 'vs', conditionsLevel[2],'paired=', paired, 'volcanoPlot.png', sep = ''), width = pic_width, height = pic_height)
+  }
+  if (subtitle == FALSE){
+    ggplot(outRst, aes(x = log2foldChange, y = -log10(FDR), color = Color, label = Gene)) +
+  geom_vline(xintercept = c(0.5, -0.5), lty = "dashed") + geom_hline(yintercept = -log10(0.05), lty = "dashed") + geom_point() + labs(x = paste("Enriched in ", conditionsLevel[1], " <-----  log2(FC)  ------> Enriched in ",   conditionsLevel[2], sep = ''), y = "Significance, -log10(FDR)", color = "Significance") + scale_color_manual(values = c(`FDR < 0.001` = "dodgerblue", `FDR < 0.05` = "lightblue",`P < 0.05` = "orange2", `NS or FC < 0.5` = "gray"), guide = guide_legend(override.aes = list(size = 4))) + scale_y_continuous(expand = expansion(mult = c(0,0.05))) + ggrepel::geom_text_repel(data = sub, size = 4, point.padding = 0.15, color = "black", min.segment.length = .1, box.padding = .2, lwd = 2,max.overlaps = 50) + theme_classic(base_size = 16) + theme(legend.position = "bottom") + ggtitle(paste('Significantly upregulated genes in', topmeta_oi, sep = ' '))
+    ggsave(paste(out_dir, Sys.Date(), conditionsLevel[1], 'vs', conditionsLevel[2],'paired=', paired, 'volcanoPlot.png', sep = ''), width = pic_width, height = pic_height)
+  }
+}
+
+```
+
+## • Heatmap w/ selection of response status, genes of interest + segment
+
+```{r}
+
+# genes options = collagen, keratin, cytokines, custom, all
+  # if custom, you need to set the gene_set equal to the genes you are interested in
+# segment options = PCK no K17, K17, triple negative, CD45 normal, all
+#response options = responder, non responder, all
+
+geomx_heatmap <- function(geomx, genes = 'all', gene_set = NULL, path, add_segment_names = TRUE, width = 20, height = 10, segment = 'all', response = 'all', metadata = c("Response", "segment", "K17 status", 'p16 status', 'Primary tu location', 'Classification', 'K17', "Patient number (CK17-)")){
+  require(scales)
+  
+  #running PCA
+  test <- log2(assayDataElement(geomx, elt = 'q_norm'))
+
+  # create a log2 transform of the data for analysis
+  assayDataElement(object = geomx, elt = "log_q") <- assayDataApply(geomx, 2, FUN = log, base = 2, elt = "q_norm")
+  
+  # create CV function
+  calc_CV <- function(x) {sd(x) / mean(x)}
+  CV_dat <- assayDataApply(geomx, elt = "log_q", MARGIN = 1, calc_CV)
+  
+  # show the highest CD genes and their CV values
+  sort(CV_dat, decreasing = TRUE)[1:5]
+  
+  # Identify genes in the top 3rd of the CV values
+  if (genes == 'all') {
+    GOI <- names(CV_dat)[CV_dat > quantile(CV_dat, 0.8)]
+    GOI <- unique(c(GOI, 'KRT17', 'LAMP3'))
+  }
+  if (genes == 'custom') {
+    GOI <- gene_set
+  }
+  
+  if (genes == 'keratin'){
+    GOI <- rownames(geomx)[rownames(geomx) %like% '%^KRT%']
+  }
+  
+  if (genes == 'collagen'){
+    GOI <- rownames(geomx)[rownames(geomx) %like% '%^COL%']
+  }
+  
+  if (genes == 'cytokines'){
+    GOI <- rownames(geomx)[rownames(geomx) %like any% c('%^CXCL%', '%^CXCR%', '%^CCL%', '%^CCR%')]
+  }
+  
+  pData(geomx)[, c('roi')] <- as.numeric(pData(geomx)[, c('roi')])
+  pData(geomx)[, c('roi')] <- as.character(pData(geomx)[, c('roi')])
+  
+  if (segment != 'all'){
+    geomx <- geomx[,pData(geomx)$segment %in% segment]
+  }
+  
+  if (response != 'all'){
+    geomx <- geomx[,pData(geomx)$Response == response]
+  }
+  
+  cols <- list(Response = c('responder' = 'indianred3', 'non responder' = 'steelblue3'), `p16 status` = c('positive' = 'indianred3', 'negative' = 'steelblue3'), `K17 status` = c('high' = 'indianred3', 'low' = 'steelblue3'), segment = c('CD45 normal' = 'darkgreen', 'K17' = 'green', 'PCK no K17' = 'yellow', 'triple negative' = 'orange'), `Primary tu location` = c('hypopharynx' = 'darkgreen', 'maxillary sinus' = 'green', 'oral cavity' = 'yellow', 'oropharynx' = 'orange'), Anatomic.location = c('hypopharynx' = 'darkgreen', 'maxillary sinus' = 'green', 'oral cavity' = 'yellow', 'oropharynx' = 'orange'), K17 = c('FOCAL' = 'darkgreen', 'P' = 'green', 'N' = 'yellow', 'NA' = "white"), "Patient number (CK17-)" = c('1' = 'aliceblue', '14' = 'azure3', '21' = 'darkolivegreen', '22' = 'darkorange', '23' = 'darkorchid', '27' = 'red', '4' = 'cornflowerblue', '7' = 'seagreen', '9' = 'firebrick', '5' = 'yellow'), `Plate ID` = c('A' = 'indianred3', 'B' = 'steelblue3'), K17_status = c('Low' = 'indianred3', 'High' = 'steelblue3'))
+    
+  geomx_test <- geomx
+  
+  if (isTRUE(add_segment_names)) {
+    colnames(geomx_test) <- paste(pData(geomx_test)$roi, pData(geomx_test)$segment)
+  }
+  
+  if(isFALSE(add_segment_names)){
+    colnames(geomx_test) <- (pData(geomx_test)$roi)
+  }
+  
+  GOI = intersect(rownames(geomx_test), GOI)
+
+  x <- assayDataElement(geomx_test[GOI, ], elt = 'log_q')
+  xx <- pheatmap::pheatmap(x, scale = "row", show_rownames = TRUE, show_colnames = TRUE, border_color = NA, color = colorRampPalette(colors = c('purple', 'black', 'yellow'))(20),  clustering_method = "average",
+           clustering_distance_rows = "correlation", clustering_distance_cols = "correlation", annotation_col = 
+           pData(geomx_test)[, metadata], annotation_colors = cols)
+  
+  x = xx
+  filename = paste(path, Sys.Date(), "_clusteringheatmap.pdf", sep = '')
+   stopifnot(!missing(x))
+   stopifnot(!missing(filename))
+   pdf(filename, width=width, height=height)
+   grid::grid.newpage()
+   grid::grid.draw(x$gtable)
+   dev.off()
+}
+```
+
+# Seurat deconvolution function
+
+```{r}
+#ck17_5 <- seurat_decon(seu = cillo_kurten, markers_sc = readRDS('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/singlecellmarkers_fordeconvolution.RDS'), metadata = 'mreg_cxcl9_globalcluster4', sp = ck17_5, out = '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-5_analysis/')
+
+#saveRDS(sp, '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-5_analysis/cleaned_ck17_5_seurat_2022-07-06.RDS')
+
+seurat_decon <- function(seu, markers_sc, metadata, sp, out){
+  
+  DefaultAssay(sp) <- 'SCT'
+  #deconvoluting using our single cell data
+  hnc_til <- seu[,!seu$tissue %like% c('PBMC', 'Tonsil')]
+  table(hnc_til[[metadata]])
+  
+  # Filter for genes that are also present in the ST data
+  markers_sc <- markers_sc[markers_sc$gene %in% rownames(sp), ]
+  
+  # Select top 20 genes per cluster, select top by first p-value, then absolute
+  # diff in pct, then quota of pct.
+  markers_sc$pct.diff <- markers_sc$pct.1 - markers_sc$pct.2
+  markers_sc$log.pct.diff <- log2((markers_sc$pct.1 * 99 + 1)/(markers_sc$pct.2 * 99 + 1))
+  markers_sc %>% dplyr::group_by(cluster) %>% dplyr::top_n(-100, p_val) %>%
+      dplyr::top_n(50, pct.diff) %>% dplyr::top_n(20, log.pct.diff) -> top20
+  m_feats <- unique(as.character(top20$gene))
+  
+  eset_SC <- ExpressionSet(assayData = as.matrix(hnc_til@assays$RNA@counts[m_feats,
+      ]), phenoData = AnnotatedDataFrame(hnc_til@meta.data))
+  eset_ST <- ExpressionSet(assayData = as.matrix(sp@assays$Spatial@counts[m_feats,
+      ]), phenoData = AnnotatedDataFrame(sp@meta.data))
+  
+  #running deconvolution
+  deconvolution <- SCDC::SCDC_prop(bulk.eset = eset_ST, sc.eset = eset_SC, ct.varname = metadata, ct.sub = as.character(unique(eset_SC[[metadata]])))
+  
+  # now adding deconvolution output and adding it to the Seurat object as a new assay
+  sp@assays[['SCDC']] <- SeuratObject::CreateAssayObject(data = t(deconvolution$prop.est.mvw))
+  
+  if (length(sp@assays$SCDC@key) == 0) {
+      sp@assays$SCDC@key = "scdc_"
+  }
+  
+  DefaultAssay(sp) <- 'SCDC'
+  
+  sp <- Seurat::FindSpatiallyVariableFeatures(sp, assay = "SCDC", selection.method = "markvariogram", features = rownames(sp), r.metric = 5, slot = "data")
+  top.clusters <- head(SpatiallyVariableFeatures(sp), 4)
+  SpatialPlot(object = sp, features = top.clusters, ncol = 2)
+  
+  outf <- paste(out, 'seurat_allsubset_proportions.pdf', sep = '')
+  
+  pdf(file = outf, width = 15, height = 20)
+  Seurat::SpatialPlot(sp, feature = rownames(sp@assays$SCDC@data), ncol = 6)
+  dev.off()
+  
+  return(sp)
+
+}
+```
+
+# Cellchat to Matrix
+
+```{r}
+cellchat_to_matrix <- function(cellchat){
+  require(CellChat)
+  require(dplyr)
+  pair_score<-c()
+  for (j in seq(1,length(levels(cellchat@idents)))){
+    for (k in seq(1,length(levels(cellchat@idents)))){
+      for (i in rownames(cellchat@LR$LRsig)){
+        pair_score<-c(pair_score, sum(cellchat@net$prob[,,i][j,k]))
+      }
+    }
+  }
+  pair_matrix<-matrix(pair_score,nrow=length(rownames(cellchat@LR$LRsig)))
+  rownames(pair_matrix)<-rownames(cellchat@LR$LRsig)
+  return(pair_matrix)
+}
+```
+
+# Visium
+
+## • REGULAR HEATMAP Unweighted co-localization of L-R pairs
+
+```{r}
+seu <- ck17_5
+seuname <- 'ck17_5'
+out <- '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/' 
+pic_height = 15
+pic_width = 7
+meta = 'BayesSpace'
+rsum_cutoff = 1
+filter = FALSE
+
+visium_cooc_heatmap <- function(seu, seuname, meta = 'BayesSpace',  out = '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/' , pic_height = 15, pic_width = 7, filter = TRUE, rsum_cutoff = 1){
+
+  require(ComplexHeatmap)
+  DefaultAssay(seu) <- 'SCT'
+  exp <- as.data.frame(t(GetAssayData(object = seu, slot = "data")))
+  meta <- seu[[c(meta)]]
+  
+  all <- merge(exp, meta, by = 0) 
+  all <- aggregate(all, list(all$BayesSpace), FUN = mean, na.rm = TRUE) 
+  all1 <- as.data.frame(t(all))
+  colnames(all1) <- all1[1,]
+  
+  
+  df <- data.frame(pair = character(), cluster = numeric(), score = numeric())
+  pb = txtProgressBar(min = 0, max = length(l), initial = 0) 
+  stepi = 0
+  for (index in 1:length(l)){
+    #print(index)
+    l1 <- l[index]
+    r1 <- r[index]
+    for (col in 1:ncol(all1)){
+      if (l1 %in% rownames(all1)){
+        lscore <- as.numeric(all1[which(rownames(all1) == l1), col])
+      } else {
+        lscore <- 0.0000000000000001
+      }
+      if (r1 %in% rownames(all1)){
+        rscore <- as.numeric(all1[which(rownames(all1) == r1), col])
+      } else {
+        rscore <- 0.0000000000000001
+      }
+      coexp <- lscore * rscore
+      name <- paste(l1, '_', r1, sep = '')
+      row <- c(name, colnames(all1[col]), coexp)
+      df <- rbind(df, row)
+      stepi <- stepi + 1
+      setTxtProgressBar(pb,stepi)
+    }
+  }
+  colnames(df) <- c('lr_pair', 'cluster', 'coexpression_value')  
+  m <- max(as.numeric(df$coexpression_value))
+  df$normalized_coexpression <- as.numeric(df$coexpression_value)/m
+  
+  df1 <- df[,c('lr_pair', 'cluster', 'normalized_coexpression')]
+  df1 <- df1[order(df1$cluster, -df1$normalized_coexpression),] 
+  
+  df2 <- df1 %>% tidyr::pivot_wider(names_from = cluster, values_from = normalized_coexpression, values_fn = mean)
+  rnames <- df2$lr_pair
+  df2$lr_pair <- NULL
+  rownames(df2) <- rnames
+  colnames(df2) <- paste('Cluster', colnames(df2), sep = '_')
+  df2$lrpair <- rownames(df2) 
+  
+  if (filter == TRUE){
+    test <- df2[-which(rowSums(df2[sapply(df2, is.numeric)]) < rsum_cutoff),]
+  } else {
+    test <- df2
+  }
+  
+  rnms <- test$lrpair
+  test$lrpair <- NULL
+  rownames(test) <- rnms
+  
+  df3 <- as.matrix(test)
+  
+  write.csv(df3, paste(out, seuname, '_', Sys.Date(), '_normalized_by_max_CCCheatmap.csv', sep = ''))
+  
+  png(filename = paste(out, seuname, '_', Sys.Date(), '_normalized_by_max_CCCheatmap.png', sep = ''), height = pic_height, width = pic_width, units = 'in', res = 300)
+  ht <- Heatmap(df3, column_title = seuname, column_title_gp = gpar(fontsize = 20), rect_gp = gpar(col = "white", lwd = 2), heatmap_legend_param = list(
+          title = "Co-occupancy", at=c(0, 0.5, 1)))
+  draw(ht)
+  dev.off()
+  
+  close(pb)
+}  
+```
+
+TEST VARIATION
+
+```{r}
+seu <- ck17_5
+seuname <- 'ck17_5'
+out <- '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/' 
+pic_height = 15
+pic_width = 7
+meta = 'BayesSpace'
+rsum_cutoff = 1
+filter = FALSE
+
+visium_cooc_heatmap <- function(seu, seuname, meta = 'BayesSpace',  out = '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/' , pic_height = 15, pic_width = 7, filter = TRUE, rsum_cutoff = 1){
+
+  require(ComplexHeatmap)
+  DefaultAssay(seu) <- 'SCT'
+  exp <- as.data.frame(t(GetAssayData(object = seu, slot = "data")))
+  meta <- seu[[c(meta)]]
+  
+  all <- merge(exp, meta, by = 0) 
+  all <- aggregate(all, list(all$BayesSpace), FUN = mean, na.rm = TRUE) 
+  all1 <- as.data.frame(t(all))
+  colnames(all1) <- all1[1,]
+  
+  
+  df <- data.frame(pair = character(), cluster = numeric(), score = numeric())
+  pb = txtProgressBar(min = 0, max = length(l), initial = 0) 
+  stepi = 0
+  for (index in 1:length(l)){
+    #print(index)
+    l1 <- l[index]
+    r1 <- r[index]
+    for (col in 1:ncol(all1)){
+      if (l1 %in% rownames(all1)){
+        lscore <- as.numeric(all1[which(rownames(all1) == l1), col])
+      } else {
+        lscore <- 0.0000000000000001
+      }
+      if (r1 %in% rownames(all1)){
+        rscore <- as.numeric(all1[which(rownames(all1) == r1), col])
+      } else {
+        rscore <- 0.0000000000000001
+      }
+      coexp <- lscore * rscore
+      name <- paste(l1, '_', r1, sep = '')
+      row <- c(name, colnames(all1[col]), coexp)
+      df <- rbind(df, row)
+      stepi <- stepi + 1
+      setTxtProgressBar(pb,stepi)
+    }
+  }
+  colnames(df) <- c('lr_pair', 'cluster', 'coexpression_value')  
+  #df$normalized_coexpression <- as.numeric(df$coexpression_value)/m
+  
+  df1 <- df[,c('lr_pair', 'cluster', 'coexpression_value')]
+  #df1 <- df1[order(df1$cluster, -df1$normalized_coexpression),] 
+  
+  df2 <- df1 %>% tidyr::pivot_wider(names_from = cluster, values_from = coexpression_value)
+  m <- max(as.numeric(df$coexpression_value))
+  rnames <- df2$lr_pair
+  df2$lr_pair <- NULL
+  rownames(df2) <- rnames
+  colnames(df2) <- paste('Cluster', colnames(df2), sep = '_')
+  df2$lrpair <- rownames(df2) 
+  df2 <- sapply(df2, as.numeric )
+  df2 <- df2[,1:ncol(df2)]/m
+  rownames(df2) <- rnames
+  df2 <- as.data.frame(df2)
+  
+  if (filter == TRUE){
+    test <- df2[-which(rowSums(df2[sapply(df2, is.numeric)]) < rsum_cutoff),]
+  } else {
+    test <- df2
+  }
+  
+  rnms <- test$lrpair
+  test$lrpair <- NULL
+  #rownames(test) <- rnms
+  
+  df3 <- as.matrix(test)
+  
+  write.csv(df3, paste(out, seuname, '_', Sys.Date(), '_normalized_by_max_CCCheatmap.csv', sep = ''))
+  
+  png(filename = paste(out, seuname, '_', Sys.Date(), '_normalized_by_max_CCCheatmap.png', sep = ''), height = pic_height, width = pic_width, units = 'in', res = 300)
+  ht <- Heatmap(df3, column_title = seuname, column_title_gp = gpar(fontsize = 20), rect_gp = gpar(col = "white", lwd = 2), heatmap_legend_param = list(
+          title = "Co-occupancy", at = c(0, 0.25, 0.5, 0.75, 1)))
+  draw(ht)
+  dev.off()
+  
+  close(pb)
+}  
+```
+
+## • REGULAR HEATMAP Immune Weighted co-localization of L-R pairs
+
+```{r}
+#seu <- ck17_5
+#seuname <- 'ck17_5'
+#out <- '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/' 
+#pic_height = 15
+#pic_width = 7
+#meta = 'BayesSpace'
+#rsum_cutoff = 1
+
+weighted_visium_cooc_heatmap <- function(seu, seuname, meta = 'BayesSpace',  out = '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/' , pic_height = 15, pic_width = 7, filter = TRUE, rsum_cutoff = 1){
+  
+  pct_immune <- seu@assays$SCDC_onemreg@data[!rownames(seu@assays$SCDC_onemreg@data) %like any% c('Endothelial cells', 'Fibroblasts', 'Epithelial cells', 'Pericytes'), ] %>% t() %>% rowSums() %>% as.data.frame()
+
+  require(ComplexHeatmap)
+  DefaultAssay(seu) <- 'SCT'
+  exp <- as.data.frame(t(GetAssayData(object = seu, slot = "data")))
+  meta <- seu[[c(meta)]]
+  
+  all <- merge(exp, meta, by = 0) 
+  all <- aggregate(all, list(all$BayesSpace), FUN = mean, na.rm = TRUE) 
+  all1 <- as.data.frame(t(all))
+  colnames(all1) <- all1[1,]
+  
+  pct_immune_byclust <- merge(meta, pct_immune, by = 0)
+  pct_immune_byclust$Row.names <- NULL
+  pct_immune_byclust <- aggregate(pct_immune_byclust, list(pct_immune_byclust$BayesSpace), FUN = mean, na.rm = TRUE)
+  pct_immune_byclust$BayesSpace <- NULL
+  colnames(pct_immune_byclust) <- c('cluster', 'immune_proportion')
+  
+  df <- data.frame(pair = character(), cluster = numeric(), score = numeric())
+  pb = txtProgressBar(min = 0, max = length(l), initial = 0) 
+  stepi = 0
+  for (index in 1:length(l)){
+    #print(index)
+    l1 <- l[index]
+    r1 <- r[index]
+    for (col in 1:ncol(all1)){
+      if (l1 %in% rownames(all1)){
+        lscore <- as.numeric(all1[which(rownames(all1) == l1), col])
+      } else {
+        lscore <- 0.0000000000000001
+      }
+      if (r1 %in% rownames(all1)){
+        rscore <- as.numeric(all1[which(rownames(all1) == r1), col])
+      } else {
+        rscore <- 0.0000000000000001
+      }
+      
+      immune <- pct_immune_byclust[which(pct_immune_byclust$cluster == colnames(all1[col])),]$immune_proportion
+      
+      coexp <- lscore * rscore * immune
+      name <- paste(l1, '_', r1, sep = '')
+      row <- c(name, colnames(all1[col]), coexp)
+      df <- rbind(df, row)
+      stepi <- stepi + 1
+      setTxtProgressBar(pb,stepi)
+    }
+  }
+  colnames(df) <- c('lr_pair', 'cluster', 'coexpression_value')  
+  m <- max(as.numeric(df$coexpression_value))
+  df$normalized_coexpression <- as.numeric(df$coexpression_value)/m
+  
+  df1 <- df[,c('lr_pair', 'cluster', 'normalized_coexpression')]
+  df1 <- df1[order(df1$cluster, -df1$normalized_coexpression),] 
+  
+  df2 <- df1 %>% tidyr::pivot_wider(names_from = cluster, values_from = normalized_coexpression, values_fn = mean)
+  rnames <- df2$lr_pair
+  df2$lr_pair <- NULL
+  rownames(df2) <- rnames
+  colnames(df2) <- paste('Cluster', colnames(df2), sep = '_')
+  df2$lrpair <- rownames(df2) 
+  
+  if (filter == TRUE){
+    test <- df2[-which(rowSums(df2[sapply(df2, is.numeric)]) < rsum_cutoff),]
+  } else {
+    test <- df2
+  }
+  
+  rnms <- test$lrpair
+  test$lrpair <- NULL
+  rownames(test) <- rnms
+  
+  df3 <- as.matrix(test)
+  
+  write.csv(df3, paste(out, seuname, '_', Sys.Date(), '_normalized_by_max_CCCheatmap_immuneweighted.csv', sep = ''))
+  
+  png(filename = paste(out, seuname, '_', Sys.Date(), '_normalized_by_max_CCCheatmap_immuneweighted.png', sep = ''), height = pic_height, width = pic_width, units = 'in', res = 300)
+  ht <- Heatmap(df3, column_title = seuname, column_title_gp = gpar(fontsize = 20), rect_gp = gpar(col = "white", lwd = 2), heatmap_legend_param = list(
+          title = "Co-occupancy", at = c(0, 0.5, 1)))
+  draw(ht)
+  dev.off()
+  
+  close(pb)
+}  
+```
+
+## • OVERLAY HEATMAP Weighted co-localization of L-R pairs
+
+```{r}
+#weighted_colocalization(ck17_7, seu_name = 'ck17_7', marks = c('PLTP', 'SPP1'))
+
+###############################################
+weighted_colocalization <- function(seu, name, default_assay = 'SCT', marks, out = '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/'){
+
+  DefaultAssay(seu) <- 'SCT'
+  genes <- FetchData(seu, vars = c(marks[1], marks[2]))
+  genes[[paste(marks[1], marks[2], sep = '_')]] <- genes[,1] * genes[,2]
+  genes[,1] <- NULL
+  genes[,1] <- NULL
+  pct_immune <- seu@assays$SCDC_onemreg@data[!rownames(seu@assays$SCDC_onemreg@data) %like any% c('Endothelial cells', 'Fibroblasts', 'Epithelial cells', 'Pericytes'), ] %>% t() %>% rowSums() %>% as.data.frame()
+  df2 <- merge(genes, pct_immune, by = 0)
+  df2[[paste(marks[1], marks[2], sep = '_')]] <- df2[[paste(marks[1], marks[2], sep = '_')]] * df2$.
+  df2$. <- NULL
+  rownames(df2) <- df2$Row.names
+  df2$Row.names <- NULL
+  
+  genes <- df2
+  
+  object = seu
+  group.by = NULL
+  features = NULL
+  images = NULL
+  cols = NULL
+  image.alpha = 1
+  crop = TRUE
+  slot = "data"
+  min.cutoff = NA
+  max.cutoff = NA
+  cells.highlight = NULL 
+  cols.highlight = c("#DE2D26", "grey50")
+  facet.highlight = FALSE
+  label = FALSE
+  label.size = 5
+  label.color = "white"
+  label.box = TRUE 
+  repel = FALSE
+  ncol = NULL
+  combine = TRUE
+  pt.size.factor = 1.6 
+  alpha = c(1, 1)
+  stroke = 0.25
+  interactive = FALSE
+  do.identify = FALSE
+  identify.ident = NULL
+  do.hover = FALSE
+  information = NULL
+  {
+    images <- images %||% Images(object = object, assay = DefaultAssay(object = object))
+    data <- genes
+    features <- paste(marks[1], marks[2], sep = '_')
+    min.cutoff <- 0
+    max.cutoff <- 6
+    check.lengths <- unique(x = vapply(X = list(features, min.cutoff, max.cutoff), FUN = length, FUN.VALUE = numeric(length = 1)))
+    data <- sapply(X = 1:ncol(x = data), FUN = function(index) {
+      data.feature <- as.vector(x = data[, index])
+      min.use <- SetQuantile(cutoff = min.cutoff[index], data.feature)
+      max.use <- SetQuantile(cutoff = max.cutoff[index], data.feature)
+      data.feature[data.feature < min.use] <- min.use
+      data.feature[data.feature > max.use] <- max.use
+      return(data.feature)
+    })
+    colnames(x = data) <- features
+    rownames(x = data) <- Cells(x = object)
+    features <- colnames(x = data)
+    colnames(x = data) <- features
+    rownames(x = data) <- colnames(x = object)
+    facet.highlight <- facet.highlight && (!is.null(x = cells.highlight) && 
+      is.list(x = cells.highlight))
+    ncols <- length(x = images)
+    plots <- vector(mode = "list", length = length(x = features) * ncols)
+    for (i in 1:ncols) {
+      plot.idx <- i
+      image.idx <- ifelse(test = facet.highlight, yes = 1, no = i)
+      image.use <- object[[images[[image.idx]]]]
+      coordinates <- GetTissueCoordinates(object = image.use)
+      highlight.use <- if (facet.highlight) {
+        cells.highlight[i]
+      }
+      else {
+        cells.highlight
+      }
+      for (j in 1:length(x = features)) {
+        cols.unset <- is.factor(x = data[, features[j]]) && is.null(x = cols)
+        if (cols.unset) {
+          cols <- hue_pal()(n = length(x = levels(x = data[, features[j]])))
+          names(x = cols) <- levels(x = data[, features[j]])
+        }
+        plot <- SingleSpatialPlot(data = cbind(coordinates, data[rownames(x = coordinates), features[j], drop = FALSE]), image = image.use, image.alpha = image.alpha,col.by = features[j], cols = cols, alpha.by = if (is.null(x = group.by)) {
+            features[j]
+          }
+          else {
+            NULL
+          }, pt.alpha = if (!is.null(x = group.by)) {
+            alpha[j]
+          }
+          else {
+            NULL
+          }, geom = if (inherits(x = image.use, what = "STARmap")) {
+            "poly"
+          }
+          else {
+            "spatial"
+          }, cells.highlight = highlight.use, cols.highlight = cols.highlight, 
+          pt.size.factor = pt.size.factor, stroke = stroke, crop = crop)
+        if (is.null(x = group.by)) {
+          plot <- plot + scale_fill_gradientn(name = features[j], colours = c('blue','white', 'red')) + theme(legend.position="top") + scale_alpha(range = alpha) + guides(alpha = 'none')
+        }
+        else if (label) {
+          plot <- LabelClusters(plot = plot, id = ifelse(test = is.null(x = cells.highlight), yes = features[j], no = "highlight"), geom = if (inherits(x = image.use, what = "STARmap")) {
+            "GeomPolygon"
+          }
+          else {
+            "GeomSpatial"
+          }, repel = repel, size = label.size, color = label.color, box = label.box, position = "nearest")
+        }
+        if (j == 1 && length(x = images) > 1 && !facet.highlight) {
+          plot <- plot + ggtitle(label = images[[image.idx]]) + theme(plot.title = element_text(hjust = 0.5))
+        }
+        plots[[plot.idx]] <- plot
+        plot.idx <- plot.idx + ncols
+        if (cols.unset) {
+          cols <- NULL
+        }
+      }
+    }
+    plots
+  }
+  
+  ggsave(filename = paste(out, name, marks[1], marks[2], '.png', sep = '_'), units = 'in', width = 5, height = 7, dpi = 300)
+}
+```
+
+# Frequency boxplot pipeline
+
+## • Get freqs (for boxplot)
+
+```{r}
+get_freqs <- function(immune.combined, cluster_res) {
+  Idents(immune.combined) <- cluster_res
+  new.ident <- sort(unique(Idents(immune.combined)))
+  samples <- unique(immune.combined@meta.data$orig.ident)
+  tmp <- match(immune.combined$orig.ident, samples)
+  sample_ind <- unique(tmp)
+  ids <- Idents(immune.combined)
+  tmp_v <- matrix(0, nrow = length(samples), ncol = length(new.ident))
+  rownames(tmp_v) <- samples
+  total_in_sample <- rep(0, length(samples))
+  tmp <- immune.combined$orig.ident
+  tmp <- plyr::count(tmp)
+  total_in_sample = tmp$freq
+  names(total_in_sample) <- tmp$x
+  total_in_sample <- total_in_sample[match(samples, names(total_in_sample))]
+  for (i in 1:length(new.ident)) {
+    tmp <- ids[which(ids == new.ident[i])]
+    tmp <- immune.combined$orig.ident[match(names(tmp), rownames(immune.combined@meta.data))]
+    tmp <- plyr::count(tmp)
+    for (j in 1:nrow(tmp)) {
+      ind <- which(rownames(tmp_v) == tmp$x[j])
+      tmp_v[ind,i] <- tmp$freq[j]
+    }
+  }
+  colnames(tmp_v) <- new.ident
+  ind <- order(colnames(tmp_v))
+  tmp_v
+}
+```
+
+## • Boxplot Wilcox test
+
+```{r}
+#df <- df
+#cond1 <- 'b2 Low'
+#cond2 <- 'b2 Medium_High'
+#out <- '/Volumes/hqdinh2/Projects/Public_Data/Luoma_HNC/'
+
+freq_wilcox <- function(df, cond1 = unique(df$Group)[1], cond2 = unique(df$Group)[2], out){
+  wilcox <- data.frame(Cluster=character(), pval = numeric())
+  for (x in unique(df$Cluster)){
+    df2 <- df[df$Cluster == x,]
+    l <- df2[df2$Group == cond1, 'Freqs']
+    h <- df2[df2$Group == cond2, 'Freqs']
+    wc <- wilcox.test(l, h)
+    p <- wc$p.value
+    row <- c(x, p)
+    wilcox <- rbind(wilcox, row)
+  }
+  colnames(wilcox) <- c('Cluster', 'pval')
+  out1 <- paste(out, cond1, 'vs', cond2, '_Wilcoxtest.csv', sep = '')
+  write.csv(wilcox, file = out1)
+  return(wilcox)
+}
+```

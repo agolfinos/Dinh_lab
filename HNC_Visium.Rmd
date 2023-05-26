@@ -1,0 +1,3990 @@
+---
+title: "HNC_Visium"
+author: "Athena Golfinos"
+date: "5/24/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r import}
+library(Seurat)
+library(ggplot2)
+library(patchwork)
+library(DescTools)
+library(magrittr)
+library(knitr)
+library(SeuratObject)
+library(SpotClean)
+library(BayesSpace)
+
+ck17_5 <- readRDS('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-5_analysis/cleaned_ck17_5_seurat_2022-1-3.RDS')
+ck17_7 <- readRDS('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-7_analysis/cleaned_ck17_7_seurat_2022-1-3.RDS')
+ck17_21 <- readRDS('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-21_analysis/cleaned_ck17_21_seurat_2022-11-30.RDS')
+ck17_27 <- readRDS('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-27_analysis/cleaned_ck17_27_seurat_2022-1-3.RDS')
+```
+
+# Integrate data
+```{r}
+# normalize and identify variable features for each dataset independently
+DefaultAssay(ck17_5) <- 'SCT'
+DefaultAssay(ck17_7) <- 'SCT'
+DefaultAssay(ck17_21) <- 'SCT'
+DefaultAssay(ck17_27) <- 'SCT'
+
+# select features that are repeatedly variable across datasets for integration
+features <- SelectIntegrationFeatures(object.list = c(ck17_5, ck17_7, ck17_21, ck17_27))
+
+immune.anchors <- FindIntegrationAnchors(object.list = c(ck17_5, ck17_7, ck17_21, ck17_27), anchor.features = features)
+# this command creates an 'integrated' data assay
+immune.combined <- IntegrateData(anchorset = immune.anchors)
+```
+
+# Convert seurats to annData
+
+```{r}
+seu <- ck17_27
+seu_name <- 'ck17_27'
+
+out <- '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/'
+DefaultAssay(seu) <- 'SCT'
+seu <- DietSeurat(seu, counts = FALSE, data = TRUE, scale.data = TRUE, assays = c('SCT', 'SCDC_onemreg'))
+seu$row <- seu@images$slice1@coordinates$row
+seu$col <- seu@images$slice1@coordinates$col  
+
+seurat_to_adata(seu = seu, out = paste(out, seu_name, '_', Sys.Date() ,'.h5Seurat', sep = ''))
+```
+
+# Adding immune cells as a celltype marker
+
+## • Adding column to assay
+
+```{r}
+ck17_5@assays$SCDC_onemreg@data <- rbind(ck17_5@assays$SCDC_onemreg@data, colSums(ck17_5@assays$SCDC_onemreg@data[which(!rownames(ck17_5@assays$SCDC_onemreg@data) %in% c('Endothelial cells', 'Epithelial cells', 'Fibroblasts', 'Pericytes')),]))
+
+rownames(ck17_5@assays$SCDC_onemreg@data)[37] <- 'CD45+'
+
+saveRDS(ck17_5, '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-5_analysis/cleaned_ck17_5_seurat_2022-11-03.RDS')
+
+ck17_7@assays$SCDC_onemreg@data <- rbind(ck17_7@assays$SCDC_onemreg@data, colSums(ck17_7@assays$SCDC_onemreg@data[which(!rownames(ck17_7@assays$SCDC_onemreg@data) %in% c('Endothelial cells', 'Epithelial cells', 'Fibroblasts', 'Pericytes')),]))
+
+rownames(ck17_7@assays$SCDC_onemreg@data)[37] <- 'CD45+'
+
+saveRDS(ck17_7, '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-7_analysis/cleaned_ck17_7_seurat_2022-11-03.RDS')
+
+ck17_21@assays$SCDC_onemreg@data <- rbind(ck17_21@assays$SCDC_onemreg@data, colSums(ck17_21@assays$SCDC_onemreg@data[which(!rownames(ck17_21@assays$SCDC_onemreg@data) %in% c('Endothelial cells', 'Epithelial cells', 'Fibroblasts', 'Pericytes')),]))
+
+rownames(ck17_21@assays$SCDC_onemreg@data)[37] <- 'CD45+'
+
+saveRDS(ck17_21, '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-21_analysis/cleaned_ck17_21_seurat_2022-11-03.RDS')
+
+ck17_27@assays$SCDC_onemreg@data <- rbind(ck17_27@assays$SCDC_onemreg@data, colSums(ck17_27@assays$SCDC_onemreg@data[which(!rownames(ck17_27@assays$SCDC_onemreg@data) %in% c('Endothelial cells', 'Epithelial cells', 'Fibroblasts', 'Pericytes')),]))
+
+rownames(ck17_27@assays$SCDC_onemreg@data)[37] <- 'CD45+'
+
+saveRDS(ck17_27, '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-27_analysis/cleaned_ck17_27_seurat_2022-11-03.RDS')
+```
+
+## • Identifying the highest value celltype & add to metadata
+
+```{r}
+seu <- ck17_5
+
+t0 <- as.data.frame(GetAssayData(seu, assay = 'SCDC_onemreg'))
+t1 <- t0[rownames(t0) %in% c('CD45+', 'Epithelial cells', 'Fibroblasts'),]
+t1 <- data.frame(col = colnames(t1), value  = rownames(t1)[max.col(t(t1))])
+rownames(t1) <- t1$col
+t1$col <- NULL
+
+seu <- AddMetaData(seu, metadata = t1, col.name = 'Enriched_celltype')
+seu$Enriched_celltype <- as.factor(seu$Enriched_celltype)
+
+Idents(seu) <- seu$Enriched_celltype
+
+SpatialDimPlot(seu)
+
+saveRDS(seu, '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-5_analysis/cleaned_ck17_5_seurat_2022-12-2.RDS')
+```
+
+## • Plotting dominant cell type
+
+```{r}
+seu <- ck17_27
+
+Idents(seu) <- seu$Enriched_celltype
+
+SpatialDimPlot(seu)
+```
+
+## • Renaming clusters based on highest expressed celltypes
+
+Here I ended up noticing that if I look at a cluster level, all clusters are considered "epithelial dominant". So we aren't going to be able to assign clusters as immune dominant, epithelial dominant, or stromal dominant.
+
+```{r}
+seu <- ck17_27
+
+assay <- as.data.frame(GetAssayData(seu, assay = 'SCDC_onemreg'))
+assay1 <- as.data.frame(t(assay[rownames(assay) %in% c('CD45+', 'Epithelial cells', 'Fibroblasts'),]))
+
+meta <- seu[[c('seurat_clusters')]]
+meta$seurat_clusters <- as.character(meta$seurat_clusters)
+
+combined <- merge(assay1, meta, by = 0)
+combined$Row.names <- NULL
+
+# aggregating by cluster and returning the sum
+combined_sum <- aggregate(combined[,1:3], by = list(combined$seurat_clusters), FUN = sum)
+combined_sum2 <- pmax(combined_sum)
+
+# aggregating by cluster and returning the mean
+combined_mean <- aggregate(combined[1:3], by = list(combined$seurat_clusters), FUN = mean)
+
+# returning a vector of the dominant cell type
+dominant <- colnames(combined_mean[, 2:4])[apply(combined_mean[, 2:4],1,which.max)]
+
+# returning a vector of the cluster ID
+cluster <- combined_mean$Group.1
+
+df <- data.frame(cluster, dominant)
+df
+
+#seu$cluster_enrichedcells <- as.character(seu$seurat_clusters)
+test <- seu[[c('seurat_clusters')]]
+test$cell <- rownames(test)
+test1 <- merge(test, df, by.x = 'seurat_clusters', by.y = 'cluster')
+rownames(test1) <- test1$cell
+test1$cell <- NULL
+test1$seurat_clusters <- NULL
+
+seu <- AddMetaData(seu, metadata = test1, col.name = 'enrichedcells_bycluster')
+
+Idents(seu) <- seu$enrichedcells_bycluster
+
+SpatialDimPlot(seu)
+
+saveRDS(seu, '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-27_analysis/cleaned_ck17_27_seurat_2022-12-2.RDS')
+```
+
+# Plotting features
+
+```{r}
+assay <- 'SCDC_global'
+#features <- c('CXCL9')
+features <- c()
+
+DefaultAssay(ck17_5) <- assay
+a <- SpatialFeaturePlot(ck17_5, features = features) 
+DefaultAssay(ck17_7) <- assay
+b <- SpatialFeaturePlot(ck17_7, features = features) 
+DefaultAssay(ck17_21) <- assay
+c <- SpatialFeaturePlot(ck17_21, features = features) 
+DefaultAssay(ck17_27) <- assay
+d <- SpatialFeaturePlot(ck17_27, features = features) 
+
+a + b + c + d
+
+# changing labels in the assay
+assay <- GetAssay(object = ck17_5, assay = "SCDC_onemreg")@data 
+assay <- as.data.frame(assay)
+assay$celltype <- rownames(assay)
+assay$celltype[assay$celltype %like% c('CD8%')] <- 'CD8'
+assay$celltype[assay$celltype %like% c('CD4%')] <- 'CD4'
+assay$celltype[assay$celltype %like% c('Treg%')] <- 'Treg'
+library(dplyr)
+assay <- assay %>%
+  group_by(celltype) %>%
+  summarise(across(c(celltype), sum))
+
+features <- rownames(ck17_5)[rownames(ck17_5) %like% c('CXCL9')]
+
+fname <- 'ICOSLG_ICOS_cellcellcommunication_markers.png'
+
+DefaultAssay(ck17_5) <- 'SCT'
+p1 <- SpatialFeaturePlot(ck17_5, features = features, combine = FALSE)
+fix.sc <- scale_color_gradientn(colours = rainbow(5),  limits = c(1, 8))
+p2 <- lapply(p1, function (x) x + fix.sc)
+CombinePlots(p2)
+ggsave(paste('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/ck17_5', fname, sep = ''), width = 15, height = 8, units = 'in')
+
+DefaultAssay(ck17_7) <- 'SCT'
+p1 <- SpatialFeaturePlot(ck17_7, features = features, combine = FALSE)
+fix.sc <- scale_color_gradientn(colours = rainbow(5),  limits = c(1, 8))
+p2 <- lapply(p1, function (x) x + fix.sc)
+CombinePlots(p2)
+ggsave(paste('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/ck17_7', fname, sep = ''), width = 15, height = 8, units = 'in')
+
+DefaultAssay(ck17_21) <- 'SCT'
+p1 <- SpatialFeaturePlot(ck17_21, features = features, combine = FALSE) 
+fix.sc <- scale_color_gradientn(colours = rainbow(5),  limits = c(1, 8))
+p2 <- lapply(p1, function (x) x + fix.sc)
+CombinePlots(p2)
+ggsave(paste('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/ck17_21', fname, sep = ''), width = 15, height = 8, units = 'in')
+
+DefaultAssay(ck17_27) <- 'SCT'
+p1 <- SpatialFeaturePlot(ck17_27, features = features, combine = FALSE)
+fix.sc <- scale_color_gradientn(colours = rainbow(5),  limits = c(1, 8))
+p2 <- lapply(p1, function (x) x + fix.sc)
+CombinePlots(p2)
+ggsave(paste('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/ck17_27', fname, sep = ''), width = 15, height = 8, units = 'in')
+```
+
+# Heatmap of co-expression by cluster
+## • Refining Cellchat database
+```{r}
+library(CellChat)
+l <- CellChatDB.human$interaction$ligand
+r <- CellChatDB.human$interaction$receptor
+
+inds <- which(l %like% '^TGF%')
+
+l <- l[inds]
+r <- r[inds]
+```
+## • Plotting unweighted by immune cell heatmap
+```{r, warning = FALSE}
+
+#visium_cooc_heatmap(ck17_5, seuname = 'ck17_5', pic_height = 17, rsum_cutoff = 0.75)
+#visium_cooc_heatmap(ck17_7, seuname = 'ck17_7', pic_height = 15, rsum_cutoff = 0.75)
+#visium_cooc_heatmap(ck17_21, seuname = 'ck17_21', pic_height = 9, pic_width = 6, rsum_cutoff = 0.4)
+#visium_cooc_heatmap(ck17_27, seuname = 'ck17_27', pic_height = 9, pic_width = 6, rsum_cutoff = 0.4)
+
+visium_cooc_heatmap(ck17_5, seuname = 'ck17_5', pic_height = 12, pic_width = 6, filter = F)
+visium_cooc_heatmap(ck17_7, seuname = 'ck17_7', pic_height = 12, pic_width = 6, filter = F)
+visium_cooc_heatmap(ck17_21, seuname = 'ck17_21', pic_height = 12, pic_width = 6, filter = F)
+visium_cooc_heatmap(ck17_27, seuname = 'ck17_27', pic_height = 12, pic_width = 6, filter = F)
+```
+## • Plotting weighted by immune cell heatmap
+```{r, warning = FALSE}
+#weighted_visium_cooc_heatmap(seu = ck17_5, seuname = 'ck17_5', rsum_cutoff = 0.5)
+#weighted_visium_cooc_heatmap(seu = ck17_7, seuname = 'ck17_7', rsum_cutoff = 0.5)
+#weighted_visium_cooc_heatmap(seu = ck17_21, seuname = 'ck17_21', rsum_cutoff = 0.4)
+#weighted_visium_cooc_heatmap(seu = ck17_27, seuname = 'ck17_27', rsum_cutoff = 0.3)
+
+weighted_visium_cooc_heatmap(seu = ck17_5, seuname = 'ck17_5', rsum_cutoff = 0.05, filter = F)
+weighted_visium_cooc_heatmap(seu = ck17_7, seuname = 'ck17_7', rsum_cutoff = 0.05, filter = F)
+weighted_visium_cooc_heatmap(seu = ck17_21, seuname = 'ck17_21', rsum_cutoff = 0.05, filter = F)
+weighted_visium_cooc_heatmap(seu = ck17_27, seuname = 'ck17_27', rsum_cutoff = 0.05, filter = F)
+```
+
+# _____SpatialPCA_____
+# TEST
+## • Create SpatialPCA object 
+count_sub = the count matrix
+xy_coords = spatial coordinates
+
+```{r}
+i=1 # Here we take the 9th sample as example, in total there are 12 samples (numbered as 1-12), the user can test on other samples if needed.
+load(paste0("/Users/agolfinos/Desktop/LIBD_sample",i,".RData")) 
+
+print(dim(count_sub)) # The count matrix
+# [1] 33538  4226
+
+type(count_sub)
+# [1] double
+
+print(dim(xy_coords)) # The x and y coordinates. We flipped the y axis for visualization.
+#  [1] 4226    2
+
+head(xy_coords)
+#   x_coord     y_coord
+#    <dbl>      <dbl>
+
+#1	147.4347	-113.1413		
+#2	413.0513	-383.4384		
+#3	231.0081	-129.5230		
+#4	155.8056	-431.1881		
+#5	125.0675	-344.8695		
+#6	137.3987	-366.4717	
+
+type(xy_coords)
+# [1] double
+
+xy_coords = as.matrix(xy_coords)
+rownames(xy_coords) = colnames(count_sub) # the rownames of location should match with the colnames of count matrix
+LIBD = SpatialPCA::CreateSpatialPCAObject(counts=count_sub, location=xy_coords, project = "SpatialPCA",gene.type="spatial",sparkversion="spark",numCores_spark=5,gene.number=3000, customGenelist=NULL,min.loctions = 20, min.features=20)
+
+LIBD = SpatialPCA::SpatialPCA_buildKernel(LIBD, kerneltype="gaussian", bandwidthtype="SJ",bandwidth.set.by.user=NULL)
+LIBD = SpatialPCA::SpatialPCA_EstimateLoading(LIBD,fast=FALSE,SpatialPCnum=20) 
+LIBD = SpatialPCA::SpatialPCA_SpatialPCs(LIBD, fast=FALSE)
+
+
+clusterlabel= SpatialPCA::walktrap_clustering(clusternum=clusterNum[i],latent_dat=LIBD@SpatialPCs,knearest=70 ) 
+# here for all 12 samples in LIBD, we set the same k nearest number in walktrap_clustering to be 70. 
+# for other Visium or ST data, the user can also set k nearest number as round(sqrt(dim(SpatialPCAobject@SpatialPCs)[2])) by default.
+clusterlabel_refine = SpatialPCA::refine_cluster_10x(clusterlabels=clusterlabel,location=LIBD@location,shape="hexagon")
+
+cbp=c("#9C9EDE" ,"#5CB85C" ,"#E377C2", "#4DBBD5" ,"#FED439" ,"#FF9896", "#FFDC91")
+SpatialPCA::plot_cluster(location=xy_coords,clusterlabel=clusterlabel_refine,pointsize=1.5,title_in=paste0("SpatialPCA"),color_in=cbp)
+```
+
+## • HNC Visium samples
+```{r}
+OBJ <- ck17_21
+num_clust <- seq(6, 20, by = 2)
+out <- '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/SpatialPCA/CK17-21/'
+
+spatialPCA(OBJ = ck17_7, out = '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/SpatialPCA/CK17-7/')
+
+DefaultAssay(ck17_21) <- 'SCT'
+spatialPCA(OBJ = ck17_21, out = '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/SpatialPCA/CK17-21/')
+
+
+DefaultAssay(ck17_27) <- 'SCT'
+spatialPCA(OBJ = ck17_27, out = '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/SpatialPCA/CK17-27/')
+
+spatialPCA <- function(OBJ, num_clust = seq(6, 20, by = 2), out){
+
+  count_sub <- GetAssayData(OBJ)
+  xy_coords <- OBJ@images$slice1@coordinates[,c(3,2)]
+  
+  #print(dim(count_sub))
+  # [1] 13918  2261
+  
+  #type(count_sub)
+  # [1] double
+  
+  #print(dim(xy_coords))
+  # [1] 2261    2
+  
+  xy_coords <- mutate_all(xy_coords, function(x) as.numeric(as.character(x)))
+  
+  #type(xy_coords)
+  # [1] double
+  
+  #head(xy_coords)
+  
+  xy_coords = as.matrix(xy_coords)
+  colnames(xy_coords) <- c('x_coord', 'y_coord')
+  rownames(xy_coords) = colnames(count_sub) # the rownames of location should match with the colnames of count matrix
+  print('Building SpatialPCA Object')
+  sPCA = SpatialPCA::CreateSpatialPCAObject(counts=count_sub, location=xy_coords, project = "SpatialPCA",gene.type="spatial",sparkversion="sparkx",numCores_spark=5)
+  print('Building kernel')
+  sPCA = SpatialPCA::SpatialPCA_buildKernel(sPCA, kerneltype="gaussian", bandwidthtype="SJ",bandwidth.set.by.user=NULL)
+  print('Estimating loadings')
+  sPCA = SpatialPCA::SpatialPCA_EstimateLoading(sPCA,fast=TRUE,SpatialPCnum=20) 
+  print('Calculating Spatial PCs')
+  sPCA = SpatialPCA::SpatialPCA_SpatialPCs(sPCA, fast=TRUE)
+  
+  print('Clustering')
+  
+  plots <- list()
+  for (y in num_clust){
+    clusterlabel= SpatialPCA::walktrap_clustering(clusternum=y,
+                              latent_dat=sPCA@SpatialPCs,knearest = 100) 
+  
+  # for other Visium or ST data, the user can also set k nearest number
+    # as round(sqrt(dim(SpatialPCAobject@SpatialPCs)[2])) by default.
+    clusterlabel_refine = SpatialPCA::refine_cluster_10x(clusterlabels=clusterlabel,
+                              location=sPCA@location,shape="hexagon")
+  
+    SpatialPCA::plot_cluster(location=xy_coords,
+            clusterlabel=clusterlabel_refine,pointsize=1.5,
+            title_in=paste0("SpatialPCA"),color_in=color_clusters[1:y])
+    
+    ggsave(filename = paste(out, Sys.Date(), '_SpatialPCA_', y, '_clusters.png', sep = ''), width = 5, height = 7, units = 'in', dpi = 300)
+  }
+  
+  
+  save(count_sub, xy_coords, sPCA, clusterlabel, clusterlabel_refine, color_clusters, file = paste(out, Sys.Date(), '_SpatialPCA.RData', sep = ''))
+}  
+```
+
+
+# _____BayesSpace_____
+
+## • Pre-processing data
+
+```{r}
+library(BayesSpace)
+set.seed(102)
+
+#Convert to SCE
+DefaultAssay(ck17_5) <- 'SCT'
+diet.ck17_5 = Seurat::DietSeurat(ck17_5, graphs = "pca", assays = 'SCT') #slim down Seurat obj prior to conversion
+sce_ck17_5 = as.SingleCellExperiment(diet.ck17_5) #convert seurat to SCE
+colData(sce_ck17_5) = cbind(colData(sce_ck17_5), ck17_5@images$slice1@coordinates) #add spatial info to SCE
+
+DefaultAssay(ck17_7) <- 'SCT'
+diet.ck17_7 = Seurat::DietSeurat(ck17_7, graphs = "pca", assays = 'SCT') 
+sce_ck17_7 = as.SingleCellExperiment(diet.ck17_7)
+colData(sce_ck17_7) = cbind(colData(sce_ck17_7), ck17_7@images$slice1@coordinates)
+
+DefaultAssay(ck17_21) <- 'SCT'
+diet.ck17_21 = Seurat::DietSeurat(ck17_21, graphs = "pca", assays = 'SCT') 
+sce_ck17_21 = as.SingleCellExperiment(diet.ck17_21)
+colData(sce_ck17_21) = cbind(colData(sce_ck17_21), ck17_21@images$slice1@coordinates)
+
+DefaultAssay(ck17_27) <- 'SCT'
+diet.ck17_27 = Seurat::DietSeurat(ck17_27, graphs = "pca", assays = 'SCT') 
+sce_ck17_27 = as.SingleCellExperiment(diet.ck17_27)
+colData(sce_ck17_27) = cbind(colData(sce_ck17_27), ck17_27@images$slice1@coordinates)
+
+#saveRDS(sce_ck17_5, file = '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-5_analysis/SINGLECELLEXPERIMENT_cleaned_ck17_5_seurat_2022-12-2.RDS')
+#saveRDS(sce_ck17_7, file = '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-7_analysis/SINGLECELLEXPERIMENT_cleaned_ck17_7_seurat_2022-12-2.RDS')
+#saveRDS(sce_ck17_21, file = '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-21_analysis/SINGLECELLEXPERIMENT_cleaned_ck17_21_seurat_2022-11-30.RDS')
+#saveRDS(sce_ck17_27, file = '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-27_analysis/SINGLECELLEXPERIMENT_cleaned_ck17_27_seurat_2022-12-2.RDS')
+
+sce_ck17_5 <- readRDS(file = '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-5_analysis/SINGLECELLEXPERIMENT_cleaned_ck17_5_seurat_2022-12-2.RDS')
+sce_ck17_7 <- readRDS(file = '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-7_analysis/SINGLECELLEXPERIMENT_cleaned_ck17_7_seurat_2022-12-2.RDS')
+sce_ck17_21 <- readRDS(file = '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-21_analysis/SINGLECELLEXPERIMENT_cleaned_ck17_21_seurat_2022-11-30.RDS')
+sce_ck17_27 <- readRDS(file = '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-27_analysis/SINGLECELLEXPERIMENT_cleaned_ck17_27_seurat_2022-12-2.RDS')
+```
+
+## • BayesSpace Workflow
+
+```{r}
+library(BayesSpace)
+
+#BayesSpace Workflow
+sce_ck17_5 = spatialPreprocess(sce_ck17_5, platform = "Visium", skip.PCA = T, log.normalize = F) #add BayesSpace metadata, without messing with PCA/logcounts
+for (x in seq(5, 20, by = 1)){
+  print(paste('Now starting with', x, 'number of clusters'))
+  sce_ck17_5 = spatialCluster(sce_ck17_5, nrep = 1000, burn.in = 100, q = x) 
+  colData(sce_ck17_5)[c(paste('spatial.cluster', as.character(x), sep = '_'))] <-   
+      colData(sce_ck17_5)$spatial.cluster
+}
+clusterPlot(sce_ck17_5, label = 'spatial.cluster_6') #plot via BayesSpace
+#ck17_5 <- as.Seurat(sce_ck17_5)
+#saveRDS(ck17_5, file = '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-5_analysis/cleaned_ck17_5_seurat_2022-1-3.RDS')
+
+
+sce_ck17_7 = spatialPreprocess(sce_ck17_7, platform="Visium", skip.PCA = T, log.normalize = F) 
+for (x in seq(5, 20, by = 1)){
+  print(paste('Now starting with', x, 'number of clusters'))
+  sce_ck17_7 = spatialCluster(sce_ck17_7, nrep = 1000, burn.in = 100, q = x) 
+  colData(sce_ck17_7)[c(paste('spatial.cluster', as.character(x), sep = '_'))] <-   
+      colData(sce_ck17_7)$spatial.cluster
+}
+clusterPlot(sce_ck17_7, label = 'spatial.cluster_5')
+#ck17_7 <- as.Seurat(sce_ck17_7)
+#saveRDS(ck17_7, file = '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-7_analysis/cleaned_ck17_7_seurat_2022-1-3.RDS')
+
+sce_ck17_21 = spatialPreprocess(sce_ck17_21, platform="Visium", skip.PCA=T, log.normalize = F) 
+for (x in seq(5, 20, by = 1)){
+  print(paste('Now starting with', x, 'number of clusters'))
+  sce_ck17_21 = spatialCluster(sce_ck17_21, nrep = 1000, burn.in = 100, q = x) 
+  colData(sce_ck17_21)[c(paste('spatial.cluster', as.character(x), sep = '_'))] <-   
+      colData(sce_ck17_21)$spatial.cluster
+}
+
+#clusterPlot(sce_ck17_21, label = 'spatial.cluster_5') 
+#saveRDS(ck17_21, file = '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-21_analysis/cleaned_ck17_21_seurat_2022-1-3.RDS')
+
+sce_ck17_27 = spatialPreprocess(sce_ck17_27, platform="Visium", skip.PCA=T, log.normalize = F) 
+for (x in seq(5, 20, by = 1)){
+  print(paste('Now starting with', x, 'number of clusters'))
+  sce_ck17_27 = spatialCluster(sce_ck17_27, nrep = 1000, burn.in = 100, q = x) 
+  colData(sce_ck17_27)[c(paste('spatial.cluster', as.character(x), sep = '_'))] <-   
+      colData(sce_ck17_27)$spatial.cluster
+}
+
+#clusterPlot(sce_ck17_27) 
+#saveRDS(ck17_27, file = '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-27_analysis/cleaned_ck17_27_seurat_2022-1-3.RDS')
+```
+
+## • Add BayesSpace results to Seurat
+
+```{r}
+#Add BayesSpace results to Seurat
+ck17_5@meta.data = cbind(ck17_5@meta.data, BayesSpace = sce_ck17_5$spatial.cluster_10) #add BayesSpace clusters to Seurat obj
+ck17_5$BayesSpace <- as.factor(ck17_5$BayesSpace)
+Idents(ck17_5) <- ck17_5$BayesSpace
+SpatialDimPlot(ck17_5) #plot via Seurat
+
+ck17_7@meta.data = cbind(ck17_7@meta.data, BayesSpace = sce_ck17_7$spatial.cluster_10) 
+ck17_7$BayesSpace <- as.factor(ck17_7$BayesSpace)
+Idents(ck17_7) <- ck17_7$BayesSpace
+SpatialDimPlot(ck17_7)
+
+ck17_21@meta.data = cbind(ck17_21@meta.data, BayesSpace = sce_ck17_21$spatial.cluster_10) 
+ck17_21$BayesSpace <- as.factor(ck17_21$BayesSpace)
+Idents(ck17_21) <- ck17_21$BayesSpace
+SpatialDimPlot(ck17_21)
+
+ck17_27@meta.data = cbind(ck17_27@meta.data, BayesSpace = sce_ck17_27$spatial.cluster_10) 
+ck17_27$BayesSpace <- as.factor(ck17_27$BayesSpace)
+Idents(ck17_27) <- ck17_27$BayesSpace
+SpatialDimPlot(ck17_27)
+```
+
+## • Calculate DE genes + find cluster resolution
+```{r}
+DefaultAssay(ck17_5) <- 'SCT'
+de_dotplot(ck17_5, metadata = 'BayesSpace')
+ck17_5$BayesSpace <- as.character(ck17_5$BayesSpace)
+ck17_5$BayesSpace[ck17_5$BayesSpace == '4'] <- '1'
+ck17_5$BayesSpace[ck17_5$BayesSpace == '7'] <- '3'
+ck17_5$BayesSpace[ck17_5$BayesSpace == '8'] <- '2'
+ck17_5$BayesSpace[ck17_5$BayesSpace == '6'] <- '3'
+
+Idents(ck17_5) <- ck17_5$BayesSpace
+SpatialDimPlot(ck17_5)
+
+saveRDS(ck17_5, '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-5_analysis/cleaned_ck17_5_seurat_2022-1-3.RDS')
+
+DefaultAssay(ck17_7) <- 'SCT'
+de_dotplot(ck17_7, metadata = 'BayesSpace')
+ck17_7$BayesSpace <- as.character(ck17_7$BayesSpace)
+ck17_7$BayesSpace[ck17_7$BayesSpace == '9'] <- '3'
+Idents(ck17_7) <- ck17_7$BayesSpace
+SpatialDimPlot(ck17_7)
+
+saveRDS(ck17_7, '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-7_analysis/cleaned_ck17_7_seurat_2022-1-3.RDS')
+
+
+
+DefaultAssay(ck17_21) <- 'SCT'
+de_dotplot(ck17_21, metadata = 'BayesSpace')
+ck17_21$BayesSpace <- as.character(ck17_21$BayesSpace)
+ck17_21$BayesSpace[ck17_21$BayesSpace == '5'] <- '1'
+ck17_21$BayesSpace[ck17_21$BayesSpace == '10'] <- '7'
+ck17_21$BayesSpace[ck17_21$BayesSpace == '8'] <- '2'
+ck17_21$BayesSpace[ck17_21$BayesSpace == '4'] <- '3'
+
+Idents(ck17_21) <- ck17_21$BayesSpace
+SpatialDimPlot(ck17_21)
+
+saveRDS(ck17_21, '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-21_analysis/cleaned_ck17_21_seurat_2022-1-3.RDS')
+
+DefaultAssay(ck17_27) <- 'SCT'
+de_dotplot(ck17_27, metadata = 'BayesSpace')
+ck17_27$BayesSpace <- as.character(ck17_27$BayesSpace)
+ck17_27$BayesSpace[ck17_27$BayesSpace == '10'] <- '9'
+ck17_27$BayesSpace[ck17_27$BayesSpace == '8'] <- '2'
+ck17_27$BayesSpace[ck17_27$BayesSpace == '3'] <- '2'
+#ck17_27$BayesSpace[ck17_27$BayesSpace == '4'] <- '3'
+
+Idents(ck17_27) <- ck17_27$BayesSpace
+SpatialDimPlot(ck17_27)
+
+saveRDS(ck17_27, '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-27_analysis/cleaned_ck17_27_seurat_2022-1-3.RDS')
+```
+
+## • Save RDS
+
+```{r}
+saveRDS(ck17_5, '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-5_analysis/cleaned_ck17_5_seurat_2022-12-20.RDS')
+saveRDS(ck17_7, '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-7_analysis/cleaned_ck17_7_seurat_2022-12-20.RDS')
+saveRDS(ck17_21, '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-21_analysis/cleaned_ck17_21_seurat_2022-12-20.RDS')
+saveRDS(ck17_27, '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-27_analysis/cleaned_ck17_27_seurat_2022-12-20.RDS')
+```
+
+# Co-expression weighted by immune cells
+
+## • CK17-5 and CK17-7 (have CXCR3 expression)
+
+```{r}
+# input
+seu <- ck17_7
+name <- 'ck17_7'
+default_assay <- 'SCT'
+marks <- c('CXCL9', 'CXCR3')
+out <- '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/'
+
+weighted_colocalization(ck17_7, seu_name = 'ck17_7', marks = c('PLTP', 'SPP1'))
+```
+
+## • CK17-21 and CK17-27 (no CXCR3 expression)
+
+```{r}
+# input
+seu <- ck17_21
+name <- 'ck17_21'
+default_assay <- 'SCT'
+marks <- c('CXCL9', 'CXCR3')
+out <- '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/'
+
+weighted_colocalization(ck17_27, name = 'ck17_27', marks = c('CXCL9', 'CXCR3'))
+
+###############################################
+weighted_colocalization <- function(seu, name, default_assay = 'SCT', marks, out = '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/'){
+
+  DefaultAssay(seu) <- 'SCT'
+  genes <- FetchData(seu, vars = c(marks[1], marks[2]))
+  if (ncol(genes) == 1){
+    genes[,marks[2]] <- 0.00000000000000001
+  }
+  
+  genes[[paste(marks[1], marks[2], sep = '_')]] <- genes[,1] * genes[,2]
+  genes[,1] <- NULL
+  genes[,1] <- NULL
+  pct_immune <- seu@assays$SCDC_onemreg@data[!rownames(seu@assays$SCDC_onemreg@data) %like any% c('Endothelial cells', 'Fibroblasts', 'Epithelial cells', 'Pericytes'), ] %>% t() %>% rowSums() %>% as.data.frame()
+  df2 <- merge(genes, pct_immune, by = 0)
+  df2[[paste(marks[1], marks[2], sep = '_')]] <- df2[[paste(marks[1], marks[2], sep = '_')]] * df2$.
+  df2$. <- NULL
+  rownames(df2) <- df2$Row.names
+  df2$Row.names <- NULL
+  
+  genes <- df2
+  
+  object = seu
+  group.by = NULL
+  features = NULL
+  images = NULL
+  cols = NULL
+  image.alpha = 1
+  crop = TRUE
+  slot = "data"
+  min.cutoff = NA
+  max.cutoff = NA
+  cells.highlight = NULL 
+  cols.highlight = c("#DE2D26", "grey50")
+  facet.highlight = FALSE
+  label = FALSE
+  label.size = 5
+  label.color = "white"
+  label.box = TRUE 
+  repel = FALSE
+  ncol = NULL
+  combine = TRUE
+  pt.size.factor = 1.6 
+  alpha = c(1, 1)
+  stroke = 0.25
+  interactive = FALSE
+  do.identify = FALSE
+  identify.ident = NULL
+  do.hover = FALSE
+  information = NULL
+  {
+    images <- images %||% Images(object = object, assay = DefaultAssay(object = object))
+    data <- genes
+    features <- paste(marks[1], marks[2], sep = '_')
+    min.cutoff <- 0
+    max.cutoff <- 6
+    check.lengths <- unique(x = vapply(X = list(features, 
+      min.cutoff, max.cutoff), FUN = length, FUN.VALUE = numeric(length = 1)))
+    data <- sapply(X = 1:ncol(x = data), FUN = function(index) {
+      data.feature <- as.vector(x = data[, index])
+      min.use <- SetQuantile(cutoff = min.cutoff[index], data.feature)
+      max.use <- SetQuantile(cutoff = max.cutoff[index], data.feature)
+      data.feature[data.feature < min.use] <- min.use
+      data.feature[data.feature > max.use] <- max.use
+      return(data.feature)
+    })
+    colnames(x = data) <- features
+    rownames(x = data) <- Cells(x = object)
+    features <- colnames(x = data)
+    colnames(x = data) <- features
+    rownames(x = data) <- colnames(x = object)
+    facet.highlight <- facet.highlight && (!is.null(x = cells.highlight) && 
+      is.list(x = cells.highlight))
+    ncols <- length(x = images)
+    plots <- vector(mode = "list", length = length(x = features) * ncols)
+    for (i in 1:ncols) {
+      plot.idx <- i
+      image.idx <- ifelse(test = facet.highlight, yes = 1, no = i)
+      image.use <- object[[images[[image.idx]]]]
+      coordinates <- GetTissueCoordinates(object = image.use)
+      highlight.use <- if (facet.highlight) {
+        cells.highlight[i]
+      }
+      else {
+        cells.highlight
+      }
+      for (j in 1:length(x = features)) {
+        cols.unset <- is.factor(x = data[, features[j]]) && is.null(x = cols)
+        if (cols.unset) {
+          cols <- hue_pal()(n = length(x = levels(x = data[, features[j]])))
+          names(x = cols) <- levels(x = data[, features[j]])
+        }
+        plot <- SingleSpatialPlot(data = cbind(coordinates, 
+          data[rownames(x = coordinates), features[j], 
+            drop = FALSE]), image = image.use, image.alpha = image.alpha, 
+          col.by = features[j], cols = cols, alpha.by = if (is.null(x = group.by)) {
+            features[j]
+          }
+          else {
+            NULL
+          }, pt.alpha = if (!is.null(x = group.by)) {
+            alpha[j]
+          }
+          else {
+            NULL
+          }, geom = if (inherits(x = image.use, what = "STARmap")) {
+            "poly"
+          }
+          else {
+            "spatial"
+          }, cells.highlight = highlight.use, cols.highlight = cols.highlight, 
+          pt.size.factor = pt.size.factor, stroke = stroke, crop = crop)
+        if (is.null(x = group.by)) {
+          plot <- plot + scale_fill_gradientn(name = features[j], colours = c('blue','white', 'red')) + theme(legend.position="top") + scale_alpha(range = alpha) + guides(alpha = 'none')
+        }
+        else if (label) {
+          plot <- LabelClusters(plot = plot, id = ifelse(test = is.null(x = cells.highlight), yes = features[j], no = "highlight"), geom = if (inherits(x = image.use, 
+            what = "STARmap")) {
+            "GeomPolygon"
+          }
+          else {
+            "GeomSpatial"
+          }, repel = repel, size = label.size, color = label.color, box = label.box, position = "nearest")
+        }
+        if (j == 1 && length(x = images) > 1 && !facet.highlight) {
+          plot <- plot + ggtitle(label = images[[image.idx]]) + theme(plot.title = element_text(hjust = 0.5))
+        }
+        plots[[plot.idx]] <- plot
+        plot.idx <- plot.idx + ncols
+        if (cols.unset) {
+          cols <- NULL
+        }
+      }
+    }
+    plots
+  }
+  
+  ggsave(filename = paste(out, name, marks[1], marks[2], '.png', sep = '_'), units = 'in', width = 5, height = 7, dpi = 300)
+}
+```
+
+# Plotting markers in clusters
+
+```{r}
+visium_marker_dotplots <- function(seu, features){
+  DefaultAssay(seu) <- 'SCT'
+  SpatialFeaturePlot(seu, features = features)
+}
+
+visium_marker_dotplots(ck17_5, features = c('LAMP3', 'FSCN1', 'ICOS', 'ICOSLG', 'CD28', 'CTLA4', 'CD8A', 'CD4'))
+visium_marker_dotplots(ck17_7, features = c('LAMP3', 'FSCN1', 'ICOS', 'ICOSLG', 'CD28', 'CTLA4', 'CD8A', 'CD4'))
+visium_marker_dotplots(ck17_21, features = c('LAMP3', 'FSCN1', 'ICOS', 'ICOSLG', 'CD28', 'CTLA4', 'CD8A', 'CD4'))
+visium_marker_dotplots(ck17_27, features = c('LAMP3', 'FSCN1', 'ICOS', 'ICOSLG', 'CD28', 'CTLA4', 'CD8A', 'CD4'))
+```
+
+# Volcano plot of responders vs. non-responders
+
+```{r}
+
+```
+
+# Plotting cell types in clusters
+
+```{r}
+visium_subset_dotplots <- function(seu, cells){
+  DefaultAssay(seu) <- 'SCDC_onemreg'
+  SpatialFeaturePlot
+}
+```
+
+# _____CellChat_____
+
+## • Get unique interactions from the database
+
+```{r}
+library(CellChat)
+
+l <- CellChatDB.human$interaction$ligand
+r <- CellChatDB.human$interaction$receptor
+
+l1l <- l[which(l %in% rownames(ck17_5))]
+r1l <- r[which(l %in% rownames(ck17_5))] #1143
+
+l1lr <- l[which(r %in% rownames(ck17_5))]
+r1lr <- r[which(r %in% rownames(ck17_5))] #694
+
+l2l <- l1lr[which(l1lr %in% rownames(ck17_7))]
+r2l <- r1lr[which(l1lr %in% rownames(ck17_7))] #413
+
+l2lr <- l2l[which(r2l %in% rownames(ck17_7))]
+r2lr <- r2l[which(r2l %in% rownames(ck17_7))] #375
+
+l3l <- l2lr[which(l2lr %in% rownames(ck17_21))]
+r3l <- r2lr[which(l2lr %in% rownames(ck17_21))] #290
+
+l3lr <- l3l[which(r3l %in% rownames(ck17_21))]
+r3lr <- r3l[which(r3l %in% rownames(ck17_21))] #195
+
+l4l <- l3lr[which(l3lr %in% rownames(ck17_27))]
+r4l <- r3lr[which(l3lr %in% rownames(ck17_27))] #188
+
+l4lr <- l4l[which(r4l %in% rownames(ck17_27))]
+r4lr <- r4l[which(r4l %in% rownames(ck17_27))] #181
+
+
+pairs <- data.frame(l, r)
+colnames(pairs) <- c('l', 'r')
+
+write.csv(pairs, '/Volumes/hqdinh2/Projects/HNC_SPORE/SpatialCorr/full_cellchat_db.csv')
+
+pairs1 <- pairs[1000:1005,]
+write.csv(pairs1, '/Volumes/hqdinh2/Projects/HNC_SPORE/SpatialCorr/mini_cellchat_db.csv')
+```
+
+## • CK17-5 Myeloid to T
+
+### ••Data input
+
+```{r}
+library(CellChat)
+library(patchwork)
+options(stringsAsFactors = FALSE)
+library(Seurat)
+ck17_5 <- readRDS('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-5_analysis/cleaned_ck17_5_seurat_2022-1-3.RDS')
+
+json_path <- '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-5/outs/spatial/scalefactors_json.json'
+
+seu <- ck17_5
+
+Idents(seu) <- 'BayesSpace'
+
+# show the image and annotated spots
+SpatialDimPlot(seu, label = T, label.size = 3)
+
+# Prepare input data for CelChat analysis
+data.input = GetAssayData(seu, slot = "data", assay = "SCT") # normalized data matrix
+meta = data.frame(labels = Idents(seu, row.names = names(Idents(seu)))) # manually create a dataframe consisting of the cell labels
+unique(meta$labels) # check the cell labels
+
+meta$labels <- as.numeric(meta$labels)
+meta$labels[meta$labels == 0] <- 12
+meta$labels <- as.factor(meta$labels)
+
+# load spatial imaging information
+# Spatial locations of spots from full (NOT high/low) resolution images are required
+spatial.locs = GetTissueCoordinates(seu, scale = NULL, cols = c("imagerow", "imagecol")) 
+# Scale factors and spot diameters of the full resolution images 
+scale.factors = jsonlite::fromJSON(txt = file.path(json_path))
+scale.factors = list(spot.diameter = 65, spot = scale.factors$spot_diameter_fullres, # these two information are required
+fiducial = scale.factors$fiducial_diameter_fullres, hires = scale.factors$tissue_hires_scalef, lowres = scale.factors$tissue_lowres_scalef # these three information are not required
+)
+```
+
+### •• Create CellChat object, set database, preprocess
+
+```{r, warning=FALSE}
+cellchat <- createCellChat(object = data.input, meta = meta, group.by = "labels", datatype = "spatial", coordinates = spatial.locs, scale.factors = scale.factors)
+cellchat
+
+CellChatDB <- CellChatDB.human # use CellChatDB.human if running on human data
+CellChatDB.use <- CellChatDB # simply use the default CellChatDB
+
+# set the used database in the object
+cellchat@DB <- CellChatDB.use
+
+# subset the expression data of signaling genes for saving computation cost
+cellchat <- subsetData(cellchat) # This step is necessary even if using the whole database
+future::plan("multiprocess", workers = 4) # do parallel
+cellchat <- identifyOverExpressedGenes(cellchat)
+cellchat <- identifyOverExpressedInteractions(cellchat)
+```
+
+### •• Compute communication probability and infer cellular communication network
+
+```{r}
+cellchat <- computeCommunProb(cellchat, type = "truncatedMean", trim = 0.1, distance.use = TRUE, interaction.length = 200, scale.distance = 0.01)
+
+# Filter out the cell-cell communication if there are only few number of cells in certain cell groups
+cellchat <- filterCommunication(cellchat, min.cells = 10)
+```
+
+### •• Infer cell-cell communication at a signaling pathway level
+
+```{r}
+cellchat <- computeCommunProbPathway(cellchat)
+
+cellchat <- aggregateNet(cellchat)
+```
+
+### •• Create visuals
+
+```{r}
+pdf(file = '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/ck17_5_cellchat_1032022_bayesspace_clusters.pdf', width = 7, height = 6)
+
+SpatialDimPlot(seu, label = T, label.size = 3)
+
+groupSize <- as.numeric(table(cellchat@idents))
+par(mfrow = c(1,2), xpd=TRUE)
+netVisual_circle(cellchat@net$count, vertex.weight = rowSums(cellchat@net$count), weight.scale = T, label.edge= F, title.name = "Number of interactions")
+netVisual_circle(cellchat@net$weight, vertex.weight = rowSums(cellchat@net$weight), weight.scale = T, label.edge= F, title.name = "Interaction weights/strength")
+
+pathways.show <- c("CXCL") 
+# Circle plot
+par(mfrow=c(1,1))
+netVisual_aggregate(cellchat, signaling = pathways.show, layout = "circle")
+# Spatial plot
+par(mfrow=c(1,1))
+netVisual_aggregate(cellchat, signaling = pathways.show, layout = "spatial", edge.width.max = 2, vertex.size.max = 1, alpha.image = 0.2, vertex.label.cex = 3.5)
+
+# Compute the network centrality scores
+cellchat <- netAnalysis_computeCentrality(cellchat, slot.name = "netP") # the slot 'netP' means the inferred intercellular communication network of signaling pathways
+# Visualize the computed centrality scores using heatmap, allowing ready identification of major signaling roles of cell groups
+par(mfrow=c(1,1))
+test <- netAnalysis_signalingRole_network(cellchat, signaling = pathways.show, width = 8, height = 2.5, font.size = 10)
+
+# USER can visualize this information on the spatial imaging, e.g., bigger circle indicates larger incoming signaling
+par(mfrow=c(1,1))
+netVisual_aggregate(cellchat, signaling = pathways.show, layout = "spatial", edge.width.max = 2, alpha.image = 0.2, vertex.weight = "outgoing", vertex.size.max = 3, vertex.label.cex = 3.5)
+
+dev.off()
+```
+
+## • CK17-7 Myeloid to T
+
+### •• Data input
+
+```{r}
+library(CellChat)
+library(patchwork)
+options(stringsAsFactors = FALSE)
+library(Seurat)
+ck17_7 <- readRDS('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-7_analysis/cleaned_ck17_7_seurat_2022-1-3.RDS')
+
+json_path <- '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-7/outs/spatial/scalefactors_json.json'
+
+seu <- ck17_7
+
+Idents(seu) <- 'BayesSpace'
+
+# show the image and annotated spots
+SpatialDimPlot(seu, label = T, label.size = 3)
+
+# Prepare input data for CelChat analysis
+data.input = GetAssayData(seu, slot = "data", assay = "SCT") # normalized data matrix
+meta = data.frame(labels = Idents(seu, row.names = names(Idents(seu)))) # manually create a dataframe consisting of the cell labels
+unique(meta$labels) # check the cell labels
+
+meta$labels <- as.numeric(meta$labels)
+meta$labels[meta$labels == 0] <- 16
+meta$labels <- as.factor(meta$labels)
+
+# load spatial imaging information
+# Spatial locations of spots from full (NOT high/low) resolution images are required
+spatial.locs = GetTissueCoordinates(seu, scale = NULL, cols = c("imagerow", "imagecol")) 
+# Scale factors and spot diameters of the full resolution images 
+scale.factors = jsonlite::fromJSON(txt = file.path(json_path))
+scale.factors = list(spot.diameter = 65, spot = scale.factors$spot_diameter_fullres, # these two information are required
+fiducial = scale.factors$fiducial_diameter_fullres, hires = scale.factors$tissue_hires_scalef, lowres = scale.factors$tissue_lowres_scalef # these three information are not required
+)
+```
+
+### •• Create CellChat object, set database, preprocess
+
+```{r}
+cellchat <- createCellChat(object = data.input, meta = meta, group.by = "labels", datatype = "spatial", coordinates = spatial.locs, scale.factors = scale.factors)
+
+CellChatDB <- CellChatDB.human # use CellChatDB.human if running on human data
+CellChatDB.use <- CellChatDB # simply use the default CellChatDB
+
+# set the used database in the object
+cellchat@DB <- CellChatDB.use
+
+# subset the expression data of signaling genes for saving computation cost
+cellchat <- subsetData(cellchat) # This step is necessary even if using the whole database
+future::plan("multiprocess", workers = 4) # do parallel
+cellchat <- identifyOverExpressedGenes(cellchat)
+cellchat <- identifyOverExpressedInteractions(cellchat)
+```
+
+### •• Compute communication probability
+
+```{r}
+cellchat <- computeCommunProb(cellchat, type = "truncatedMean", trim = 0.1, distance.use = TRUE, interaction.length = 200, scale.distance = 0.01)
+
+# Filter out the cell-cell communication if there are only few number of cells in certain cell groups
+cellchat <- filterCommunication(cellchat, min.cells = 10)
+```
+
+### •• Infer cell-cell communication at a signaling level
+
+```{r}
+cellchat <- computeCommunProbPathway(cellchat)
+
+cellchat <- aggregateNet(cellchat)
+```
+
+### •• Create visuals
+
+```{r}
+pdf(file = '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/ck17_7_cellchat_bayesspace_clusters.pdf', width = 7, height = 6)
+
+SpatialDimPlot(seu, label = T, label.size = 3)
+#de_dotplot(seu, metadata = 'seurat_clusters')
+
+groupSize <- as.numeric(table(cellchat@idents))
+par(mfrow = c(1,2), xpd=TRUE)
+netVisual_circle(cellchat@net$count, vertex.weight = rowSums(cellchat@net$count), weight.scale = T, label.edge= F, title.name = "Number of interactions")
+netVisual_circle(cellchat@net$weight, vertex.weight = rowSums(cellchat@net$weight), weight.scale = T, label.edge= F, title.name = "Interaction weights/strength")
+
+pathways.show <- c("CXCL") 
+# Circle plot
+par(mfrow=c(1,1))
+netVisual_aggregate(cellchat, signaling = pathways.show, layout = "circle")
+# Spatial plot
+par(mfrow=c(1,1))
+netVisual_aggregate(cellchat, signaling = pathways.show, layout = "spatial", edge.width.max = 2, vertex.size.max = 1, alpha.image = 0.2, vertex.label.cex = 3.5)
+
+# Compute the network centrality scores
+cellchat <- netAnalysis_computeCentrality(cellchat, slot.name = "netP") # the slot 'netP' means the inferred intercellular communication network of signaling pathways
+# Visualize the computed centrality scores using heatmap, allowing ready identification of major signaling roles of cell groups
+par(mfrow=c(1,1))
+netAnalysis_signalingRole_network(cellchat, signaling = pathways.show, width = 8, height = 2.5, font.size = 10)
+
+# USER can visualize this information on the spatial imaging, e.g., bigger circle indicates larger incoming signaling
+par(mfrow=c(1,1))
+netVisual_aggregate(cellchat, signaling = pathways.show, layout = "spatial", edge.width.max = 2, alpha.image = 0.2, vertex.weight = "outgoing", vertex.size.max = 3, vertex.label.cex = 3.5)
+
+dev.off()
+```
+
+## • CK17-21 Myeloid to T
+
+### •• Data input
+
+```{r}
+library(CellChat)
+library(patchwork)
+options(stringsAsFactors = FALSE)
+library(Seurat)
+ck17_21 <- readRDS('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-21_analysis/cleaned_ck17_21_seurat_2022-1-3.RDS')
+
+json_path <- '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-21/outs/spatial/scalefactors_json.json'
+
+#ck17_21 <- SCTransform(ck17_21, assay = "Spatial", verbose = FALSE)
+#ck17_21 <- RunPCA(ck17_21, assay = "SCT", verbose = FALSE)
+#ElbowPlot(ck17_21, ndims = 50)
+#ck17_21 <- FindNeighbors(ck17_21, reduction = "pca", dims = 1:30)
+#ck17_21 <- FindClusters(ck17_21, verbose = FALSE)
+#ck17_21 <- RunUMAP(ck17_21, reduction = "pca", dims = 1:30)
+
+#saveRDS(ck17_21, '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-21_analysis/cleaned_ck17_21_seurat_2022-11-30.RDS')
+
+seu <- ck17_21
+
+Idents(seu) <- 'BayesSpace'
+
+# show the image and annotated spots
+SpatialDimPlot(seu, label = T, label.size = 3)
+
+# Prepare input data for CelChat analysis
+data.input = GetAssayData(seu, slot = "data", assay = "SCT") # normalized data matrix
+meta = data.frame(labels = Idents(seu, row.names = names(Idents(seu)))) # manually create a dataframe consisting of the cell labels
+unique(meta$labels) # check the cell labels
+
+meta$labels <- as.numeric(meta$labels)
+max <- max(meta$labels) 
+
+# this needs to be edited to whatever the next largest number beyond the largest number 
+meta$labels[meta$labels == 0] <- max
+meta$labels <- as.factor(meta$labels)
+
+# load spatial imaging information
+# Spatial locations of spots from full (NOT high/low) resolution images are required
+spatial.locs = GetTissueCoordinates(seu, scale = NULL, cols = c("imagerow", "imagecol")) 
+# Scale factors and spot diameters of the full resolution images 
+scale.factors = jsonlite::fromJSON(txt = file.path(json_path))
+scale.factors = list(spot.diameter = 65, spot = scale.factors$spot_diameter_fullres, # these two information are required
+fiducial = scale.factors$fiducial_diameter_fullres, hires = scale.factors$tissue_hires_scalef, lowres = scale.factors$tissue_lowres_scalef # these three information are not required
+)
+```
+
+### •• Create CellChat object, set database, preprocess
+
+```{r}
+cellchat <- createCellChat(object = data.input, meta = meta, group.by = "labels", datatype = "spatial", coordinates = spatial.locs, scale.factors = scale.factors)
+
+CellChatDB <- CellChatDB.human # use CellChatDB.human if running on human data
+CellChatDB.use <- CellChatDB # simply use the default CellChatDB
+
+# set the used database in the object
+cellchat@DB <- CellChatDB.use
+
+# subset the expression data of signaling genes for saving computation cost
+cellchat <- subsetData(cellchat) # This step is necessary even if using the whole database
+future::plan("multiprocess", workers = 4) # do parallel
+cellchat <- identifyOverExpressedGenes(cellchat)
+cellchat <- identifyOverExpressedInteractions(cellchat)
+```
+
+### •• Compute communication probability
+
+```{r}
+cellchat <- computeCommunProb(cellchat, type = "truncatedMean", trim = 0.1, distance.use = TRUE, interaction.length = 200, scale.distance = 0.01)
+
+# Filter out the cell-cell communication if there are only few cells in certain cell groups
+cellchat <- filterCommunication(cellchat, min.cells = 10)
+```
+
+### •• Infer cell-cell communication at a signaling pathway level
+
+```{r}
+cellchat <- computeCommunProbPathway(cellchat)
+
+cellchat <- aggregateNet(cellchat)
+```
+
+### •• Create visuals
+
+```{r}
+pdf(file = '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/ck17_21_cellchat_bayesspace_clusters.pdf', width = 7, height = 6)
+
+SpatialDimPlot(seu, label = T, label.size = 3)
+#de_dotplot(seu, metadata = 'seurat_clusters')
+
+groupSize <- as.numeric(table(cellchat@idents))
+par(mfrow = c(1,2), xpd=TRUE)
+netVisual_circle(cellchat@net$count, vertex.weight = rowSums(cellchat@net$count), weight.scale = T, label.edge= F, title.name = "Number of interactions")
+netVisual_circle(cellchat@net$weight, vertex.weight = rowSums(cellchat@net$weight), weight.scale = T, label.edge= F, title.name = "Interaction weights/strength")
+
+pathways.show <- c("CXCL") 
+# Circle plot
+par(mfrow=c(1,1))
+netVisual_aggregate(cellchat, signaling = pathways.show, layout = "circle")
+# Spatial plot
+par(mfrow=c(1,1))
+netVisual_aggregate(cellchat, signaling = pathways.show, layout = "spatial", edge.width.max = 2, vertex.size.max = 1, alpha.image = 0.2, vertex.label.cex = 3.5)
+
+# Compute the network centrality scores
+cellchat <- netAnalysis_computeCentrality(cellchat, slot.name = "netP") # the slot 'netP' means the inferred intercellular communication network of signaling pathways
+# Visualize the computed centrality scores using heatmap, allowing ready identification of major signaling roles of cell groups
+par(mfrow=c(1,1))
+netAnalysis_signalingRole_network(cellchat, signaling = pathways.show, width = 8, height = 2.5, font.size = 10)
+
+# USER can visualize this information on the spatial imaging, e.g., bigger circle indicates larger incoming signaling
+par(mfrow=c(1,1))
+netVisual_aggregate(cellchat, signaling = pathways.show, layout = "spatial", edge.width.max = 2, alpha.image = 0.2, vertex.weight = "outgoing", vertex.size.max = 3, vertex.label.cex = 3.5)
+
+dev.off()
+```
+
+## • CK17-27 Myeloid to T
+
+### •• Data input
+
+```{r}
+library(CellChat)
+library(patchwork)
+options(stringsAsFactors = FALSE)
+library(Seurat)
+ck17_27 <- readRDS('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-27_analysis/cleaned_ck17_27_seurat_2022-1-3.RDS')
+
+json_path <- '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-27/outs/spatial/scalefactors_json.json'
+
+#ck17_27 <- SCTransform(ck17_27, assay = "Spatial", verbose = FALSE)
+#ck17_27 <- RunPCA(ck17_27, assay = "SCT", verbose = FALSE)
+#ElbowPlot(ck17_27, ndims = 50)
+#ck17_27 <- FindNeighbors(ck17_27, reduction = "pca", dims = 1:30)
+#ck17_27 <- FindClusters(ck17_27, verbose = FALSE)
+#ck17_27 <- RunUMAP(ck17_27, reduction = "pca", dims = 1:30)
+
+seu <- ck17_27
+
+Idents(seu) <- 'BayesSpace'
+
+# show the image and annotated spots
+SpatialDimPlot(seu, label = T, label.size = 3)
+
+# Prepare input data for CelChat analysis
+data.input = GetAssayData(seu, slot = "data", assay = "SCT") # normalized data matrix
+meta = data.frame(labels = Idents(seu, row.names = names(Idents(seu)))) # manually create a dataframe consisting of the cell labels
+unique(meta$labels) # check the cell labels
+
+meta$labels <- as.numeric(meta$labels)
+max <- max(meta$labels) 
+
+# this needs to be edited to whatever the next largest number beyond the largest number 
+meta$labels[meta$labels == 0] <- max
+meta$labels <- as.factor(meta$labels)
+
+# load spatial imaging information
+# Spatial locations of spots from full (NOT high/low) resolution images are required
+spatial.locs = GetTissueCoordinates(seu, scale = NULL, cols = c("imagerow", "imagecol")) 
+# Scale factors and spot diameters of the full resolution images 
+scale.factors = jsonlite::fromJSON(txt = file.path(json_path))
+scale.factors = list(spot.diameter = 65, spot = scale.factors$spot_diameter_fullres, # these two information are required
+fiducial = scale.factors$fiducial_diameter_fullres, hires = scale.factors$tissue_hires_scalef, lowres = scale.factors$tissue_lowres_scalef # these three information are not required
+)
+```
+
+### •• Create CellChat object, set database, preprocess
+
+```{r}
+cellchat <- createCellChat(object = data.input, meta = meta, group.by = "labels", datatype = "spatial", coordinates = spatial.locs, scale.factors = scale.factors)
+
+CellChatDB <- CellChatDB.human # use CellChatDB.human if running on human data
+CellChatDB.use <- CellChatDB # simply use the default CellChatDB
+
+# set the used database in the object
+cellchat@DB <- CellChatDB.use
+
+# subset the expression data of signaling genes for saving computation cost
+cellchat <- subsetData(cellchat) # This step is necessary even if using the whole database
+future::plan("multiprocess", workers = 4) # do parallel
+cellchat <- identifyOverExpressedGenes(cellchat)
+cellchat <- identifyOverExpressedInteractions(cellchat)
+```
+
+### •• Compute communication probability
+
+```{r}
+cellchat <- computeCommunProb(cellchat, type = "truncatedMean", trim = 0.1, distance.use = TRUE, interaction.length = 200, scale.distance = 0.01)
+
+# Filter out the cell-cell communication if there are only few number of cells in certain cell groups
+cellchat <- filterCommunication(cellchat, min.cells = 10)
+```
+
+### •• Infer cell-cell communication at a signaling pathway level
+
+```{r}
+cellchat <- computeCommunProbPathway(cellchat)
+
+cellchat <- aggregateNet(cellchat)
+```
+
+### •• Create visuals
+
+```{r}
+pdf(file = '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/ck17_27_cellchat_bayesspace_clusters.pdf', width = 7, height = 6)
+
+SpatialDimPlot(seu, label = T, label.size = 3)
+#de_dotplot(seu, metadata = 'seurat_clusters')
+
+groupSize <- as.numeric(table(cellchat@idents))
+par(mfrow = c(1,2), xpd=TRUE)
+netVisual_circle(cellchat@net$count, vertex.weight = rowSums(cellchat@net$count), weight.scale = T, label.edge= F, title.name = "Number of interactions")
+netVisual_circle(cellchat@net$weight, vertex.weight = rowSums(cellchat@net$weight), weight.scale = T, label.edge= F, title.name = "Interaction weights/strength")
+
+pathways.show <- c("CXCL") 
+# Circle plot
+par(mfrow=c(1,1))
+netVisual_aggregate(cellchat, signaling = pathways.show, layout = "circle")
+# Spatial plot
+par(mfrow=c(1,1))
+netVisual_aggregate(cellchat, signaling = pathways.show, layout = "spatial", edge.width.max = 2, vertex.size.max = 1, alpha.image = 0.2, vertex.label.cex = 3.5)
+
+# Compute the network centrality scores
+cellchat <- netAnalysis_computeCentrality(cellchat, slot.name = "netP") # the slot 'netP' means the inferred intercellular communication network of signaling pathways
+# Visualize the computed centrality scores using heatmap, allowing ready identification of major signaling roles of cell groups
+par(mfrow=c(1,1))
+netAnalysis_signalingRole_network(cellchat, signaling = pathways.show, width = 8, height = 2.5, font.size = 10)
+
+# USER can visualize this information on the spatial imaging, e.g., bigger circle indicates larger incoming signaling
+par(mfrow=c(1,1))
+netVisual_aggregate(cellchat, signaling = pathways.show, layout = "spatial", edge.width.max = 2, alpha.image = 0.2, vertex.weight = "outgoing", vertex.size.max = 3, vertex.label.cex = 3.5)
+
+dev.off()
+```
+
+# Visium LR interactions metadata
+
+## Modifying spatialdimplot code (LR pairs)
+
+```{r}
+# input
+seu <- ck17_7
+name <- 'ck17_7'
+DefaultAssay(seu) <- 'SCT'
+head(rownames(seu))
+marks <- c('CXCL9', 'CXCR3')
+
+
+###############################################
+
+genes <- FetchData(seu, vars = c(marks[1], marks[2]))
+# if genes[,2] is non-existent
+#genes[,2] <- 0
+genes[[paste(marks[1], marks[2], sep = '_')]] <- genes[,1] * genes[,2]
+genes[,1] <- NULL
+genes[,1] <- NULL
+
+pct_immune <- seu@assays$SCDC_onemreg@data[!rownames(seu@assays$SCDC_onemreg@data) %like any% c('Endothelial cells', 'Fibroblasts', 'Epithelial cells', 'Pericytes'), ] %>% t() %>% rowSums() %>% as.data.frame()
+
+df2 <- merge(genes, pct_immune, by = 0)
+df2[[paste(marks[1], marks[2], sep = '_')]] <- df2[[paste(marks[1], marks[2], sep = '_')]] * df2$.
+
+df2$. <- NULL
+rownames(df2) <- df2$Row.names
+df2$Row.names <- NULL
+
+genes <- df2
+
+object = seu
+group.by = NULL
+features = NULL
+images = NULL
+cols = NULL
+image.alpha = 1
+crop = TRUE
+slot = "data"
+min.cutoff = NA
+max.cutoff = NA
+cells.highlight = NULL 
+cols.highlight = c("#DE2D26", "grey50")
+facet.highlight = FALSE
+label = FALSE
+label.size = 5
+label.color = "white"
+label.box = TRUE 
+repel = FALSE
+ncol = NULL
+combine = TRUE
+pt.size.factor = 1.6 
+alpha = c(1, 1)
+stroke = 0.25
+interactive = FALSE
+do.identify = FALSE
+identify.ident = NULL
+do.hover = FALSE
+information = NULL
+{
+  images <- images %||% Images(object = object, assay = DefaultAssay(object = object))
+  data <- genes
+  #features <- colnames(x = data)
+  features <- paste(marks[1], marks[2], sep = '_')
+  min.cutoff <- 0
+  max.cutoff <- 6
+  check.lengths <- unique(x = vapply(X = list(features, 
+    min.cutoff, max.cutoff), FUN = length, FUN.VALUE = numeric(length = 1)))
+  data <- sapply(X = 1:ncol(x = data), FUN = function(index) {
+    data.feature <- as.vector(x = data[, index])
+    min.use <- SetQuantile(cutoff = min.cutoff[index], data.feature)
+    max.use <- SetQuantile(cutoff = max.cutoff[index], data.feature)
+    data.feature[data.feature < min.use] <- min.use
+    data.feature[data.feature > max.use] <- max.use
+    return(data.feature)
+  })
+  colnames(x = data) <- features
+  rownames(x = data) <- Cells(x = object)
+  features <- colnames(x = data)
+  colnames(x = data) <- features
+  rownames(x = data) <- colnames(x = object)
+  facet.highlight <- facet.highlight && (!is.null(x = cells.highlight) && 
+    is.list(x = cells.highlight))
+  ncols <- length(x = images)
+  plots <- vector(mode = "list", length = length(x = features) * ncols)
+  for (i in 1:ncols) {
+    plot.idx <- i
+    image.idx <- ifelse(test = facet.highlight, yes = 1, no = i)
+    image.use <- object[[images[[image.idx]]]]
+    coordinates <- GetTissueCoordinates(object = image.use)
+    highlight.use <- if (facet.highlight) {
+      cells.highlight[i]
+    }
+    else {
+      cells.highlight
+    }
+    for (j in 1:length(x = features)) {
+      cols.unset <- is.factor(x = data[, features[j]]) && is.null(x = cols)
+      if (cols.unset) {
+        cols <- hue_pal()(n = length(x = levels(x = data[, features[j]])))
+        names(x = cols) <- levels(x = data[, features[j]])
+      }
+      plot <- SingleSpatialPlot(data = cbind(coordinates, 
+        data[rownames(x = coordinates), features[j], 
+          drop = FALSE]), image = image.use, image.alpha = image.alpha, 
+        col.by = features[j], cols = cols, alpha.by = if (is.null(x = group.by)) {
+          features[j]
+        }
+        else {
+          NULL
+        }, pt.alpha = if (!is.null(x = group.by)) {
+          alpha[j]
+        }
+        else {
+          NULL
+        }, geom = if (inherits(x = image.use, what = "STARmap")) {
+          "poly"
+        }
+        else {
+          "spatial"
+        }, cells.highlight = highlight.use, cols.highlight = cols.highlight, 
+        pt.size.factor = pt.size.factor, stroke = stroke, crop = crop)
+      if (is.null(x = group.by)) {
+        plot <- plot + scale_fill_gradientn(name = features[j], 
+          colours = c('blue','white', 'red')) + theme(legend.position = "top") + scale_alpha(range = alpha) + guides(alpha = "none")
+      }
+      else if (label) {
+        plot <- LabelClusters(plot = plot, id = ifelse(test = is.null(x = cells.highlight), 
+          yes = features[j], no = "highlight"), geom = if (inherits(x = image.use, 
+          what = "STARmap")) {
+          "GeomPolygon"
+        }
+        else {
+          "GeomSpatial"
+        }, repel = repel, size = label.size, color = label.color, 
+          box = label.box, position = "nearest")
+      }
+      if (j == 1 && length(x = images) > 1 && !facet.highlight) {
+        plot <- plot + ggtitle(label = images[[image.idx]]) + 
+          theme(plot.title = element_text(hjust = 0.5))
+      }
+      plots[[plot.idx]] <- plot
+      plot.idx <- plot.idx + ncols
+      if (cols.unset) {
+        cols <- NULL
+      }
+    }
+  }
+  plots
+}
+
+ggsave(filename = paste('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/', name, marks[1], marks[2], '.png', sep = '_'), units = 'in', width = 5, height = 7, dpi = 300)
+
+```
+
+## Modifying spatialdimplot code (Immune cells)
+
+```{r}
+# input
+seu <- ck17_27
+name <- 'ck17_27'
+DefaultAssay(seu) <- 'SCT'
+
+
+###############################################
+
+pct_immune <- seu@assays$SCDC_onemreg@data[!rownames(seu@assays$SCDC_onemreg@data) %like any% c('Endothelial cells', 'Fibroblasts', 'Epithelial cells', 'Pericytes'), ] %>% t() %>% rowSums() %>% as.data.frame()
+pct_immune[['CD45+ Immune cells']] <- pct_immune$.
+pct_immune$. <- NULL
+
+object = seu
+group.by = NULL
+features = NULL
+images = NULL
+cols = NULL
+image.alpha = 1
+crop = TRUE
+slot = "data"
+min.cutoff = NA
+max.cutoff = NA
+cells.highlight = NULL 
+cols.highlight = c("#DE2D26", "grey50")
+facet.highlight = FALSE
+label = FALSE
+label.size = 5
+label.color = "white"
+label.box = TRUE 
+repel = FALSE
+ncol = NULL
+combine = TRUE
+pt.size.factor = 1.6 
+alpha = c(1, 1)
+stroke = 0.25
+interactive = FALSE
+do.identify = FALSE
+identify.ident = NULL
+do.hover = FALSE
+information = NULL
+{
+  images <- images %||% Images(object = object, assay = DefaultAssay(object = object))
+  data <- pct_immune
+  #features <- colnames(x = data)
+  features <- "CD45+ Immune Cells"
+  min.cutoff <- 0
+  max.cutoff <- 6
+  check.lengths <- unique(x = vapply(X = list(features, 
+    min.cutoff, max.cutoff), FUN = length, FUN.VALUE = numeric(length = 1)))
+  data <- sapply(X = 1:ncol(x = data), FUN = function(index) {
+    data.feature <- as.vector(x = data[, index])
+    min.use <- SetQuantile(cutoff = min.cutoff[index], data.feature)
+    max.use <- SetQuantile(cutoff = max.cutoff[index], data.feature)
+    data.feature[data.feature < min.use] <- min.use
+    data.feature[data.feature > max.use] <- max.use
+    return(data.feature)
+  })
+  colnames(x = data) <- features
+  rownames(x = data) <- Cells(x = object)
+  features <- colnames(x = data)
+  colnames(x = data) <- features
+  rownames(x = data) <- colnames(x = object)
+  facet.highlight <- facet.highlight && (!is.null(x = cells.highlight) && 
+    is.list(x = cells.highlight))
+  ncols <- length(x = images)
+  plots <- vector(mode = "list", length = length(x = features) * ncols)
+  for (i in 1:ncols) {
+    plot.idx <- i
+    image.idx <- ifelse(test = facet.highlight, yes = 1, no = i)
+    image.use <- object[[images[[image.idx]]]]
+    coordinates <- GetTissueCoordinates(object = image.use)
+    highlight.use <- if (facet.highlight) {
+      cells.highlight[i]
+    }
+    else {
+      cells.highlight
+    }
+    for (j in 1:length(x = features)) {
+      cols.unset <- is.factor(x = data[, features[j]]) && is.null(x = cols)
+      if (cols.unset) {
+        cols <- hue_pal()(n = length(x = levels(x = data[, features[j]])))
+        names(x = cols) <- levels(x = data[, features[j]])
+      }
+      plot <- SingleSpatialPlot(data = cbind(coordinates, 
+        data[rownames(x = coordinates), features[j], 
+          drop = FALSE]), image = image.use, image.alpha = image.alpha, 
+        col.by = features[j], cols = cols, alpha.by = if (is.null(x = group.by)) {
+          features[j]
+        }
+        else {
+          NULL
+        }, pt.alpha = if (!is.null(x = group.by)) {
+          alpha[j]
+        }
+        else {
+          NULL
+        }, geom = if (inherits(x = image.use, what = "STARmap")) {
+          "poly"
+        }
+        else {
+          "spatial"
+        }, cells.highlight = highlight.use, cols.highlight = cols.highlight, 
+        pt.size.factor = pt.size.factor, stroke = stroke, crop = crop)
+      if (is.null(x = group.by)) {
+        plot <- plot + scale_fill_gradientn(name = features[j], 
+          colours = c('blue','white', 'red')) + theme(legend.position = "top") + scale_alpha(range = alpha) + guides(alpha = "none")
+      }
+      else if (label) {
+        plot <- LabelClusters(plot = plot, id = ifelse(test = is.null(x = cells.highlight), 
+          yes = features[j], no = "highlight"), geom = if (inherits(x = image.use, 
+          what = "STARmap")) {
+          "GeomPolygon"
+        }
+        else {
+          "GeomSpatial"
+        }, repel = repel, size = label.size, color = label.color, 
+          box = label.box, position = "nearest")
+      }
+      if (j == 1 && length(x = images) > 1 && !facet.highlight) {
+        plot <- plot + ggtitle(label = images[[image.idx]]) + 
+          theme(plot.title = element_text(hjust = 0.5))
+      }
+      plots[[plot.idx]] <- plot
+      plot.idx <- plot.idx + ncols
+      if (cols.unset) {
+        cols <- NULL
+      }
+    }
+  }
+  plots
+}
+
+ggsave(filename = paste('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/', name, 'ImmuneCells.png', sep = '_'), units = 'in', width = 5, height = 7, dpi = 300)
+
+```
+
+# \*\*Visium Boxplot of LR interactions
+
+```{r}
+load('/Volumes/hqdinh2/Lab Manuscripts/HNC_Wangetal2021/CellphoneDB_heatmap/10282021_1neutrophil/Final/CellphoneDB_heatmap.RData')
+
+k17lr <- setdiff(unique(k17ko.all$lr), unique(moc2.all$lr))
+moc2lr <- setdiff(unique(moc2.all$lr), unique(k17ko.all$lr))
+combined <- intersect(unique(moc2.all$lr), unique(k17ko.all$lr))
+
+ligands <- sapply(strsplit(combined," "), `[`, 1)
+receptors <- sapply(strsplit(combined, ' '), `[`, 2)
+```
+
+## CK17-5
+
+```{r}
+obj <- ck17_5
+name <- 'ck17_5'
+
+DefaultAssay(obj) <- 'SCDC_onemreg'
+
+obj <- obj[,names(which(colSums(obj@assays$SCDC_onemreg[c('Pericytes', 'Fibroblasts', 'Endothelial cells', 'Epithelial cells'),]) < 0.95))]
+
+df <- data.frame()
+
+assay <- as.data.frame(obj@assays$SCT@data) #AverageExpression(obj, assays = 'SCT')$SCT %>% rowMeans() %>% as.data.frame()
+
+lr <- data.frame(ligands, receptors)
+
+#making an object that will hold the running total of the sum of all spots
+total_score <- 0
+for (x in 1:nrow(lr)){
+  total_score <- 0
+  # for one spot
+  for (y in 1:ncol(assay)){
+    # get ligand/receptor names
+    lig <- lr[x,1]
+    rec <- lr[x,2]
+    #get a dataframe of just that single spot with gene names
+    assay_mini <- data.frame(assay[,y])
+    rownames(assay_mini) <- rownames(assay)
+    
+    #getting the ligand receptor score
+    lrexp <- assay_mini[lr[x,1],] * assay_mini[lr[x,2],]
+    DefaultAssay(obj) <- 'SCDC_onemreg'
+    
+    #getting the percentage of immune cells in this spot
+    pct_immune <- as.numeric(1 - colSums(obj@assays$SCDC_onemreg[c('Pericytes', 'Fibroblasts', 'Endothelial cells', 'Epithelial cells'), y]))
+    
+    # scaling the ligand receptor score based on the percentage of immune cells in the spot
+    lr_scaled <- lrexp * pct_immune
+    
+    #preventing the value from becoming NA in the case that it's zero
+    if(is.na(lr_scaled)){
+      lr_scaled <- 0
+    }
+    
+    #adding the score to the total score
+    total_score <- total_score + lr_scaled
+    
+    #jump back to the top to do the rest of the spots
+  }
+    #now dividing the total score by the number of spots in the downsized object
+    total_score_norm <- total_score / as.numeric(ncol(obj))
+    
+    # adding the row to the dataframe
+    rname <- paste(lig, rec, sep = '_')
+    row <- c(rname, total_score_norm)
+    df <- rbind(df, row)
+
+}
+
+colnames(df) <- c('lr_pair', 'ck17_5_score')
+df[is.na(df)] <- 0
+df$ck17_5_score <- as.numeric(df$ck17_5_score)
+
+r1 <- df
+```
+
+## CK17-27
+
+```{r}
+obj <- ck17_27
+
+obj <- obj[,names(which(colSums(obj@assays$SCDC_onemreg[c('Pericytes', 'Fibroblasts', 'Endothelial cells', 'Epithelial cells'),]) < 0.95))]
+
+df <- data.frame()
+
+assay <- AverageExpression(obj, assays = 'SCT')$SCT %>% rowMeans() %>% as.data.frame()
+lr <- data.frame(ligands, receptors)
+
+#making an object that will hold the running total of the sum of all spots
+total_score <- 0
+for (x in 1:nrow(lr)){
+  total_score <- 0
+  # for one spot
+  for (y in 1:ncol(assay)){
+    # get ligand/receptor names
+    lig <- lr[x,1]
+    rec <- lr[x,2]
+    #get a dataframe of just that single spot with gene names
+    assay_mini <- data.frame(assay[,y])
+    rownames(assay_mini) <- rownames(assay)
+    
+    #getting the ligand receptor score
+    lrexp <- assay_mini[lr[x,1],] * assay_mini[lr[x,2],]
+    DefaultAssay(obj) <- 'SCDC_onemreg'
+    
+    #getting the percentage of immune cells in this spot
+    pct_immune <- as.numeric(1 - colSums(obj@assays$SCDC_onemreg[c('Pericytes', 'Fibroblasts', 'Endothelial cells', 'Epithelial cells'), y]))
+    
+    # scaling the ligand receptor score based on the percentage of immune cells in the spot
+    lr_scaled <- lrexp * pct_immune
+    
+    #preventing the value from becoming NA in the case that it's zero
+    if(is.na(lr_scaled)){
+      lr_scaled <- 0
+    }
+    
+    #adding the score to the total score
+    total_score <- total_score + lr_scaled
+    
+    #jump back to the top to do the rest of the spots
+  }
+    #now dividing the total score by the number of spots in the downsized object
+    total_score_norm <- total_score / as.numeric(ncol(obj))
+    
+    # adding the row to the dataframe
+    rname <- paste(lig, rec, sep = '_')
+    row <- c(rname, total_score_norm)
+    df <- rbind(df, row)
+
+}
+colnames(df) <- c('lr_pair', 'ck17_27_score')
+df[is.na(df)] <- 0
+df$ck17_27_score <- as.numeric(df$ck17_27_score)
+
+r2 <- df
+```
+
+## Merging R1 and R2
+
+```{r}
+rs <- merge(r1, r2, by = 'lr_pair')
+rownames(rs) <- rs$lr_pair
+rs$lr_pair <- NULL
+rmean <- as.data.frame(rowMeans(rs))
+rmean$group <- 'Responders'
+colnames(rmean) <- c('score', 'group')
+```
+
+## CK17-7
+
+```{r}
+obj <- ck17_7
+
+obj <- obj[,names(which(colSums(obj@assays$SCDC_onemreg[c('Pericytes', 'Fibroblasts', 'Endothelial cells', 'Epithelial cells'),]) < 0.95))]
+
+df <- data.frame()
+
+assay <- AverageExpression(obj, assays = 'SCT')$SCT %>% rowMeans() %>% as.data.frame()
+lr <- data.frame(ligands, receptors)
+
+#making an object that will hold the running total of the sum of all spots
+total_score <- 0
+for (x in 1:nrow(lr)){
+  total_score <- 0
+  # for one spot
+  for (y in 1:ncol(assay)){
+    # get ligand/receptor names
+    lig <- lr[x,1]
+    rec <- lr[x,2]
+    #get a dataframe of just that single spot with gene names
+    assay_mini <- data.frame(assay[,y])
+    rownames(assay_mini) <- rownames(assay)
+    
+    #getting the ligand receptor score
+    lrexp <- assay_mini[lr[x,1],] * assay_mini[lr[x,2],]
+    DefaultAssay(obj) <- 'SCDC_onemreg'
+    
+    #getting the percentage of immune cells in this spot
+    pct_immune <- as.numeric(1 - colSums(obj@assays$SCDC_onemreg[c('Pericytes', 'Fibroblasts', 'Endothelial cells', 'Epithelial cells'), y]))
+    
+    # scaling the ligand receptor score based on the percentage of immune cells in the spot
+    lr_scaled <- lrexp * pct_immune
+    
+    #preventing the value from becoming NA in the case that it's zero
+    if(is.na(lr_scaled)){
+      lr_scaled <- 0
+    }
+    
+    #adding the score to the total score
+    total_score <- total_score + lr_scaled
+    
+    #jump back to the top to do the rest of the spots
+  }
+    #now dividing the total score by the number of spots in the downsized object
+    total_score_norm <- total_score / as.numeric(ncol(obj))
+    
+    # adding the row to the dataframe
+    rname <- paste(lig, rec, sep = '_')
+    row <- c(rname, total_score_norm)
+    df <- rbind(df, row)
+
+}
+
+colnames(df) <- c('lr_pair', 'ck17_7_score')
+df[is.na(df)] <- 0
+df$ck17_7_score <- as.numeric(df$ck17_7_score)
+
+nr1 <- df
+```
+
+## CK17-21
+
+```{r}
+obj <- ck17_21
+
+#obj <- obj[,names(which(colSums(obj@assays$SCDC_onemreg[c('Pericytes', 'Fibroblasts', 'Endothelial cells', 'Epithelial cells'),]) < 0.95))]
+
+df <- data.frame()
+
+assay <- AverageExpression(obj, assays = 'SCT')$SCT %>% rowMeans() %>% as.data.frame()
+lr <- data.frame(ligands, receptors)
+
+#making an object that will hold the running total of the sum of all spots
+total_score <- 0
+for (x in 1:nrow(lr)){
+  total_score <- 0
+  # for one spot
+  for (y in 1:ncol(assay)){
+    # get ligand/receptor names
+    lig <- lr[x,1]
+    rec <- lr[x,2]
+    #get a dataframe of just that single spot with gene names
+    assay_mini <- data.frame(assay[,y])
+    rownames(assay_mini) <- rownames(assay)
+    
+    #getting the ligand receptor score
+    lrexp <- assay_mini[lr[x,1],] * assay_mini[lr[x,2],]
+    DefaultAssay(obj) <- 'SCDC_onemreg'
+    
+    #getting the percentage of immune cells in this spot
+    pct_immune <- as.numeric(1 - colSums(obj@assays$SCDC_onemreg[c('Pericytes', 'Fibroblasts', 'Endothelial cells', 'Epithelial cells'), y]))
+    
+    # scaling the ligand receptor score based on the percentage of immune cells in the spot
+    lr_scaled <- lrexp * pct_immune
+    
+    #preventing the value from becoming NA in the case that it's zero
+    if(is.na(lr_scaled)){
+      lr_scaled <- 0
+    }
+    
+    #adding the score to the total score
+    total_score <- total_score + lr_scaled
+    
+    #jump back to the top to do the rest of the spots
+  }
+    #now dividing the total score by the number of spots in the downsized object
+    total_score_norm <- total_score / as.numeric(ncol(obj))
+    
+    # adding the row to the dataframe
+    rname <- paste(lig, rec, sep = '_')
+    row <- c(rname, total_score_norm)
+    df <- rbind(df, row)
+
+}
+
+colnames(df) <- c('lr_pair', 'ck17_21_score')
+df[is.na(df)] <- 0
+df$ck17_21_score <- as.numeric(df$ck17_21_score)
+
+nr2 <- df
+```
+
+## Merging NR1 and NR2
+
+```{r}
+nrs <- merge(nr1, nr2, by = 'lr_pair')
+rownames(nrs) <- nrs$lr_pair
+nrs$lr_pair <- NULL
+nrmean <- as.data.frame(rowMeans(nrs))
+nrmean$group <- 'Non-Responders'
+colnames(nrmean) <- c('score', 'group')
+```
+
+## Merging R and NR objects
+
+```{r}
+all <- rbind(rmean, nrmean)
+
+# log normalize
+all$score <- log10(all$score)
+```
+
+## \*\*\*Combined Boxplot
+
+```{r}
+all$pair <- rownames(all)
+
+half <- nrow(all) / 2
+half_plus1 <- half + 1
+whole <- half * 2
+all$pair[half_plus1:whole] <- all$pair[1:half] 
+
+ggplot(all) + geom_boxplot(aes(x = group, y = score, color = group, fill = group), position = position_dodge(0.2), alpha = 0.5, outlier.color = NA) + geom_point(aes(x = group, y = score, color = group), alpha = 0.8, position = position_jitterdodge()) + geom_line(aes(x = group, y = score, group=pair), alpha = 0.3, position = position_dodge(0.2)) + theme_bw() + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(), strip.text = element_text(size = 12)) + ggrepel::geom_text_repel(data=subset(all, score > -2.5 | score < -4.5 & score > -Inf | pair == c('CXCL9_CXCR3')), max.overlaps = 4, direction = 'both', aes(group,score,label=pair))
+ggsave('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/SHARED_lr_response_boxplot_>5pctimmunecells_log10norm.png', width = 4, height = 6, units = 'in', dpi = 300)
+```
+
+## \*\*\*Individual sample boxplot
+
+```{r}
+name <- 'all_samples_individual'
+
+r1_edit <- r1
+rownames(r1_edit) <- r1_edit$lr_pair
+r1_edit$group <- 'Responder_1'
+colnames(r1_edit) <- c('pair', 'score', 'group')
+
+r2_edit <- r2
+rownames(r2_edit) <- r2_edit$lr_pair
+r2_edit$group <- 'Responder_2'
+colnames(r2_edit) <- c('pair', 'score', 'group')
+
+nr1_edit <- nr1
+rownames(nr1_edit) <- nr1_edit$lr_pair
+nr1_edit$group <- 'Non-Responder_1'
+colnames(nr1_edit) <- c('pair', 'score', 'group')
+
+nr2_edit <- nr2
+rownames(nr2_edit) <- nr2_edit$lr_pair
+nr2_edit$group <- 'Non-Responder_2'
+colnames(nr2_edit) <- c('pair', 'score', 'group')
+
+all1 <- rbind(r1_edit, r2_edit, nr1_edit, nr2_edit)
+all1$score <- log10(all1$score)
+
+
+ggplot(all1) + geom_boxplot(aes(x = group, y = score, color = group, fill = group), position = position_dodge(0.2), alpha = 0.5, outlier.color = NA) + geom_point(aes(x = group, y = score, color = group), alpha = 0.8, position = position_jitterdodge()) + theme_bw() + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(), strip.text = element_text(size = 12)) + ggrepel::geom_text_repel(data=subset(all1, score > -2.5 | score < -4.5 & score > -Inf), max.overlaps = 4, direction = 'both', aes(group,score,label=pair))
+ggsave(paste('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/', name, 'lr_response_boxplot_>5pctimmunecells_log10norm.png', sep = ''), width = 5, height = 7, units = 'in', dpi = 300)
+```
+
+# Heatmap of clustering results
+
+## Saving clustering results
+
+```{r}
+ck17_21 <- RunPCA(ck17_21, assay = "SCT", verbose = FALSE)
+ck17_21 <- FindNeighbors(ck17_21, reduction = "pca", dims = 1:30)
+ck17_21 <- FindClusters(ck17_21, verbose = FALSE)
+ck17_21 <- RunUMAP(ck17_21, reduction = "pca", dims = 1:30)
+
+p1 <- DimPlot(ck17_21, reduction = "umap", label = TRUE)
+p2 <- SpatialDimPlot(ck17_21, label = TRUE, label.size = 3)
+p1 + p2
+
+saveRDS(ck17_21, file = '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-21_analysis/ck17_21_seurat.RDS')
+
+ck17_27 <- RunPCA(ck17_27, assay = "SCT", verbose = FALSE)
+ck17_27 <- FindNeighbors(ck17_27, reduction = "pca", dims = 1:30)
+ck17_27 <- FindClusters(ck17_27, verbose = FALSE)
+ck17_27 <- RunUMAP(ck17_27, reduction = "pca", dims = 1:30)
+
+p1 <- DimPlot(ck17_27, reduction = "umap", label = TRUE)
+p2 <- SpatialDimPlot(ck17_27, label = TRUE, label.size = 3)
+p1 + p2
+```
+
+## Finding cell type distribution of each spot
+
+### CK17-5
+
+```{r}
+#test <- merge(as.data.frame(t(ck17_5@assays$SCDC@data)), as.data.frame(ck17_5$seurat_clusters), by.x = 0, by.y = 0)[,-1] 
+
+#test <- aggregate(test, by = list(test$`ck17_5$seurat_clusters`), FUN = mean)
+
+#test <- test[1:(length(test)-1)] %>% dplyr::mutate_all(function(x) as.numeric(as.character(x)))
+
+#rownames(test) <- test$Group.1
+#test <- test[,-1]
+#rowSums(test)
+
+#write.csv(test, '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-5_analysis/seurat_deconvolution_heatmap.csv')
+
+test <- read.csv('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-5_analysis/seurat_deconvolution_heatmap.csv', row.names = 1)
+
+png('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-5_analysis/seurat_deconvolution_heatmap.png', height = 8, width =12, units = 'in', res = 800)
+pheatmap::pheatmap(test, main = 'CK17-5 (responder)')
+dev.off()
+```
+
+### CK17-7
+
+```{r}
+#test <- merge(as.data.frame(t(ck17_7@assays$SCDC@data)), as.data.frame(ck17_7$seurat_clusters), by.x = 0, by.y = 0)[,-1] 
+
+#test <- aggregate(test, by = list(test$`ck17_7$seurat_clusters`), FUN = mean)
+
+#test <- test[1:(length(test)-1)] %>% dplyr::mutate_all(function(x) as.numeric(as.character(x)))
+
+#rownames(test) <- test$Group.1
+#test <- test[,-1]
+#rowSums(test)
+
+#write.csv(test, '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-7_analysis/seurat_deconvolution_heatmap_globalcluster.csv')
+
+test <- read.csv('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-7_analysis/seurat_deconvolution_heatmap_globalcluster.csv', row.names = 1)
+
+png('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-7_analysis/seurat_deconvolution_heatmap_globalcluster.png', height = 8, width =12, units = 'in', res = 800)
+pheatmap::pheatmap(test, main = 'CK17-7 (non-responder)')
+dev.off()
+```
+
+### CK17-21
+
+```{r}
+test <- merge(as.data.frame(t(ck17_21@assays$SCDC@data)), as.data.frame(ck17_21$seurat_clusters), by.x = 0, by.y = 0)[,-1] 
+
+test <- aggregate(test, by = list(test$`ck17_21$seurat_clusters`), FUN = mean)
+
+test <- test[1:(length(test)-1)] %>% dplyr::mutate_all(function(x) as.numeric(as.character(x)))
+
+rownames(test) <- test$Group.1
+test <- test[,-1]
+rowSums(test)
+
+write.csv(test, '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-21_analysis/seurat_deconvolution_heatmap.csv')
+
+test <- read.csv('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-21_analysis/seurat_deconvolution_heatmap.csv', row.names = 1)
+
+png('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-21_analysis/seurat_deconvolution_heatmap_globalcluster.png', height = 8, width =12, units = 'in', res = 800)
+pheatmap::pheatmap(test, main = 'CK17-21 (non-responder)')
+dev.off()
+
+```
+
+### CK17-27
+
+```{r}
+ck17_27 <- readRDS('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-27_analysis/ck17_27_seurat.RDS')
+
+test <- merge(as.data.frame(t(ck17_27@assays$SCDC@data)), as.data.frame(ck17_27$seurat_clusters), by.x = 0, by.y = 0)[,-1] 
+
+test <- aggregate(test, by = list(test$`ck17_27$seurat_clusters`), FUN = mean)
+
+test <- test[1:(length(test)-1)] %>% dplyr::mutate_all(function(x) as.numeric(as.character(x)))
+
+rownames(test) <- test$Group.1
+test <- test[,-1]
+rowSums(test)
+
+write.csv(test, '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-27_analysis/seurat_deconvolution_heatmap_globalcluster.csv')
+
+test <- read.csv('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-27_analysis/seurat_deconvolution_heatmap_globalcluster.csv', row.names = 1)
+
+png('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-27_analysis/seurat_deconvolution_heatmap_globalcluster.png', height = 8, width =12, units = 'in', res = 800)
+pheatmap::pheatmap(test, main = 'CK17-27 (responder)')
+dev.off()
+
+```
+
+# SPOTclean
+
+## CK17-5
+
+```{r}
+library(SpotClean)
+spatial_dir <- '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-5_outs/'
+list.files(spatial_dir)
+
+hnc_raw <- read10xRaw("/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-5_outs/")
+hnc_slide_info <- read10xSlide(tissue_csv_file=file.path(spatial_dir, "tissue_positions_list.csv"), tissue_img_file = file.path(spatial_dir,
+                                       "tissue_lowres_image.png"),
+             scale_factor_file = file.path(spatial_dir,
+                                       "scalefactors_json.json"))
+
+str(hnc_slide_info)
+
+slide_obj <- createSlide(hnc_raw, hnc_slide_info)
+slide_obj
+visualizeSlide(slide_obj)
+visualizeLabel(slide_obj,"tissue")
+metadata(slide_obj)$slide$total_counts <- colSums(hnc_raw)
+visualizeHeatmap(slide_obj,"total_counts")
+visualizeHeatmap(slide_obj,"LAMP3")
+visualizeHeatmap(slide_obj,"CXCL9")
+
+saveRDS(slide_obj, paste(spatial_dir, 'slide_obj.RDS', sep = ''))
+
+#decont_obj <- spotclean(slide_obj, maxit=10, candidate_radius = 20)
+
+decon_ck17_5_seurat <- readRDS(paste(spatial_dir, 'decon_ck17_5_seurat.RDS', sep = ''))
+
+decon_ck17_5_seurat 
+names(metadata(decon_ck17_5_seurat ))
+visualizeHeatmap(decon_ck17_5_seurat ,"LAMP3")
+visualizeHeatmap(decon_ck17_5_seurat ,"CXCL9")
+summary(metadata(decon_ck17_5_seurat )$contamination_rate)
+arcScore(slide_obj)
+decon_ck17_5_seurat <- convertToSeurat(decon_ck17_5_seurat ,image_dir = spatial_dir)
+
+saveRDS(slide_obj, paste(spatial_dir, 'decon_ck17_5_seurat.RDS', sep = ''))
+```
+
+## CK17-7
+
+```{r}
+library(SpotClean)
+spatial_dir <- '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-7_outs/'
+list.files(spatial_dir)
+
+hnc_raw <- read10xRaw("/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-7_outs/")
+hnc_slide_info <- read10xSlide(tissue_csv_file=file.path(spatial_dir, "tissue_positions_list.csv"), tissue_img_file = file.path(spatial_dir,
+                                       "tissue_lowres_image.png"),
+             scale_factor_file = file.path(spatial_dir,
+                                       "scalefactors_json.json"))
+
+str(hnc_slide_info)
+
+slide_obj <- createSlide(hnc_raw, hnc_slide_info)
+slide_obj
+visualizeSlide(slide_obj)
+visualizeLabel(slide_obj,"tissue")
+metadata(slide_obj)$slide$total_counts <- colSums(hnc_raw)
+visualizeHeatmap(slide_obj,"total_counts")
+visualizeHeatmap(slide_obj,"LAMP3")
+visualizeHeatmap(slide_obj,"CXCL9")
+
+saveRDS(slide_obj, paste(spatial_dir, 'slide_obj.RDS', sep = ''))
+
+decont_obj <- spotclean(slide_obj, maxit=10, candidate_radius = 20)
+saveRDS(slide_obj, file = paste(spatial_dir, 'decon_ck17_7_seurat.RDS', sep = ''))
+
+decon_ck17_7_seurat <- readRDS(paste(spatial_dir, 'decon_ck17_7_seurat.RDS', sep = ''))
+
+decon_ck17_7_seurat 
+names(metadata(decon_ck17_7_seurat ))
+visualizeHeatmap(decon_ck17_7_seurat ,"LAMP3")
+visualizeHeatmap(decon_ck17_7_seurat ,"CXCL9")
+summary(metadata(decon_ck17_7_seurat )$contamination_rate)
+arcScore(slide_obj)
+decon_ck17_7_seurat <- convertToSeurat(decon_ck17_7_seurat ,image_dir = spatial_dir)
+
+saveRDS(slide_obj, paste(spatial_dir, 'decon_ck17_7_seurat.RDS', sep = ''))
+```
+
+## CK17-21
+
+```{r}
+library(SpotClean)
+spatial_dir <- '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-21_outs/'
+list.files(spatial_dir)
+
+hnc_raw <- read10xRaw("/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-21_outs/")
+hnc_slide_info <- read10xSlide(tissue_csv_file=file.path(spatial_dir, "tissue_positions_list.csv"), tissue_img_file = file.path(spatial_dir,
+                                       "tissue_lowres_image.png"),
+             scale_factor_file = file.path(spatial_dir,
+                                       "scalefactors_json.json"))
+
+str(hnc_slide_info)
+
+slide_obj <- createSlide(hnc_raw, hnc_slide_info)
+slide_obj
+visualizeSlide(slide_obj)
+visualizeLabel(slide_obj,"tissue")
+metadata(slide_obj)$slide$total_counts <- colSums(hnc_raw)
+visualizeHeatmap(slide_obj,"total_counts")
+visualizeHeatmap(slide_obj,"LAMP3")
+visualizeHeatmap(slide_obj,"CXCL9")
+
+saveRDS(slide_obj, paste(spatial_dir, 'slide_obj.RDS', sep = ''))
+
+decont_obj <- spotclean(slide_obj, maxit=10, candidate_radius = 20)
+saveRDS(slide_obj, file = paste(spatial_dir, 'decon_ck17_21_seurat.RDS', sep = ''))
+
+decon_ck17_21_seurat <- readRDS(paste(spatial_dir, 'decon_ck17_21_seurat.RDS', sep = ''))
+
+decon_ck17_21_seurat 
+names(metadata(decon_ck17_21_seurat ))
+visualizeHeatmap(decon_ck17_21_seurat ,"LAMP3")
+visualizeHeatmap(decon_ck17_21_seurat ,"CXCL9")
+summary(metadata(decon_ck17_21_seurat )$contamination_rate)
+arcScore(slide_obj)
+decon_ck17_21_seurat <- convertToSeurat(decon_ck17_21_seurat ,image_dir = spatial_dir)
+
+saveRDS(slide_obj, paste(spatial_dir, 'decon_ck17_21_seurat.RDS', sep = ''))
+```
+
+## CK17-27
+
+```{r}
+library(SpotClean)
+spatial_dir <- '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-27_outs/'
+list.files(spatial_dir)
+
+hnc_raw <- read10xRaw("/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-27_outs/")
+hnc_slide_info <- read10xSlide(tissue_csv_file=file.path(spatial_dir, "tissue_positions_list.csv"), tissue_img_file = file.path(spatial_dir,
+                                       "tissue_lowres_image.png"),
+             scale_factor_file = file.path(spatial_dir,
+                                       "scalefactors_json.json"))
+
+str(hnc_slide_info)
+
+slide_obj <- createSlide(hnc_raw, hnc_slide_info)
+slide_obj
+visualizeSlide(slide_obj)
+visualizeLabel(slide_obj,"tissue")
+metadata(slide_obj)$slide$total_counts <- colSums(hnc_raw)
+visualizeHeatmap(slide_obj,"total_counts")
+visualizeHeatmap(slide_obj,"LAMP3")
+visualizeHeatmap(slide_obj,"CXCL9")
+
+saveRDS(slide_obj, paste(spatial_dir, 'slide_obj.RDS', sep = ''))
+
+decont_obj <- spotclean(slide_obj, maxit=10, candidate_radius = 20)
+saveRDS(slide_obj, file = paste(spatial_dir, 'decon_ck17_27_seurat.RDS', sep = ''))
+
+decon_ck17_27_seurat <- readRDS(paste(spatial_dir, 'decon_ck17_27_seurat.RDS', sep = ''))
+
+decon_ck17_27_seurat 
+names(metadata(decon_ck17_27_seurat ))
+visualizeHeatmap(decon_ck17_27_seurat ,"LAMP3")
+visualizeHeatmap(decon_ck17_27_seurat ,"CXCL9")
+summary(metadata(decon_ck17_27_seurat )$contamination_rate)
+arcScore(slide_obj)
+decon_ck17_27_seurat <- convertToSeurat(decon_ck17_27_seurat ,image_dir = spatial_dir)
+
+saveRDS(slide_obj, paste(spatial_dir, 'decon_ck17_27_seurat.RDS', sep = ''))
+```
+
+# SCDC Integration
+
+## Plotting
+
+```{r}
+a <- ck17_5
+b <- ck17_7
+c <- ck17_21
+d <- ck17_27
+
+DefaultAssay(a) <- 'SCDC_onemreg'
+DefaultAssay(b) <- 'SCDC_onemreg'
+DefaultAssay(c) <- 'SCDC_onemreg'
+DefaultAssay(d) <- 'SCDC_onemreg'
+
+pdf('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/seurat_deconvolution_allsubsets_onemreg.pdf', width = 10, height = 10)
+for (x in rownames(a@assays$SCDC_onemreg@data)){
+  y1 <- SpatialPlot(a, features = c(x))
+  y2 <- SpatialPlot(b, features = c(x))
+  y3 <- SpatialPlot(c, features = c(x))
+  y4 <- SpatialPlot(d, features = c(x))
+  plot(y1 + y2 + y3 + y4)
+}
+dev.off()
+```
+
+## Combining mregDCs into one
+
+```{r}
+
+combine_mregs <- function(sp){
+
+  seu.decon <- as.data.frame(sp@assays$SCDC@data)
+  rownames(seu.decon)
+  seu.decon <- mutate_all(seu.decon, function(x) as.numeric(as.character(x)))
+  seu.decon$subset <- rownames(seu.decon)
+  seu.decon$subset[seu.decon$subset %like% c('mregDC%')] <- 'mregDC'
+  seu.decon <- aggregate(. ~ subset, seu.decon, sum)
+  rownames(seu.decon) <- seu.decon$subset
+  seu.decon$subset <- NULL
+  
+  sp@assays[['SCDC_onemreg']] <- SeuratObject::CreateAssayObject(data = as.matrix(seu.decon))
+
+  if (length(sp@assays$SCDC_onemreg@key) == 0) {
+      sp@assays$SCDC_onemreg@key = "scdconemreg_"
+  }
+  
+  return(sp)
+
+}
+
+ck17_5 <- combine_mregs(ck17_5)
+ck17_7 <- combine_mregs(ck17_7)
+ck17_21 <- combine_mregs(ck17_21)
+ck17_27 <- combine_mregs(ck17_27)
+
+saveRDS(ck17_5, '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-5_analysis/cleaned_ck17_5_seurat_2022-07-08.RDS')
+saveRDS(ck17_7, '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-7_analysis/cleaned_ck17_7_seurat_2022-07-08.RDS')
+saveRDS(ck17_21, '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-21_analysis/cleaned_ck17_21_seurat_2022-07-08.RDS')
+saveRDS(ck17_27, '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-27_analysis/cleaned_ck17_27_seurat_2022-07-08.RDS')
+```
+
+## Load in
+
+```{r}
+#these are the global cluster4 markers
+markers_sc <- readRDS('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/singlecellmarkers_fordeconvolution.RDS')
+
+table(markers_sc$cluster)
+
+# these are the global cluster markers
+markers_sc <- readRDS('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/singlecellmarkers_fordeconvolution_globalcluster.RDS')
+
+#this is the combined Cillo and Kurten object
+cillo_kurten <- readRDS('/Volumes/hqdinh2/Projects/HNC_SPORE/Seurat_Objs/HNC_human/cillo_kurten.RDS')
+
+ck17_5 <- readRDS('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-5_analysis/cleaned_ck17_5_seurat_2022-07-06.RDS')
+ck17_7 <- readRDS('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-7_analysis/cleaned_ck17_7_seurat_2022-07-06.RDS')
+ck17_21 <- readRDS('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-21_analysis/cleaned_ck17_21_seurat_2022-07-06.RDS')
+ck17_27 <- readRDS('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-27_analysis/cleaned_ck17_27_seurat.RDS')
+```
+
+## CK17-5 (mreg_cxcl9_globalcluster4)
+
+```{r}
+seu <- cillo_kurten
+markers_sc <- readRDS('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/singlecellmarkers_fordeconvolution.RDS')
+metadata <- 'mreg_cxcl9_globalcluster4'
+sp <- ck17_5
+out <- '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-5_analysis/'
+
+#deconvoluting using our single cell data
+hnc_til <- seu[,!seu$tissue %like% c('PBMC', 'Tonsil')]
+table(hnc_til[[metadata]])
+
+# Filter for genes that are also present in the ST data
+markers_sc <- markers_sc[markers_sc$gene %in% rownames(sp), ]
+
+# Select top 20 genes per cluster, select top by first p-value, then absolute
+# diff in pct, then quota of pct.
+markers_sc$pct.diff <- markers_sc$pct.1 - markers_sc$pct.2
+markers_sc$log.pct.diff <- log2((markers_sc$pct.1 * 99 + 1)/(markers_sc$pct.2 * 99 + 1))
+markers_sc %>% dplyr::group_by(cluster) %>% dplyr::top_n(-100, p_val) %>%
+    dplyr::top_n(50, pct.diff) %>% dplyr::top_n(20, log.pct.diff) -> top20
+m_feats <- unique(as.character(top20$gene))
+
+eset_SC <- ExpressionSet(assayData = as.matrix(hnc_til@assays$RNA@counts[m_feats,
+    ]), phenoData = AnnotatedDataFrame(hnc_til@meta.data))
+eset_ST <- ExpressionSet(assayData = as.matrix(sp@assays$Spatial@counts[m_feats,
+    ]), phenoData = AnnotatedDataFrame(sp@meta.data))
+
+#running deconvolution
+deconvolution <- SCDC::SCDC_prop(bulk.eset = eset_ST, sc.eset = eset_SC, ct.varname = metadata, ct.sub = as.character(unique(eset_SC[['metadata']])))
+
+# now adding deconvolution output and adding it to the Seurat object as a new assay
+sp@assays[['SCDC']] <- SeuratObject::CreateAssayObject(data = t(deconvolution$prop.est.mvw))
+
+if (length(sp@assays$SCDC@key) == 0) {
+    sp@assays$SCDC@key = "scdc_"
+}
+
+DefaultAssay(sp) <- 'SCDC'
+
+sp <- Seurat::FindSpatiallyVariableFeatures(sp, assay = "SCDC", selection.method = "markvariogram", features = rownames(sp), r.metric = 5, slot = "data")
+top.clusters <- head(SpatiallyVariableFeatures(sp), 4)
+SpatialPlot(object = sp, features = top.clusters, ncol = 2)
+
+Seurat::SpatialPlot(sp, feature = rownames(sp@assays$SCDC@data))
+ggsave(paste(out, 'seurat_allsubset_proportions.png'), width = 3000, height = 1200, units = 'px')
+
+saveRDS(ck17_5, '/Volumes/hdlab/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-5_analysis/ck17_5_seurat.RDS')
+```
+
+## CK17-5 (globalcluster)
+
+```{r}
+markers_sc <- readRDS('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/singlecellmarkers_fordeconvolution_globalcluster.RDS')
+
+#deconvoluting using our single cell data
+hnc_til <- cillo_kurten[,!cillo_kurten$tissue %like% c('PBMC', 'Tonsil')]
+hnc_til <- hnc_til[,!hnc_til$mreg_cxcl9_globalcluster4 %in% c('KRT17+', 'Immature_Myeloids', 'Macrophages', 'DCs', 'pDC', 'CD4', 'CD8')]
+
+Idents(hnc_til) <- hnc_til$decon.clusters
+
+DefaultAssay(ck17_5) <- 'SCT'
+
+# Filter for genes that are also present in the ST data
+markers_sc <- markers_sc[markers_sc$gene %in% rownames(ck17_5), ]
+
+# Select top 20 genes per cluster, select top by first p-value, then absolute
+# diff in pct, then quota of pct.
+markers_sc$pct.diff <- markers_sc$pct.1 - markers_sc$pct.2
+markers_sc$log.pct.diff <- log2((markers_sc$pct.1 * 99 + 1)/(markers_sc$pct.2 * 99 + 1))
+markers_sc %>% dplyr::group_by(cluster) %>% dplyr::top_n(-100, p_val) %>%
+    dplyr::top_n(50, pct.diff) %>% dplyr::top_n(20, log.pct.diff) -> top20
+m_feats <- unique(as.character(top20$gene))
+
+eset_SC <- ExpressionSet(assayData = as.matrix(hnc_til@assays$RNA@counts[m_feats,
+    ]), phenoData = AnnotatedDataFrame(hnc_til@meta.data))
+eset_ST <- ExpressionSet(assayData = as.matrix(ck17_5@assays$Spatial@counts[m_feats,
+    ]), phenoData = AnnotatedDataFrame(ck17_5@meta.data))
+
+#running deconvolution
+deconvolution <- SCDC::SCDC_prop(bulk.eset = eset_ST, sc.eset = eset_SC, ct.varname = "decon.clusters", ct.sub = as.character(unique(eset_SC$decon.clusters)))
+
+# now adding deconvolution output and adding it to the Seurat object as a new assay
+ck17_5@assays[['SCDC_global']] <- SeuratObject::CreateAssayObject(data = t(deconvolution$prop.est.mvw))
+
+if (length(ck17_5@assays$SCDC_global@key) == 0) {
+    ck17_5@assays$SCDC_global@key = "scdc_global_"
+}
+
+DefaultAssay(ck17_5) <- 'SCDC_global'
+ck17_5_test <- ck17_5
+
+ck17_5_test <- Seurat::FindSpatiallyVariableFeatures(ck17_5_test, assay = "SCDC_global", selection.method = "markvariogram", features = rownames(ck17_5_test), r.metric = 5, slot = "data")
+
+Seurat::SpatialPlot(ck17_5_test, features = c('DC', 'CD4', 'CD8', 'Epithelial cells'))
+
+saveRDS(ck17_5_test, '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-5_analysis/cleaned_ck17_5_seurat_2022-07-06.RDS')
+```
+
+## CK17-7 (globalcluster4)
+
+```{r}
+#deconvoluting using our single cell data
+hnc_til <- hnc[,hnc$tissue == 'TIL']
+hnc_til <- hnc_til[,!hnc_til$mreg_cxcl9_globalcluster4 %in% c('KRT17+', 'Immature_Myeloids', 'Macrophages', 'DCs', 'pDC', 'CD4', 'CD8')]
+
+# Filter for genes that are also present in the ST data
+markers_sc <- markers_sc[markers_sc$gene %in% rownames(ck17_7), ]
+
+# Select top 20 genes per cluster, select top by first p-value, then absolute
+# diff in pct, then quota of pct.
+markers_sc$pct.diff <- markers_sc$pct.1 - markers_sc$pct.2
+markers_sc$log.pct.diff <- log2((markers_sc$pct.1 * 99 + 1)/(markers_sc$pct.2 * 99 + 1))
+markers_sc %>% dplyr::group_by(cluster) %>% dplyr::top_n(-100, p_val) %>%
+    dplyr::top_n(50, pct.diff) %>% dplyr::top_n(20, log.pct.diff) -> top20
+m_feats <- unique(as.character(top20$gene))
+
+eset_SC <- ExpressionSet(assayData = as.matrix(hnc_til@assays$RNA@counts[m_feats,
+    ]), phenoData = AnnotatedDataFrame(hnc_til@meta.data))
+eset_ST <- ExpressionSet(assayData = as.matrix(ck17_7@assays$Spatial@counts[m_feats,
+    ]), phenoData = AnnotatedDataFrame(ck17_7@meta.data))
+
+#running deconvolution
+deconvolution <- SCDC::SCDC_prop(bulk.eset = eset_ST, sc.eset = eset_SC, ct.varname = "mreg_cxcl9_globalcluster4", ct.sub = as.character(unique(eset_SC$mreg_cxcl9_globalcluster4)))
+
+# now adding deconvolution output and adding it to the Seurat object as a new assay
+ck17_7@assays[['SCDC']] <- SeuratObject::CreateAssayObject(data = t(deconvolution$prop.est.mvw))
+
+if (length(ck17_7@assays$SCDC@key) == 0) {
+    ck17_7@assays$SCDC@key = "scdc_"
+}
+
+DefaultAssay(ck17_7) <- 'SCDC'
+ck17_7_test <- ck17_7
+
+ck17_7_test <- Seurat::FindSpatiallyVariableFeatures(ck17_7_test, assay = "SCDC", selection.method = "markvariogram", features = rownames(ck17_7_test), r.metric = 5, slot = "data")
+
+Seurat::SpatialPlot(ck17_7_test, feature = c('mregDC-CXCL9lo', 'Mac-C1QA', 'mregDC-CXCL9hi'))
+ggsave('/Volumes/hdlab/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-5_analysis/ck17_7_mregDC_MacC1QA_proportions.png', width = 3000, height = 1200, units = 'px')
+
+Seurat::SpatialPlot(ck17_7_test, feature = c('CD4-1', 'CD8-2', 'Treg-1'))
+ggsave('/Volumes/hdlab/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-5_analysis/ck17_7_CD41_CD82_Treg1_proportions.png', width = 3000, height = 1200, units = 'px')
+
+saveRDS(ck17_7, '/Volumes/hdlab/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-7_analysis/ck17_7_seurat.RDS')
+
+```
+
+## CK17-7 (globalcluster)
+
+```{r}
+#deconvoluting using our single cell data
+hnc_til <- cillo_kurten[,cillo_kurten$tissue == 'TIL']
+hnc_til <- hnc_til[,!hnc_til$mreg_cxcl9_globalcluster4 %in% c('KRT17+', 'Immature_Myeloids', 'Macrophages', 'DCs', 'pDC', 'CD4', 'CD8')]
+
+Idents(hnc_til) <- hnc_til$decon.clusters
+
+DefaultAssay(ck17_7) <- 'SCT'
+
+# Filter for genes that are also present in the ST data
+markers_sc <- markers_sc[markers_sc$gene %in% rownames(ck17_7), ]
+
+# Select top 20 genes per cluster, select top by first p-value, then absolute
+# diff in pct, then quota of pct.
+markers_sc$pct.diff <- markers_sc$pct.1 - markers_sc$pct.2
+markers_sc$log.pct.diff <- log2((markers_sc$pct.1 * 99 + 1)/(markers_sc$pct.2 * 99 + 1))
+markers_sc %>% dplyr::group_by(cluster) %>% dplyr::top_n(-100, p_val) %>%
+    dplyr::top_n(50, pct.diff) %>% dplyr::top_n(20, log.pct.diff) -> top20
+m_feats <- unique(as.character(top20$gene))
+
+eset_SC <- ExpressionSet(assayData = as.matrix(hnc_til@assays$RNA@counts[m_feats,
+    ]), phenoData = AnnotatedDataFrame(hnc_til@meta.data))
+eset_ST <- ExpressionSet(assayData = as.matrix(ck17_7@assays$Spatial@counts[m_feats,
+    ]), phenoData = AnnotatedDataFrame(ck17_7@meta.data))
+
+#running deconvolution
+deconvolution <- SCDC::SCDC_prop(bulk.eset = eset_ST, sc.eset = eset_SC, ct.varname = "decon.clusters", ct.sub = as.character(unique(eset_SC$decon.clusters)))
+
+# now adding deconvolution output and adding it to the Seurat object as a new assay
+ck17_7@assays[['SCDC_global']] <- SeuratObject::CreateAssayObject(data = t(deconvolution$prop.est.mvw))
+
+if (length(ck17_7@assays$SCDC_global@key) == 0) {
+    ck17_7@assays$SCDC_global@key = "scdc_global"
+}
+
+Seurat::DefaultAssay(ck17_7) <- 'SCDC_global'
+ck17_7_test <- ck17_7
+
+ck17_7_test <- Seurat::FindSpatiallyVariableFeatures(ck17_7_test, assay = "SCDC_global", selection.method = "markvariogram", features = rownames(ck17_7_test), r.metric = 5, slot = "data")
+
+Seurat::SpatialPlot(ck17_7_test, features = c('DC', 'CD4', 'CD8'))
+ggsave('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-7_analysis/seurat_ck17_7_DC_CD8_CD4_proportions.png', width = 3000, height = 1200, units = 'px')
+
+saveRDS(ck17_7_test, '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-7_analysis/cleaned_ck17_7_seurat_2022-07-06.RDS')
+```
+
+## CK17-21 (globalcluster4)
+
+```{r}
+#deconvoluting using our single cell data
+hnc_til <- hnc[,hnc$tissue == 'TIL']
+hnc_til <- hnc_til[,!hnc_til$mreg_cxcl9_globalcluster4 %in% c('KRT17+', 'Immature_Myeloids', 'Macrophages', 'DCs', 'pDC', 'CD4', 'CD8')]
+
+
+markers_sc <- readRDS('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/singlecellmarkers_fordeconvolution.RDS')
+
+# Filter for genes that are also present in the ST data
+markers_sc <- markers_sc[markers_sc$gene %in% rownames(ck17_21), ]
+
+# Select top 20 genes per cluster, select top by first p-value, then absolute
+# diff in pct, then quota of pct.
+markers_sc$pct.diff <- markers_sc$pct.1 - markers_sc$pct.2
+markers_sc$log.pct.diff <- log2((markers_sc$pct.1 * 99 + 1)/(markers_sc$pct.2 * 99 + 1))
+markers_sc %>% dplyr::group_by(cluster) %>% dplyr::top_n(-100, p_val) %>%
+    dplyr::top_n(50, pct.diff) %>% dplyr::top_n(20, log.pct.diff) -> top20
+m_feats <- unique(as.character(top20$gene))
+
+eset_SC <- ExpressionSet(assayData = as.matrix(hnc_til@assays$RNA@counts[m_feats,
+    ]), phenoData = AnnotatedDataFrame(hnc_til@meta.data))
+eset_ST <- ExpressionSet(assayData = as.matrix(ck17_21@assays$Spatial@counts[m_feats,
+    ]), phenoData = AnnotatedDataFrame(ck17_21@meta.data))
+
+#running deconvolution
+deconvolution <- SCDC::SCDC_prop(bulk.eset = eset_ST, sc.eset = eset_SC, ct.varname = "mreg_cxcl9_globalcluster4", ct.sub = as.character(unique(eset_SC$mreg_cxcl9_globalcluster4)))
+
+# now adding deconvolution output and adding it to the Seurat object as a new assay
+ck17_21@assays[['SCDC']] <- SeuratObject::CreateAssayObject(data = t(deconvolution$prop.est.mvw))
+
+if (length(ck17_21@assays$SCDC@key) == 0) {
+    ck17_21@assays$SCDC@key = "scdc_"
+}
+
+DefaultAssay(ck17_21) <- 'SCDC'
+ck17_21_test <- ck17_21
+
+ck17_21_test <- Seurat::FindSpatiallyVariableFeatures(ck17_21_test, assay = "SCDC", selection.method = "markvariogram", features = rownames(ck17_21_test), r.metric = 5, slot = "data")
+
+Seurat::SpatialPlot(ck17_21_test, feature = c('mregDC-CXCL9lo', 'Mac-C1QA', 'mregDC-CXCL9hi'))
+ggsave('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-21_analysis/ck17_21_mregDC_MacC1QA_proportions.png', width = 3000, height = 1200, units = 'px')
+
+Seurat::SpatialPlot(ck17_21_test, feature = c('CD4-1', 'CD8-2', 'Treg-1'))
+ggsave('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-21_analysis/ck17_21_CD41_CD82_Treg1_proportions.png', width = 3000, height = 1200, units = 'px')
+
+saveRDS(ck17_21, '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-21_analysis/ck17_21_seurat.RDS')
+```
+
+## CK17-21 (globalcluster)
+
+```{r}
+
+markers_sc <- readRDS('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/singlecellmarkers_fordeconvolution_globalcluster.RDS')
+
+# Filter for genes that are also present in the ST data
+markers_sc <- markers_sc[markers_sc$gene %in% rownames(ck17_21), ]
+
+DefaultAssay(ck17_21) <- 'SCT'
+
+# Select top 20 genes per cluster, select top by first p-value, then absolute
+# diff in pct, then quota of pct.
+markers_sc$pct.diff <- markers_sc$pct.1 - markers_sc$pct.2
+markers_sc$log.pct.diff <- log2((markers_sc$pct.1 * 99 + 1)/(markers_sc$pct.2 * 99 + 1))
+markers_sc %>% dplyr::group_by(cluster) %>% dplyr::top_n(-100, p_val) %>%
+    dplyr::top_n(50, pct.diff) %>% dplyr::top_n(20, log.pct.diff) -> top20
+m_feats <- unique(as.character(top20$gene))
+
+eset_SC <- ExpressionSet(assayData = as.matrix(hnc_til@assays$RNA@counts[m_feats,
+    ]), phenoData = AnnotatedDataFrame(hnc_til@meta.data))
+eset_ST <- ExpressionSet(assayData = as.matrix(ck17_21@assays$Spatial@counts[m_feats,
+    ]), phenoData = AnnotatedDataFrame(ck17_21@meta.data))
+
+#running deconvolution
+deconvolution <- SCDC::SCDC_prop(bulk.eset = eset_ST, sc.eset = eset_SC, ct.varname = "decon.clusters", ct.sub = as.character(unique(eset_SC$decon.clusters)))
+
+# now adding deconvolution output and adding it to the Seurat object as a new assay
+ck17_21@assays[['SCDC_global']] <- SeuratObject::CreateAssayObject(data = t(deconvolution$prop.est.mvw))
+
+if (length(ck17_21@assays$SCDC_global@key) == 0) {
+    ck17_21@assays$SCDC_global@key = "scdc_global_"
+}
+
+Seurat::DefaultAssay(ck17_21) <- 'SCDC_global'
+ck17_21_test <- ck17_21
+
+ck17_21_test <- Seurat::FindSpatiallyVariableFeatures(ck17_21_test, assay = "SCDC_global", selection.method = "markvariogram", features = rownames(ck17_21_test), r.metric = 5, slot = "data")
+
+Seurat::SpatialPlot(ck17_21_test, features = c('DC', 'CD4', 'CD8'))
+ggsave('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-21_analysis/seurat_ck17_21_DC_CD8_CD4_proportions.png', width = 3000, height = 1200, units = 'px')
+
+saveRDS(ck17_21_test, '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-21_analysis/cleaned_ck17_21_seurat_2022-07-06.RDS')
+```
+
+## CK17-27 (globalcluster4)
+
+```{r}
+#deconvoluting using our single cell data
+hnc_til <- hnc[,hnc$tissue == 'TIL']
+hnc_til <- hnc_til[,!hnc_til$mreg_cxcl9_globalcluster4 %in% c('KRT17+', 'Immature_Myeloids', 'Macrophages', 'DCs', 'pDC', 'CD4', 'CD8')]
+
+#markers_sc <- Seurat::FindAllMarkers(hnc_til, only.pos = TRUE, logfc.threshold = 0.1,
+    #test.use = "wilcox", min.pct = 0.05, min.diff.pct = 0.1, max.cells.per.ident = 200,
+    #return.thresh = 0.05, assay = "RNA")
+
+#saveRDS(markers_sc, '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/singlecellmarkers_fordeconvolution.RDS')
+
+markers_sc <- readRDS('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/singlecellmarkers_fordeconvolution.RDS')
+
+DefaultAssay(ck17_27) <- 'SCT'
+
+# Filter for genes that are also present in the ST data
+markers_sc <- markers_sc[markers_sc$gene %in% rownames(ck17_27), ]
+
+# Select top 20 genes per cluster, select top by first p-value, then absolute
+# diff in pct, then quota of pct.
+markers_sc$pct.diff <- markers_sc$pct.1 - markers_sc$pct.2
+markers_sc$log.pct.diff <- log2((markers_sc$pct.1 * 99 + 1)/(markers_sc$pct.2 * 99 + 1))
+markers_sc %>% dplyr::group_by(cluster) %>% dplyr::top_n(-100, p_val) %>%
+    dplyr::top_n(50, pct.diff) %>% dplyr::top_n(20, log.pct.diff) -> top20
+m_feats <- unique(as.character(top20$gene))
+
+eset_SC <- ExpressionSet(assayData = as.matrix(hnc_til@assays$RNA@counts[m_feats,
+    ]), phenoData = AnnotatedDataFrame(hnc_til@meta.data))
+eset_ST <- ExpressionSet(assayData = as.matrix(ck17_27@assays$Spatial@counts[m_feats,
+    ]), phenoData = AnnotatedDataFrame(ck17_27@meta.data))
+
+#running deconvolution
+deconvolution <- SCDC::SCDC_prop(bulk.eset = eset_ST, sc.eset = eset_SC, ct.varname = "mreg_cxcl9_globalcluster4", ct.sub = as.character(unique(eset_SC$mreg_cxcl9_globalcluster4)))
+
+# now adding deconvolution output and adding it to the Seurat object as a new assay
+ck17_27@assays[['SCDC']] <- SeuratObject::CreateAssayObject(data = t(deconvolution$prop.est.mvw))
+
+if (length(ck17_27@assays$SCDC@key) == 0) {
+    ck17_27@assays$SCDC@key = "scdc_"
+}
+
+DefaultAssay(ck17_27) <- 'SCDC'
+ck17_27_test <- ck17_27
+
+ck17_27_test <- Seurat::FindSpatiallyVariableFeatures(ck17_27_test, assay = "SCDC", selection.method = "markvariogram", features = rownames(ck17_27_test), r.metric = 5, slot = "data")
+
+Seurat::SpatialPlot(ck17_27_test, feature = c('mregDC-CXCL9lo', 'Mac-C1QA', 'mregDC-CXCL9hi'))
+ggsave('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-27_analysis/ck17_27_mregDC_MacC1QA_proportions.png', width = 3000, height = 1200, units = 'px')
+
+Seurat::SpatialPlot(ck17_27_test, feature = c('CD4-1', 'CD8-2', 'Treg-1'))
+ggsave('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-27_analysis/ck17_27_CD41_CD82_Treg1_proportions.png', width = 3000, height = 1200, units = 'px')
+
+saveRDS(ck17_27, '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-27_analysis/ck17_27_seurat.RDS')
+```
+
+## CK17-27 (globalcluster)
+
+```{r}
+markers_sc <- readRDS('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/singlecellmarkers_fordeconvolution_globalcluster.RDS')
+
+DefaultAssay(ck17_27) <- 'SCT'
+
+# Filter for genes that are also present in the ST data
+markers_sc <- markers_sc[markers_sc$gene %in% rownames(ck17_27), ]
+
+# Select top 20 genes per cluster, select top by first p-value, then absolute
+# diff in pct, then quota of pct.
+markers_sc$pct.diff <- markers_sc$pct.1 - markers_sc$pct.2
+markers_sc$log.pct.diff <- log2((markers_sc$pct.1 * 99 + 1)/(markers_sc$pct.2 * 99 + 1))
+markers_sc %>% dplyr::group_by(cluster) %>% dplyr::top_n(-100, p_val) %>%
+    dplyr::top_n(50, pct.diff) %>% dplyr::top_n(20, log.pct.diff) -> top20
+m_feats <- unique(as.character(top20$gene))
+
+eset_SC <- ExpressionSet(assayData = as.matrix(hnc_til@assays$RNA@counts[m_feats,
+    ]), phenoData = AnnotatedDataFrame(hnc_til@meta.data))
+eset_ST <- ExpressionSet(assayData = as.matrix(ck17_27@assays$Spatial@counts[m_feats,
+    ]), phenoData = AnnotatedDataFrame(ck17_27@meta.data))
+
+#running deconvolution
+deconvolution <- SCDC::SCDC_prop(bulk.eset = eset_ST, sc.eset = eset_SC, ct.varname = "decon.clusters", ct.sub = as.character(unique(eset_SC$decon.clusters)))
+
+# now adding deconvolution output and adding it to the Seurat object as a new assay
+ck17_27@assays[['SCDC_global']] <- SeuratObject::CreateAssayObject(data = t(deconvolution$prop.est.mvw))
+
+if (length(ck17_27@assays$SCDC_global@key) == 0) {
+    ck17_27@assays$SCDC_global@key = "scdc_global_"
+}
+
+Seurat::DefaultAssay(ck17_27) <- 'SCDC_global'
+ck17_27_test <- ck17_27
+
+ck17_27_test <- Seurat::FindSpatiallyVariableFeatures(ck17_27_test, assay = "SCDC_global", selection.method = "markvariogram", features = rownames(ck17_27_test), r.metric = 5, slot = "data")
+
+Seurat::SpatialPlot(ck17_27_test, features = c('DC', 'CD4', 'CD8'))
+ggsave('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-27_analysis/seurat_ck17_27_DC_CD8_CD4_proportions.png', width = 3000, height = 1200, units = 'px')
+
+saveRDS(ck17_27_test, '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-27_analysis/cleaned_ck17_27_seurat_2022-07-06.RDS')
+```
+
+# SPOTlight
+
+## Load packages
+
+```{r}
+library(ggplot2)
+library(SPOTlight)
+library(SingleCellExperiment)
+library(Seurat)
+library(SpatialExperiment)
+library(scater)
+library(scran)
+library(DescTools)
+library(NMF)
+```
+
+## Load Spatial Data
+
+```{r}
+ck17_5 <- readRDS('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-5_analysis/cleaned_ck17_5_seurat_2022-07-06.RDS')
+ck17_7 <- readRDS('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-7_analysis/cleaned_ck17_7_seurat_2022-07-06.RDS')
+ck17_21 <- readRDS('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-21_analysis/cleaned_ck17_21_seurat_2022-07-06.RDS')
+ck17_27 <- readRDS('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-27_analysis/cleaned_ck17_27_seurat.RDS')
+
+kurten_til <- readRDS('/Volumes/hqdinh2/Projects/HNC_SPORE/Seurat_Objs/HNC_human/cillo_kurten_til.RDS')
+
+#markers_sc <- FindAllMarkers(kurten_til, only.pos = TRUE, logfc.threshold = 0.1,test.use = "wilcox", min.pct = 0.05, min.diff.pct = 0.1, max.cells.per.ident = 200,return.thresh = 0.05, assay = "RNA")
+
+#markers_sc <- markers_sc[markers_sc$p_val_adj < 0.01,]
+#saveRDS(markers_sc, '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/singlecellmarkers_fordeconvolution_globalcluster.RDS')
+
+markers_sc <- readRDS('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/singlecellmarkers_fordeconvolution_globalcluster.RDS')
+```
+
+## CK17-5 SPOTlight decomposition
+
+```{r}
+set.seed(123)
+
+## Loading the data
+spe <- ck17_5
+sce <- kurten_til[, sample(colnames(kurten_til), size = 10000, replace=F)]
+
+dec <- markers_sc[order(markers_sc$avg_log2FC, decreasing = TRUE), ][1:3000,]
+table(dec$cluster)
+
+mgs <- scoreMarkers(sce@assays$RNA@data, groups = sce$decon.clusters)
+mgs_fil <- lapply(names(mgs), function(i) {
+    x <- mgs[[i]]
+    # Filter and keep relevant marker genes, those with AUC > 0.8
+    x <- x[x$mean.AUC > 0.8, ]
+    # Sort the genes from highest to lowest weight
+    x <- x[order(x$mean.AUC, decreasing = TRUE), ]
+    # Add gene and cluster id to the dataframe
+    x$gene <- rownames(x)
+    x$cluster <- i
+    data.frame(x)
+})
+mgs_df <- do.call(rbind, mgs_fil)
+# split cell indices by identity
+idx <- split(seq(ncol(sce)), sce$decon.clusters)
+# downsample to at most 20 per identity & subset
+# We are using 5 here to speed up the process but set to 75-100 for your real life analysis
+n_cells <- 100
+cs_keep <- lapply(idx, function(i) {
+    n <- length(i)
+    if (n < n_cells)
+        n_cells <- n
+    sample(i, n_cells)
+})
+sce <- sce[, unlist(cs_keep)]
+## Deconvolution
+res <- SPOTlight(
+    x = sce@assays$RNA@data,
+    y = spe@assays$Spatial@counts,
+    groups = as.character(sce$decon.clusters),
+    mgs = mgs_df,
+    hvg = dec$gene,
+    weight_id = "mean.AUC",
+    group_id = "cluster",
+    gene_id = "gene")
+
+# Extract deconvolution matrix
+head(mat <- res$mat)[, seq_len(3)]
+# Extract NMF model fit
+mod <- res$NMF
+
+# Visualization
+## Topic profiles
+plotTopicProfiles(x = mod, y = sce$decon.clusters, facet = FALSE, min_prop = 0.01,ncol = 1) + theme(aspect.ratio = 1)
+
+library(NMF)
+# This can be dynamically visualized with DT as shown below
+DT::datatable(sign, fillContainer = TRUE, filter = "top")
+
+## Scatterpie
+#We can also visualize the cell type proportions as sections of a pie chart for
+#each spot. You can modify the colors as you would a standard `r CRANpkg("ggplot2")`.
+ct <- colnames(mat)
+mat[mat < 0.1] <- 0
+
+# Define color palette
+# (here we use 'paletteMartin' from the 'colorBlindness' package)
+paletteMartin <- c(
+    "#000000", "#004949", "#009292", "#FF6DB6", "#FFB6DB",
+    "#490092", "#006DDB", "#B66DFF", "#6DB6FF", "#B6DBFF",
+    "#920000", "#924900", "#DB6D00", "#24FF24", "#FFFF6D")
+pal <- colorRampPalette(paletteMartin)(length(ct))
+names(pal) <- ct
+
+
+a <- SPOTlight::plotSpatialScatterpie(x = spe, y = mat,cell_types = c('DC', 'CD8', 'CD4'),img = FALSE, scatterpie_alpha = 1,pie_scale = 0.4,degrees = 90,axis = "h") +scale_fill_manual(values = pal,breaks = names(pal))
+
+b <- SPOTlight::plotSpatialScatterpie(x = spe, y = mat,cell_types = c('Fibroblasts', 'Epithelial cells'),img = FALSE, scatterpie_alpha = 1,pie_scale = 0.4,degrees = 90,axis = "h") +scale_fill_manual(values = pal,breaks = names(pal))
+
+png('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-5_analysis/SPOTlight_scatterpie_DC_T_fibro_epi.png', width = 10, height = 7, units = 'in', res = 600)
+
+a + b
+
+dev.off()
+
+save(res, mgs_df, dec, sce, spe, mat, mod, ct, pal, file = '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-5_analysis/all_spotlight_files.RData')
+
+load('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-5_analysis/all_spotlight_files.RData')
+
+ck17_5@assays[['SPOTlight']] <- SeuratObject::CreateAssayObject(data = t(mat))
+
+if (length(ck17_5@assays$SPOTlight@key) == 0) {
+    ck17_5@assays$SPOTlight@key = "spotlight_"
+}
+
+Seurat::DefaultAssay(ck17_5) <- 'SCDC'
+
+Seurat::SpatialFeaturePlot(ck17_5, features = c('DC', 'CD4', 'CD8'))
+
+ggsave('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-5_analysis/seurat_DC_CD4_CD8.png', width = 10, height = 8, units = 'in', dpi = 300)
+
+saveRDS(ck17_5, file = '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-5_analysis/cleaned_ck17_5_seurat_2022-07-06.RDS')
+```
+
+## CK17-7 SPOTlight decomposition
+
+```{r}
+set.seed(123)
+
+## Loading the data
+spe <- ck17_7
+sce <- kurten_til[, sample(colnames(kurten_til), size = 10000, replace=F)]
+
+dec <- markers_sc[order(markers_sc$avg_log2FC, decreasing = TRUE), ][1:3000,]
+table(dec$cluster)
+
+mgs <- scoreMarkers(sce@assays$RNA@data, groups = sce$decon.clusters)
+mgs_fil <- lapply(names(mgs), function(i) {
+    x <- mgs[[i]]
+    # Filter and keep relevant marker genes, those with AUC > 0.8
+    x <- x[x$mean.AUC > 0.8, ]
+    # Sort the genes from highest to lowest weight
+    x <- x[order(x$mean.AUC, decreasing = TRUE), ]
+    # Add gene and cluster id to the dataframe
+    x$gene <- rownames(x)
+    x$cluster <- i
+    data.frame(x)
+})
+mgs_df <- do.call(rbind, mgs_fil)
+# split cell indices by identity
+idx <- split(seq(ncol(sce)), sce$decon.clusters)
+# downsample to at most 20 per identity & subset
+# We are using 5 here to speed up the process but set to 75-100 for your real life analysis
+n_cells <- 100
+cs_keep <- lapply(idx, function(i) {
+    n <- length(i)
+    if (n < n_cells)
+        n_cells <- n
+    sample(i, n_cells)
+})
+sce <- sce[, unlist(cs_keep)]
+## Deconvolution
+res <- SPOTlight(
+    x = sce@assays$RNA@data,
+    y = spe@assays$Spatial@counts,
+    groups = as.character(sce$decon.clusters),
+    mgs = mgs_df,
+    hvg = dec$gene,
+    weight_id = "mean.AUC",
+    group_id = "cluster",
+    gene_id = "gene")
+
+# Extract deconvolution matrix
+head(mat <- res$mat)[, seq_len(3)]
+# Extract NMF model fit
+mod <- res$NMF
+
+# Visualization
+## Topic profiles
+plotTopicProfiles(x = mod, y = sce$decon.clusters, facet = FALSE, min_prop = 0.01,ncol = 1) + theme(aspect.ratio = 1)
+
+library(NMF)
+# This can be dynamically visualized with DT as shown below
+DT::datatable(sign, fillContainer = TRUE, filter = "top")
+
+## Scatterpie
+#We can also visualize the cell type proportions as sections of a pie chart for
+#each spot. You can modify the colors as you would a standard `r CRANpkg("ggplot2")`.
+ct <- colnames(mat)
+mat[mat < 0.1] <- 0
+
+# Define color palette
+# (here we use 'paletteMartin' from the 'colorBlindness' package)
+paletteMartin <- c(
+    "#000000", "#004949", "#009292", "#FF6DB6", "#FFB6DB",
+    "#490092", "#006DDB", "#B66DFF", "#6DB6FF", "#B6DBFF",
+    "#920000", "#924900", "#DB6D00", "#24FF24", "#FFFF6D")
+pal <- colorRampPalette(paletteMartin)(length(ct))
+names(pal) <- ct
+
+load('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-7_analysis/all_spotlight_files.RData')
+
+a <- SPOTlight::plotSpatialScatterpie(x = spe, y = mat,cell_types = c('DC', 'CD8', 'CD4'),img = FALSE, scatterpie_alpha = 1,pie_scale = 0.4,degrees = 90,axis = "h") +scale_fill_manual(values = pal,breaks = names(pal))
+
+b <- SPOTlight::plotSpatialScatterpie(x = spe, y = mat,cell_types = c('Fibroblasts', 'Epithelial cells'),img = FALSE, scatterpie_alpha = 1,pie_scale = 0.4,degrees = 90,axis = "h") +scale_fill_manual(values = pal,breaks = names(pal))
+
+png('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-7_analysis/SPOTlight_scatterpie_DC_T_fibro_epi.png', width = 10, height = 7, units = 'in', res = 600)
+
+a + b
+
+dev.off()
+
+save(res, mgs_df, dec, sce, spe, mat, mod, ct, pal, file = '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-7_analysis/all_spotlight_files.RData')
+
+load('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-7_analysis/all_spotlight_files.RData')
+
+ck17_7@assays[['SPOTlight']] <- SeuratObject::CreateAssayObject(data = t(mat))
+
+if (length(ck17_7@assays$SPOTlight@key) == 0) {
+    ck17_7@assays$SPOTlight@key = "spotlight_"
+}
+
+Seurat::DefaultAssay(ck17_7) <- 'SPOTlight'
+
+Seurat::SpatialFeaturePlot(ck17_7, features = c('DC', 'CD4', 'CD8'))
+
+ggsave('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-7_analysis/spotlight_DC_CD4_CD8.png', width = 10, height = 8, units = 'in', dpi = 300)
+
+saveRDS(ck17_7, file = '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-7_analysis/cleaned_ck17_7_seurat_2022-07-06.RDS')
+```
+
+## CK17-21 SPOTlight decomposition
+
+```{r}
+set.seed(123)
+
+## Loading the data
+spe <- ck17_21
+sce <- kurten_til[, sample(colnames(kurten_til), size = 10000, replace=F)]
+
+dec <- markers_sc[order(markers_sc$avg_log2FC, decreasing = TRUE), ][1:3000,]
+table(dec$cluster)
+
+mgs <- scoreMarkers(sce@assays$RNA@data, groups = sce$decon.clusters)
+mgs_fil <- lapply(names(mgs), function(i) {
+    x <- mgs[[i]]
+    # Filter and keep relevant marker genes, those with AUC > 0.8
+    x <- x[x$mean.AUC > 0.8, ]
+    # Sort the genes from highest to lowest weight
+    x <- x[order(x$mean.AUC, decreasing = TRUE), ]
+    # Add gene and cluster id to the dataframe
+    x$gene <- rownames(x)
+    x$cluster <- i
+    data.frame(x)
+})
+mgs_df <- do.call(rbind, mgs_fil)
+# split cell indices by identity
+idx <- split(seq(ncol(sce)), sce$decon.clusters)
+# downsample to at most 20 per identity & subset
+# We are using 5 here to speed up the process but set to 75-100 for your real life analysis
+n_cells <- 100
+cs_keep <- lapply(idx, function(i) {
+    n <- length(i)
+    if (n < n_cells)
+        n_cells <- n
+    sample(i, n_cells)
+})
+sce <- sce[, unlist(cs_keep)]
+## Deconvolution
+res <- SPOTlight(
+    x = sce@assays$RNA@data,
+    y = spe@assays$Spatial@counts,
+    groups = as.character(sce$decon.clusters),
+    mgs = mgs_df,
+    hvg = dec$gene,
+    weight_id = "mean.AUC",
+    group_id = "cluster",
+    gene_id = "gene")
+
+# Extract deconvolution matrix
+head(mat <- res$mat)[, seq_len(3)]
+# Extract NMF model fit
+mod <- res$NMF
+
+# Visualization
+## Topic profiles
+plotTopicProfiles(x = mod, y = sce$decon.clusters, facet = FALSE, min_prop = 0.01,ncol = 1) + theme(aspect.ratio = 1)
+
+# This can be dynamically visualized with DT as shown below
+#DT::datatable(sign, fillContainer = TRUE, filter = "top")
+
+## Scatterpie
+ct <- colnames(mat)
+mat[mat < 0.1] <- 0
+
+# Define color palette
+# (here we use 'paletteMartin' from the 'colorBlindness' package)
+paletteMartin <- c(
+    "#000000", "#004949", "#009292", "#FF6DB6", "#FFB6DB",
+    "#490092", "#006DDB", "#B66DFF", "#6DB6FF", "#B6DBFF",
+    "#920000", "#924900", "#DB6D00", "#24FF24", "#FFFF6D")
+pal <- colorRampPalette(paletteMartin)(length(ct))
+names(pal) <- ct
+
+load('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-21_analysis/all_spotlight_files.RData')
+
+a <- SPOTlight::plotSpatialScatterpie(x = spe, y = mat,cell_types = c('DC', 'CD8', 'CD4'),img = FALSE, scatterpie_alpha = 1,pie_scale = 0.4,degrees = 90,axis = "h") +scale_fill_manual(values = pal,breaks = names(pal))
+
+b <- SPOTlight::plotSpatialScatterpie(x = spe, y = mat,cell_types = c('Fibroblasts', 'Epithelial cells'),img = FALSE, scatterpie_alpha = 1,pie_scale = 0.4,degrees = 90,axis = "h") +scale_fill_manual(values = pal,breaks = names(pal))
+
+png('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-21_analysis/SPOTlight_scatterpie_DC_T_fibro_epi.png', width = 10, height = 7, units = 'in', res = 600)
+
+a + b
+
+dev.off()
+
+save(res, mgs_df, dec, sce, spe, mat, mod, ct, pal, file = '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-21_analysis/all_spotlight_files.RData')
+
+
+
+ck17_21@assays[['SPOTlight']] <- SeuratObject::CreateAssayObject(data = t(mat))
+
+if (length(ck17_21@assays$SPOTlight@key) == 0) {
+    ck17_21@assays$SPOTlight@key = "spotlight_"
+}
+
+Seurat::DefaultAssay(ck17_21) <- 'SPOTlight'
+
+Seurat::SpatialFeaturePlot(ck17_21, features = c('DC', 'CD4', 'CD8'))
+
+ggsave('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-5_analysis/spotlight_DC_CD4_CD8.png', width = 10, height = 8, units = 'in', dpi = 300)
+
+saveRDS(ck17_21, file = '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-21_analysis/cleaned_ck17_21_seurat_2022-07-06.RDS')
+```
+
+## CK17-27
+
+```{r}
+set.seed(123)
+
+## Loading the data
+spe <- ck17_27
+sce <- kurten_til[, sample(colnames(kurten_til), size = 10000, replace=F)]
+
+dec <- markers_sc[order(markers_sc$avg_log2FC, decreasing = TRUE), ][1:3000,]
+table(dec$cluster)
+
+mgs <- scoreMarkers(sce@assays$RNA@data, groups = sce$decon.clusters)
+mgs_fil <- lapply(names(mgs), function(i) {
+    x <- mgs[[i]]
+    # Filter and keep relevant marker genes, those with AUC > 0.8
+    x <- x[x$mean.AUC > 0.8, ]
+    # Sort the genes from highest to lowest weight
+    x <- x[order(x$mean.AUC, decreasing = TRUE), ]
+    # Add gene and cluster id to the dataframe
+    x$gene <- rownames(x)
+    x$cluster <- i
+    data.frame(x)
+})
+mgs_df <- do.call(rbind, mgs_fil)
+# split cell indices by identity
+idx <- split(seq(ncol(sce)), sce$decon.clusters)
+# downsample to at most 20 per identity & subset
+# We are using 5 here to speed up the process but set to 75-100 for your real life analysis
+n_cells <- 100
+cs_keep <- lapply(idx, function(i) {
+    n <- length(i)
+    if (n < n_cells)
+        n_cells <- n
+    sample(i, n_cells)
+})
+sce <- sce[, unlist(cs_keep)]
+## Deconvolution
+res <- SPOTlight(
+    x = sce@assays$RNA@data,
+    y = spe@assays$Spatial@counts,
+    groups = as.character(sce$decon.clusters),
+    mgs = mgs_df,
+    hvg = dec$gene,
+    weight_id = "mean.AUC",
+    group_id = "cluster",
+    gene_id = "gene")
+
+# Extract deconvolution matrix
+head(mat <- res$mat)[, seq_len(3)]
+# Extract NMF model fit
+mod <- res$NMF
+
+# Visualization
+## Topic profiles
+plotTopicProfiles(x = mod, y = sce$decon.clusters, facet = FALSE, min_prop = 0.01,ncol = 1) + theme(aspect.ratio = 1)
+
+# This can be dynamically visualized with DT as shown below
+#DT::datatable(sign, fillContainer = TRUE, filter = "top")
+
+## Scatterpie
+ct <- colnames(mat)
+mat[mat < 0.1] <- 0
+
+# Define color palette
+# (here we use 'paletteMartin' from the 'colorBlindness' package)
+paletteMartin <- c(
+    "#000000", "#004949", "#009292", "#FF6DB6", "#FFB6DB",
+    "#490092", "#006DDB", "#B66DFF", "#6DB6FF", "#B6DBFF",
+    "#920000", "#924900", "#DB6D00", "#24FF24", "#FFFF6D")
+pal <- colorRampPalette(paletteMartin)(length(ct))
+names(pal) <- ct
+
+
+load('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-27_analysis/all_spotlight_files.RData')
+
+a <- SPOTlight::plotSpatialScatterpie(x = spe, y = mat,cell_types = c('DC', 'CD8', 'CD4'),img = FALSE, scatterpie_alpha = 1,pie_scale = 0.4,degrees = 90,axis = "h") +scale_fill_manual(values = pal,breaks = names(pal))
+
+b <- SPOTlight::plotSpatialScatterpie(x = spe, y = mat,cell_types = c('Fibroblasts', 'Epithelial cells'),img = FALSE, scatterpie_alpha = 1,pie_scale = 0.4,degrees = 90,axis = "h") +scale_fill_manual(values = pal,breaks = names(pal))
+
+png('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-27_analysis/SPOTlight_scatterpie_DC_T_fibro_epi.png', width = 10, height = 7, units = 'in', res = 600)
+
+a + b
+
+dev.off()
+
+save(res, mgs_df, dec, sce, spe, mat, mod, ct, pal, file = '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-27_analysis/all_spotlight_files.RData')
+
+
+ck17_27@assays[['SPOTlight']] <- SeuratObject::CreateAssayObject(data = t(mat))
+
+if (length(ck17_27@assays$SPOTlight@key) == 0) {
+    ck17_5@assays$SPOTlight@key = "spotlight_"
+}
+
+Seurat::DefaultAssay(ck17_27) <- 'SPOTlight'
+
+Seurat::SpatialFeaturePlot(ck17_27, features = c('DC', 'CD4', 'CD8'))
+
+saveRDS(ck17_27, file = '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-27_analysis/cleaned_ck17_27_seurat_2022-07-06.RDS')
+```
+
+# Plotting specific cell types (SEURAT)
+
+```{r}
+DefaultAssay(ck17_5) <- 'SCDC_onemreg'
+DefaultAssay(ck17_7) <- 'SCDC_onemreg'
+DefaultAssay(ck17_21) <- 'SCDC_onemreg'
+DefaultAssay(ck17_27) <- 'SCDC_onemreg'
+
+SpatialFeaturePlot(ck17_5, features = c('Epithelial cells', 'Fibroblasts', 'mregDC', 'Mac-C1QA', 'CD4-3', 'CD4-1', 'CD8-1', 'Treg-2'))
+
+SpatialFeaturePlot(ck17_7, features = c('Epithelial cells', 'Fibroblasts', 'mregDC', 'Mac-C1QA', 'CD4-3', 'CD4-1', 'CD8-1', 'Treg-2'))
+
+SpatialFeaturePlot(ck17_21, features = c('Epithelial cells', 'Fibroblasts', 'mregDC', 'Mac-C1QA', 'CD4-3', 'CD4-1', 'CD8-1', 'Treg-2'))
+
+SpatialFeaturePlot(ck17_27, features = c('Epithelial cells', 'Fibroblasts', 'mregDC', 'Mac-C1QA', 'CD4-3', 'CD4-1', 'CD8-1', 'Treg-2'))
+```
+
+# LOAD IN Co-occupancy
+
+```{r}
+library(DescTools)
+library(magrittr)
+library(dplyr)
+
+ck17_5 <- readRDS('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-5_analysis/cleaned_ck17_5_seurat_2022-07-08.RDS')
+ck17_7 <- readRDS('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-7_analysis/cleaned_ck17_7_seurat_2022-07-08.RDS')
+ck17_21 <- readRDS('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-21_analysis/cleaned_ck17_21_seurat_2022-07-08.RDS')
+ck17_27 <- readRDS('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-27_analysis/cleaned_ck17_27_seurat_2022-07-08.RDS')
+
+ck17_5@project.name <- 'CK17-5'
+ck17_7@project.name <- 'CK17-7'
+ck17_21@project.name <- 'CK17-21'
+ck17_27@project.name <- 'CK17-27'
+```
+
+# FUNCTION Co-occupancy scores (product of %) (2 cell types)
+
+```{r}
+out <- '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/Myeloid_to_T_Cooccupancy/All_immune_subsets_PDF/'
+seu <- c(ck17_5, ck17_7, ck17_21, ck17_27)
+cell1 <- rownames(ck17_5@assays$SCDC_onemreg)[!rownames(ck17_5@assays$SCDC_onemreg) %like% c('Fibroblasts', 'Epithelial cells', 'Endothelial cells', 'Pericytes')]
+norm <- 'z-score'
+
+# norm <- c('z-score', 'divide_by_max')
+co_occupancy <- function(out, seu, cell1, norm = c('z-score', 'divide_by_max')){  
+  pdf(file = paste(out, 'all_subsets_cooccupancy_matrix.pdf', sep = ''), height = 5, width = 12)
+  for (a in cell1){
+    ALL <- data.frame(matrix(ncol = 0, nrow = 4))
+    all <- data.frame(matrix(ncol = length(cell1), nrow = 0))
+    for (z in seu){
+      assay <- t(z@assays$SCDC_onemreg@data)
+      all_scores <- c()
+      for (y in cell1) {
+        total_cooc <- c()
+        for (x in 1:nrow(assay)){
+          percents <- assay[x,]
+          cooc <- as.numeric(percents[a] * percents[y])
+          total_cooc <- c(total_cooc, cooc)
+          spots <- as.numeric(nrow(assay))
+          score <- sum(total_cooc)/spots
+        }
+        names(score) <- paste(a, '_', y, sep = '')
+        all_scores <- c(all_scores, score)
+      }
+      row <- c(z@project.name, unname(all_scores))
+      all <- rbind(all, row)
+      colnames(all) <- c('Sample', names(all_scores))
+    }
+    rownames(all) <- all$Sample
+    all$Sample <- NULL
+    all <- mutate_all(all, function(x) as.numeric(as.character(x)))
+    #write.csv(all, file = paste(out, a, '_', y, 'unnormalized_cooccupancy_matrix.csv', sep = ''))
+    if (isTRUE('divide_by_max' %in% norm)){
+      all_norm <- all/do.call(pmax, all)
+      all_norm[is.na(all_norm)] <- 0
+      ALL <- cbind(ALL, all_norm)
+      test <- strsplit(colnames(ALL), split = '_')
+      indexes <- c()
+      for (i in 1:length(test)){
+        test1 <- as.numeric(i[test[[i]][1] != test[[i]][2]])
+        indexes <- c(indexes, test1)
+      }
+      ALL <- ALL[indexes]
+      pheatmap::pheatmap(ALL, main = paste(test[[i]][1], ': Divide by Max, Clustered', sep = ''))
+      pheatmap::pheatmap(ALL, cluster_cols = FALSE, cluster_rows = FALSE, main = paste(test[[i]][1], ': Divide by Max, Unclustered', sep = ''))
+    }
+    if (isTRUE('z-score' %in% norm)){
+      ALL <- as.data.frame(t(apply(all, 1, scale)))
+      colnames(ALL) <- colnames(all)
+      ALL[is.na(ALL)] <- 0
+      test <- strsplit(colnames(ALL), split = '_')
+      indexes <- c()
+      for (i in 1:length(test)){
+        test1 <- as.numeric(i[test[[i]][1] != test[[i]][2]])
+        indexes <- c(indexes, test1)
+      }
+      ALL <- ALL[indexes]
+      pheatmap::pheatmap(ALL, main = paste(test[[i]][1], ': Z-score Normalized, Clustered', sep = ''))
+      pheatmap::pheatmap(ALL, cluster_rows = FALSE, cluster_cols = FALSE, main = paste(test[[i]][1], ': Z-score Normalized, Unclustered', sep = ''))
+    }
+  }
+  dev.off()
+}  
+```
+
+# RUNNING Co-occupancy scores (product of %) (2 cell types)
+
+```{r}
+co_occupancy(out <- '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/Myeloid_to_T_Cooccupancy/All_immune_subsets_PDF_ZandDividebyMax/', seu <- c(ck17_5, ck17_7, ck17_21, ck17_27), cell1 <- rownames(ck17_5@assays$SCDC_onemreg)[!rownames(ck17_5@assays$SCDC_onemreg) %like% c('Fibroblasts', 'Epithelial cells', 'Endothelial cells', 'Pericytes')], norm = c('z-score', 'divide_by_max'))
+```
+
+# \*\*\*\*\*Create new assay
+
+```{r}
+library(Seurat)
+sp <- ck17_21
+
+DefaultAssay(sp) <- 'SCDC_global'
+test <- as.data.frame(GetAssayData(object = sp))
+test$celltype <- rownames(test)
+test$celltype[test$celltype %like any% c('Plasma', 'CD4', 'Monocytes', 'DC', 'Macrophages', 'CD8', 'Bcells', 'Treg', 'NK', 'Mast')] <- 'CD45+' 
+
+test1 <- aggregate(test[,1:ncol(test)-1], by = list(test$celltype), FUN = sum)
+rownames(test1) <- test1$Group.1
+test1$Group.1 <- NULL
+test1 <- as.matrix(test1)
+test2 <- SeuratObject::CreateAssayObject(data = test1)
+
+sp@assays[['SCDC_immune_nonimmune']] <- SeuratObject::CreateAssayObject(data =  test2)
+
+DefaultAssay(sp) <- 'SCDC_immune_nonimmune'
+rownames(sp@assays$SCDC_immune_nonimmune) %in% c('Plasma', 'CD4', 'Monocytes', 'DC', 'Macrophages', 'CD8', 'Bcells', 'Treg', 'NK', 'Mast') <- 'CD45+'
+
+saveRDS('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-21_analysis/cleaned_ck17_21_seurat_2022-12-2.RDS')
+
+
+```
+
+# 2 cell type co-occupancy (Pearson correlation heatmap)
+
+```{r}
+library(magrittr)
+library(DescTools)
+out <- '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/Myeloid_to_T_Cooccupancy/All_immune_subsets_PDF/'
+seu <- c(ck17_5, ck17_27)
+metadata <- 'SCDC_global'
+cell1 <- rownames(ck17_5@assays[[metadata]])[!rownames(ck17_5@assays[[metadata]]) %like% c('Fibroblasts', 'Epithelial cells', 'Endothelial cells', 'Pericytes')]
+norm <- c('z-score', 'divide_by_max')
+
+ck17_5@project.name <- 'CK17_5'
+ck17_7@project.name <- 'CK17_7'
+ck17_21@project.name <- 'CK17_21'
+ck17_27@project.name <- 'CK17_27'
+
+ALL <- data.frame(matrix(ncol = length(cell1), nrow = length(cell1)))
+colnames(ALL) <- cell1
+rownames(ALL) <- cell1
+
+ALL_SEU <- list()
+for (bb in seu){
+  for (a in cell1){
+    for (z in seu){
+      assay <- as.data.frame(t(z@assays[[metadata]]@data))
+      all_scores <- c()
+      for (y in cell1) {
+        ALL[a, y] <- cor(assay[[a]], assay[[y]], method = c('pearson'))
+      }
+    }
+  }
+  ALL_SEU[bb@project.name] <- list(ALL)
+}
+all <- Reduce("+", ALL_SEU) / length(ALL_SEU)
+
+test <- ALL[ALL >= 0.95] <- NA
+
+#write.csv()
+
+png('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/Myeloid_to_T_Cooccupancy/global_responders_cooccupancy_correlation.png', width = 8, height = 6, units = 'in', res = 300)
+pheatmap::pheatmap(ALL, main = 'Responders')
+dev.off()
+
+
+
+
+
+
+
+
+
+out <- '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/Myeloid_to_T_Cooccupancy/All_immune_subsets_PDF/'
+seu <- c(ck17_7, ck17_21)
+metadata <- 'SCDC_global'
+cell1 <- rownames(ck17_7@assays[[metadata]])[!rownames(ck17_7@assays[[metadata]]) %like% c('Fibroblasts', 'Epithelial cells', 'Endothelial cells', 'Pericytes')]
+norm <- c('z-score', 'divide_by_max')
+
+ck17_5@project.name <- 'CK17_5'
+ck17_7@project.name <- 'CK17_7'
+ck17_21@project.name <- 'CK17_21'
+ck17_27@project.name <- 'CK17_27'
+
+ALL <- data.frame(matrix(ncol = length(cell1), nrow = length(cell1)))
+colnames(ALL) <- cell1
+rownames(ALL) <- cell1
+
+ALL_SEU <- list()
+for (bb in seu){
+  for (a in cell1){
+    for (z in seu){
+      assay <- as.data.frame(t(z@assays[[metadata]]@data))
+      all_scores <- c()
+      for (y in cell1) {
+        ALL[a, y] <- cor(assay[[a]], assay[[y]], method = c('pearson'))
+      }
+    }
+  }
+  ALL_SEU[bb@project.name] <- list(ALL)
+}
+all <- Reduce("+", ALL_SEU) / length(ALL_SEU)
+
+test <- ALL[ALL >= 0.95] <- NA
+
+#write.csv()
+
+png('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/Myeloid_to_T_Cooccupancy/global_nonresponders_cooccupancy_correlation.png', width = 8, height = 6, units = 'in', res = 300)
+pheatmap::pheatmap(ALL, main = 'Non-Responders')
+dev.off()
+```
+
+# 2 cell type co-occupancy (Pearson correlation w/ confidence interval)
+
+```{r warning=FALSE}
+library(magrittr)
+library(DescTools)
+library(confintr)
+library(ggplot2)
+
+out <- '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/Myeloid_to_T_Cooccupancy/All_immune_subsets_PDF/'
+seu <- c(ck17_5, ck17_7, ck17_21, ck17_27)
+cell1 <- rownames(ck17_5@assays$SCDC_onemreg)[!rownames(ck17_5@assays$SCDC_onemreg) %like% c('Fibroblasts', 'Epithelial cells', 'Endothelial cells', 'Pericytes')]
+norm <- c('z-score', 'divide_by_max')
+
+ck17_5@project.name <- 'CK17_5'
+ck17_7@project.name <- 'CK17_7'
+ck17_21@project.name <- 'CK17_21'
+ck17_27@project.name <- 'CK17_27'
+
+all_plots <- list()
+ALL <- data.frame(matrix(ncol = length(cell1), nrow = length(cell1)))
+colnames(ALL) <- cell1
+rownames(ALL) <- cell1
+for (a in cell1){
+  for (z in seu){
+    assay <- as.data.frame(t(z@assays$SCDC_onemreg@data))
+    all_scores <- c()
+    for (y in cell1) {
+      test <- ci_cor(assay[[a]], assay[[y]], method = c('pearson'))
+      df <- data.frame(assay[[a]], assay[[y]])
+      colnames(df) <- c('x', 'y')
+      require(broom)
+      require(dplyr)
+      # original linear model--doesn't have se.fit so need to run a second part
+      lm1 <- df %>% lm(y ~ x + I(x^2), data = .)
+      
+      # this returns a dataframe that contains se.fit data
+      test <- as.data.frame(predict(lm1, se.fit = TRUE))
+        
+      df1 <- df %>% do(augment(lm(y ~ x + I(x^2), data = .)))
+      df2 <- cbind(df1, test) 
+      df2 <- df2 %>% mutate(group = as.numeric(abs(y - .fitted) < 2.58*se.fit)) %>%
+          ggplot(aes(x, y)) + geom_point(aes(colour = factor(group)), size = 4) + stat_smooth(method = "lm", formula = y ~ poly(x, 2), size = 1, level = .99) + xlab(a) + ylab(y)
+      df2
+      
+      all_plots[[paste(a, '_', y, sep = '')]] <- df2
+    }
+  }
+}
+plot_cutoffs <- seq(1, length(all_plots), by=25)
+
+pdf('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/Myeloid_to_T_Cooccupancy/cooccupancy_correlation_scatterplots_colored.pdf', width = 20, height = 20)
+for (b in 1:(length(plot_cutoffs)-1)){
+  gridExtra::grid.arrange(grobs = all_plots[plot_cutoffs[b]:plot_cutoffs[b+1]])
+}
+dev.off()
+```
+
+```{r}
+library(magrittr)
+library(DescTools)
+library(confintr)
+library(ggplot2)
+
+out <- '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/Myeloid_to_T_Cooccupancy/All_immune_subsets_PDF/'
+seu <- c(ck17_5, ck17_7, ck17_21, ck17_27)
+cell1 <- rownames(ck17_5@assays$SCDC_onemreg)[!rownames(ck17_5@assays$SCDC_onemreg) %like% c('Fibroblasts', 'Epithelial cells', 'Endothelial cells', 'Pericytes')]
+norm <- c('z-score', 'divide_by_max')
+
+ck17_5@project.name <- 'CK17_5'
+ck17_7@project.name <- 'CK17_7'
+ck17_21@project.name <- 'CK17_21'
+ck17_27@project.name <- 'CK17_27'
+
+all_plots <- list()
+ALL <- data.frame(matrix(ncol = length(cell1), nrow = length(cell1)))
+colnames(ALL) <- cell1
+rownames(ALL) <- cell1
+for (a in cell1){
+  for (z in seu){
+    assay <- as.data.frame(t(z@assays$SCDC_onemreg@data))
+    all_scores <- c()
+    for (y in cell1) {
+      test <- ci_cor(assay[[a]], assay[[y]], method = c('pearson'))
+      df <- data.frame(assay[[a]], assay[[y]])
+      all_plots[[paste(a, '_', y, sep = '')]] <- ggplot(df, aes(x=assay..a.., y=assay..y..)) + geom_point() + geom_smooth(method=lm , color="red", fill = '#69b3a2', se=TRUE)
+    }
+  }
+}
+
+plot_cutoffs <- seq(1, length(all_plots), by=25)
+
+pdf('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/Myeloid_to_T_Cooccupancy/cooccupancy_correlation_scatterplots.pdf', width = 15, height = 15)
+for (b in 1:(length(plot_cutoffs)-1)){
+  gridExtra::grid.arrange(grobs = all_plots[plot_cutoffs[b]:plot_cutoffs[b+1]])
+}
+dev.off()
+
+
+
+test <- ALL[ALL >= 0.95] <- NA
+```
+
+# FUNCTION Co-occupancy scores (product of %) (3 cell types)
+
+```{r}
+out <- '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/Myeloid_to_T_Cooccupancy_triads/All_immune_subsets_PDF_ZandDividebyMax/'
+seu <- c(ck17_5, ck17_7, ck17_21, ck17_27)
+#cell1 <- rownames(ck17_5@assays$SCDC_onemreg)[!rownames(ck17_5@assays$SCDC_onemreg) %like% c('Fibroblasts', 'Epithelial cells', 'Endothelial cells', 'Pericytes')]
+cell1 <- c('Mac-C1QA', 'Treg-2', 'Plasma', 'Mono-CD14-THBS1', 'Mono-Int', 'mregDC', 'DC3-CD1C', 'CD4-1', 'CD8_1', 'CD8_2', 'CD4_2', 'NK-1', 'NK-2')
+norm <- c('z-score', 'divide_by_max')
+sd_thresh <- 50 # keeps all samples with a standard deviation above this percentage
+
+vals <- unique(c(cell1, cell1, cell1))
+test <- combn(vals, 3)
+
+pdf(file = paste(out, 'all_subsets_cooccupancy_matrix_triad.pdf', sep = ''), height = 8, width = 30)
+
+ALL <- data.frame(matrix(ncol = 0, nrow = 4))
+all <- data.frame(matrix(ncol = length(cell1), nrow = 0))
+for (z in seu){
+  print(paste("Now starting", z@project.name))
+  assay <- as.data.frame(t(z@assays$SCDC_onemreg@data))
+  all_scores <- c()
+  total_cooc <- c()
+  for (col in 1:ncol(test)){
+    cooc <- assay[[test[,col][[1]]]] * assay[[test[,col][[2]]]] * assay[[test[,col][[3]]]]
+    total_cooc <- c(total_cooc, cooc)
+    score <- sum(total_cooc)/as.numeric(nrow(assay))
+    names(score) <- paste(test[,col][[1]], '_', test[,col][[2]], '_', test[,col][[3]], sep = '')
+    all_scores <- c(all_scores, score)
+  }  
+  row <- c(z@project.name, unname(all_scores))
+  all <- rbind(all, row)
+  colnames(all) <- c('Sample', names(all_scores))
+}
+  rownames(all) <- all$Sample
+  all$Sample <- NULL
+  all <- mutate_all(all, function(x) as.numeric(as.character(x)))
+  #write.csv(all, file = paste(out, a, '_', y, 'unnormalized_cooccupancy_matrix.csv', sep = ''))
+  if (isTRUE('divide_by_max' %in% norm)){
+    all_norm <- all/do.call(pmax, all)
+    all_norm[is.na(all_norm)] <- 0
+    ALL <- cbind(ALL, all_norm)
+    test <- strsplit(colnames(ALL), split = '_')
+    indexes <- c()
+    for (i in 1:length(test)){
+      test1 <- as.numeric(i[test[[i]][1] != test[[i]][2]])
+      indexes <- c(indexes, test1)
+    }
+    ALL <- ALL[indexes]
+    sds <- apply(ALL, 2, sd)
+    top_pct <- names(sds[sds > quantile(sds,prob=1-sd_thresh/100)])
+    ALL <- ALL[colnames(ALL) %in% c(top_pct)]
+    pheatmap::pheatmap(ALL, main = 'Divide by Max')
+    #pheatmap::pheatmap(ALL, cluster_cols = FALSE, cluster_rows = FALSE, main = 'Divide by Max, Unclustered')
+  }
+  if (isTRUE('z-score' %in% norm)){
+    # normalize by row
+    ALL <- as.data.frame(t(apply(all, 1, scale)))
+    colnames(ALL) <- colnames(all)
+    ALL[is.na(ALL)] <- 0
+    test <- strsplit(colnames(ALL), split = '_')
+    indexes <- c()
+    for (i in 1:length(test)){
+      test1 <- as.numeric(i[test[[i]][1] != test[[i]][2]])
+      indexes <- c(indexes, test1)
+    }
+    ALL <- ALL[indexes]
+    sds <- apply(ALL, 2, sd)
+    top_pct <- names(sds[sds > quantile(sds,prob=1-sd_thresh/100)])
+    ALL <- ALL[colnames(ALL) %in% c(top_pct)]
+    pheatmap::pheatmap(ALL, main = 'Z-score Normalized')
+    #pheatmap::pheatmap(ALL, cluster_rows = FALSE, cluster_cols = FALSE, main = 'Z-score Normalized, Unclustered') 
+  }
+dev.off()
+```
+
+# RUNNING Co-occupancy (product of %) (3 cells)
+
+```{r}
+co_occupancy_triad(out <- '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/Myeloid_to_T_Cooccupancy/All_immune_subsets_PDF_ZandDividebyMax/', seu <- c(ck17_5, ck17_7, ck17_21, ck17_27), cell1 <- c('Mac-C1QA', 'Treg-2', 'Plasma', 'Mono-CD14-THBS1', 'Mono-Int', 'mregDC', 'DC3-CD1C', 'CD4-1', 'CD8_1', 'CD8_2', 'CD4_2', 'NK-1', 'NK-2'), norm = c('z-score', 'divide_by_max'))
+```
+
+# Co-occupancy (3 cells) permutation test
+
+```{r, warning=FALSE}
+library(dplyr)
+
+ck17_5 <- readRDS('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-5_analysis/cleaned_ck17_5_seurat_2022-07-08.RDS')
+ck17_7 <- readRDS('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-7_analysis/cleaned_ck17_7_seurat_2022-07-08.RDS')
+ck17_21 <- readRDS('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-21_analysis/cleaned_ck17_21_seurat_2022-07-08.RDS')
+ck17_27 <- readRDS('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-27_analysis/cleaned_ck17_27_seurat_2022-07-08.RDS')
+
+ck17_5@project.name <- 'Responder'
+ck17_7@project.name <- 'Non-responder'
+ck17_21@project.name <- 'Non-responder'
+ck17_27@project.name <- 'Responder'
+
+
+out <- '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/Myeloid_to_T_Cooccupancy_triads_permutationtest/'
+seu <- c(ck17_5, ck17_7, ck17_21, ck17_27)
+#cell1 <- rownames(ck17_5@assays$SCDC_onemreg)[!rownames(ck17_5@assays$SCDC_onemreg) %like% c('Fibroblasts', 'Epithelial cells', 'Endothelial cells', 'Pericytes')]
+cell1 <- c('Mac-C1QA', 'Treg-2', 'Plasma', 'Mono-CD14-THBS1', 'Mono-Int', 'mregDC', 'DC3-CD1C', 'CD4-1', 'CD8-1', 'CD8-2', 'CD4-2', 'NK-1', 'NK-2')
+norm <- c('z-score', 'divide_by_max')
+#sd_thresh <- 50 # keeps all samples with a standard deviation above this percentage
+
+vals <- unique(c(cell1, cell1, cell1))
+test <- as.data.frame(combn(vals, 3))
+
+#pdf(file = paste(out, 'all_subsets_cooccupancy_matrix_triad.pdf', sep = ''), height = 8, width = 30)
+
+ALL <- data.frame(matrix(ncol = 6, nrow = 0))
+all <- data.frame(matrix(ncol = length(cell1), nrow = 0))
+
+for (col in 1:ncol(test)){
+  print(col)
+  all_scores <- data.frame(matrix(ncol = 0, nrow = 0))
+  for (z in seu){
+    assay <- as.data.frame(t(z@assays$SCDC_onemreg@data))
+    cooc <- assay[[test[,col][[1]]]] * assay[[test[,col][[2]]]] * assay[[test[,col][[3]]]]
+    names(cooc) <- c(rep(z@project.name, length(cooc)))
+    scores <- as.data.frame(cbind(data.frame(names(cooc)), data.frame(cooc)))
+    all_scores <- rbind(scores, all_scores)
+  }
+  ptest <- permutation.test(treatment = all_scores[,1], outcome = all_scores[,2], n = 1000)
+  minidf <- all_scores %>% group_by(names.cooc.) %>% summarize_at(vars(cooc), list(name = mean)) %>% as.data.frame()
+  max <- minidf$names.cooc.[which.max(minidf$name)]
+  colnames(minidf) <- c('response', 'cooccupancy')
+  minidf <- minidf[order(-minidf$cooccupancy),]
+  log2fc <- log2(minidf$cooccupancy[1]/minidf$cooccupancy[2])
+  row <- c(paste(test[,col][[1]], '_', test[,col][[2]], '_', test[,col][[3]], sep = ''), unname(ptest[[1]]), max, minidf$cooccupancy[1], minidf$cooccupancy[2], log2fc)
+  ALL <- rbind(ALL, row)
+}  
+  
+ALL1 <- ALL[ALL$X.0. < 0.01,]
+colnames(ALL1) <- c('Triad', 'p-value', 'enriched population', 'higher coocupancy', 'lower coocupancy', 'log2fc')
+write.csv(ALL1, '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/Myeloid_to_T_Cooccupancy_triads_permutationtest/permutation_triads_sigpvalues.csv')
+
+
+treatment <- all_scores[,1]
+outcome <- all_scores[,2]
+n <- 1000
+
+permutation.test <- function(treatment, outcome, n){
+  original <- diff(tapply(outcome, treatment, mean))
+  distribution=c()
+  result=0
+  for(i in 1:n){
+    distribution[i]=diff(by(outcome, sample(treatment, length(treatment), FALSE), mean))
+  }
+  result=sum(abs(distribution) >= abs(original))/(n)
+  names(result)[[1]] <- 'p_val'
+  return(list(result, distribution))
+}
+
+```
+
+# Plotting co-occupancy scores
+
+```{r}
+ck17_5 <- readRDS('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-5_analysis/cleaned_ck17_5_seurat_2022-07-08.RDS')
+ck17_7 <- readRDS('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-7_analysis/cleaned_ck17_7_seurat_2022-07-08.RDS')
+ck17_21 <- readRDS('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-21_analysis/cleaned_ck17_21_seurat_2022-07-08.RDS')
+ck17_27 <- readRDS('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-27_analysis/cleaned_ck17_27_seurat_2022-07-08.RDS')
+
+abc <- readRDS('/Volumes/hqdinh2/Projects/HNC_SPORE/Seurat_Objs/decon_ABC_seurat.RDS')
+
+DefaultAssay(ck17_5) <- 'SCDC_onemreg'
+DefaultAssay(ck17_7) <- 'SCDC_onemreg'
+DefaultAssay(ck17_21) <- 'SCDC_onemreg'
+DefaultAssay(ck17_27) <- 'SCDC_onemreg'
+
+SpatialFeaturePlot(ck17_5, features = c('CD4-2', 'CD4-3', 'CD8-5', 'Mac-C1QA', 'Treg-2', 'Plasma', 'mregDC', 'DC3-CD1C'))
+
+SpatialFeaturePlot(ck17_7, features = c('CD8-1', 'CD8-3', 'Plasma', 'NK-1', 'Mac-C1QA'))
+
+SpatialFeaturePlot(ck17_21, features = c('CD4-4', 'CD8-2', 'Mono-CD14-THBS1', 'Mac-C1QA', 'cDC1-CLEC9A'))
+
+SpatialFeaturePlot(ck17_27, features = c('CD4-2', 'CD8-1', 'Mono-Int', 'Mac-C1QA', 'mregDC', 'NK-1', 'NK-2'))
+```
+
+# \_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_
+
+# stDeconvolve
+
+```{r}
+library(STdeconvolve)
+
+#before starting, remove everything from your R session
+sample <- 'CK17-5'
+
+# 1. set working directory
+f <-  paste('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/', sample, sep = '')
+
+#pdf(paste(f, '/', sample, 'STdeconvolve_15clusters.pdf', sep = ''), width = 12, height = 12)
+
+se <- SpatialExperiment::read10xVisium(samples = f, type = "sparse", data = "filtered")
+cd <- se@assays@data@listData$counts
+pos <- SpatialExperiment::spatialCoords(se)
+colnames(pos) <- c("y", "x")
+counts <- cleanCounts(cd, min.lib.size = 100, min.reads = 10)
+corpus <- restrictCorpus(counts, removeAbove=1.0, removeBelow = 0.05, nTopOD = 1000)
+ldas <- fitLDA(t(as.matrix(corpus)), Ks = seq(2, 9, by = 1))
+optLDA <- optimalModel(models = ldas, opt = 'min')
+results <- getBetaTheta(optLDA, perc.filt = 0.05, betaScale = 1000)
+deconProp <- results$theta
+deconGexp <- results$beta
+
+plt <- vizAllTopics(theta = deconProp, pos = pos, r = 90, lwd = 0, showLegend = TRUE, plotTitle = NA) + ggplot2::guides(fill=ggplot2::guide_legend(ncol=2)) + ggplot2::geom_rect(data = data.frame(pos), ggplot2::aes(xmin = min(x)-90, xmax = max(x)+90, ymin = min(y)-90, ymax = max(y)+90), fill = NA, color = "black", linetype = "solid", size = 0.5) + ggplot2::theme(plot.background = ggplot2::element_blank()) + ggplot2::guides(colour = "none")
+
+png(paste(f, '/', sample, Sys.Date(), '_STdeconvolve_vizalltopics.png', sep = ''), width = 8, height = 6, units = 'in', res = 300)
+plt
+dev.off()
+
+ps <- lapply(colnames(deconProp), function(celltype) {
+vizTopic(theta = deconProp, pos = pos, topic = celltype, plotTitle = paste0("X", celltype), size = 2, stroke = 1, alpha = 0.5, low = "white", high = "red") + ggplot2::guides(colour = "none")})
+
+png(paste(f, '/', sample, Sys.Date(), '_STdeconvolve_topicheatmap.png', sep = ''), width = 25, height = 25, units = 'in', res = 300)
+gridExtra::grid.arrange(grobs = ps, layout_matrix = rbind(c(1, 2, 3, 4), c(5, 6, 7, 8), c(9, 10, 11, 12), c(13, 14, 15, 16)))
+dev.off()
+
+geneSymbols <- se@rowRanges@elementMetadata$symbol
+names(geneSymbols) <- names(se@rowRanges)
+colnames(deconGexp) <- geneSymbols[colnames(deconGexp)]
+
+all_types <- vector('list')
+for (celltype in 1:nrow(deconGexp)) {#celltype <- 5
+  ## highly expressed in cell-type of interest
+  highgexp <- names(which(deconGexp[celltype,] > 5))
+  ## high log2(fold-change) compared to other deconvolved cell-types
+  log2fc <- sort(log2(deconGexp[celltype,highgexp]/colMeans(deconGexp[-celltype,highgexp])), decreasing=TRUE)
+  markers <- names(log2fc)[1:10]
+  ## visualize the transcriptional profile
+  dat <- data.frame(values = as.vector(log2fc), genes = names(log2fc), order = seq(length(log2fc)))
+  # Hide all of the text labels.
+  dat$selectedLabels <- ""
+  dat$selectedLabels[1:10] <- markers
+  
+  all_types[[celltype]] <- ggplot2::ggplot(data = dat) + ggplot2::geom_col(ggplot2::aes(x = order, y = values, fill = factor(selectedLabels == ""), color = factor(selectedLabels == "")), width = 1) + ggplot2::scale_y_continuous(expand = c(0, 0), limits = c(min(log2fc) - 0.3, max(log2fc) + 0.3)) + ggplot2::scale_x_continuous(expand = c(0, 0), limits = c(-2, NA)) + ggplot2::labs(title = paste("Deconvolved cell-type", celltype, "transcriptional profile"), x = "Gene expression rank", y = "log2(FC)") + ggrepel::geom_text_repel(ggplot2::aes(x = order, y = values, label = selectedLabels), color = "black") + ggplot2::theme_classic() + ggplot2::theme(axis.text.x = ggplot2::element_text(size=15, color = "black"), axis.text.y = ggplot2::element_text(size=15, color = "black"), axis.title.y = ggplot2::element_text(size=15, color = "black"), axis.title.x = ggplot2::element_text(size=15, color = "black"), axis.ticks.x = ggplot2::element_blank(), plot.title = ggplot2::element_text(size=15), legend.text = ggplot2::element_text(size = 15, colour = "black"), legend.title = ggplot2::element_text(size = 15, colour = "black", angle = 90), panel.background = ggplot2::element_blank(), plot.background = ggplot2::element_blank(), panel.grid.major.y = ggplot2::element_line(size = 0.3), axis.line = ggplot2::element_line(size = 1, colour = "black"), legend.position="none")
+  #all_types[celltype] <- plt
+}  
+
+png(paste(f, '/', sample, Sys.Date(), '_STdeconvolve_markerspertopic.png', sep = ''), width = 25, height = 25, units = 'in', res = 300)
+cowplot::plot_grid(plotlist = all_types)
+dev.off()
+
+c <- counts
+rownames(c) <- geneSymbols[rownames(c)]
+df <- merge(as.data.frame(pos),as.data.frame(t(as.matrix(c))), by = 0)
+markerGenes <- unlist(lapply(colnames(deconProp), function(celltype) {
+  celltype <- as.numeric(celltype)
+  highgexp <- names(which(deconGexp[celltype,] > 3)) ## highly exp in cell-type of interest
+  log2fc <- sort(log2(deconGexp[celltype,highgexp]/colMeans(deconGexp[-celltype,highgexp])), decreasing=TRUE) # high log2(fold-change) compared to other deconvolved cell-types
+  markers <- names(log2fc)[1] ## label just the top gene
+  markers ## collect name of top gene for each cell-type
+}))
+
+## now visualize top genes for each deconvolved cell-type
+ps <- lapply(markerGenes, function(marker) {
+vizGeneCounts(df = df, gene = marker, size = 2, stroke = 0.1, plotTitle = marker, winsorize = 0.05, showLegend = TRUE) + ggplot2::guides(colour = "none") + ggplot2::theme(axis.text.x = ggplot2::element_text(size=0, color = "black", hjust = 0, vjust = 0.5), axis.text.y = ggplot2::element_text(size=0, color = "black"), axis.title.y = ggplot2::element_text(size=15), axis.title.x = ggplot2::element_text(size=15), plot.title = ggplot2::element_text(size=15), legend.text = ggplot2::element_text(size = 15, colour = "black"), legend.title = ggplot2::element_text(size = 15, colour = "black", angle = 90), panel.background = ggplot2::element_blank(), panel.border = ggplot2::element_rect(fill = NA, color = "black", size = 2), plot.background = ggplot2::element_blank()) + ggplot2::guides(fill = ggplot2::guide_colorbar(title = "Counts", title.position = "left", title.hjust = 0.5, ticks.colour = "black", ticks.linewidth = 2, frame.colour= "black", frame.linewidth = 2, label.hjust = 0))})
+
+
+png(paste(f, '/', sample, Sys.Date(), '_STdeconvolve_markergenes.png', sep = ''), width = 25, height = 25, units = 'in', res = 300)
+gridExtra::grid.arrange(grobs = ps, layout_matrix = rbind(c(1, 2, 3, 4), c(5, 6, 7, 8), c(9, 10, 11, 12), c(13, 14, 15, 16)))
+dev.off()
+
+
+pcs.info <- stats::prcomp(t(log10(as.matrix(counts)+1)), center=TRUE)
+nPcs <- 7 ## let's take the top 5 PCs
+pcs <- pcs.info$x[,1:nPcs]
+emb <- Rtsne::Rtsne(pcs, is_distance=FALSE, perplexity=30,num_threads=1,verbose=FALSE)$Y
+rownames(emb) <- rownames(pcs)
+colnames(emb) <- c("x", "y")
+k <- 35
+com <- MERINGUE::getClusters(pcs, k, weight=TRUE, method = igraph::cluster_louvain)
+tempCom <- com
+dat <- data.frame("emb1" = pos[,"x"], "emb2" = pos[,"y"], "Cluster" = tempCom)
+
+plt <- ggplot2::ggplot(data = dat) + ggplot2::geom_point(ggplot2::aes(x = emb1, y = emb2, color = Cluster), size = 0.8) + ggplot2::scale_color_manual(values = rainbow(n = length(levels(tempCom)))) + ggplot2::labs(title = "", x = "x", y = "y") + ggplot2::theme_classic() + ggplot2::theme(axis.text.x = ggplot2::element_text(size=15, color = "black"), axis.text.y = ggplot2::element_text(size=15, color = "black"), axis.title.y = ggplot2::element_text(size=15), axis.title.x = ggplot2::element_text(size=15), axis.ticks.x = ggplot2::element_blank(), plot.title = ggplot2::element_text(size=15), legend.text = ggplot2::element_text(size = 12, colour = "black"), legend.title = ggplot2::element_text(size = 15, colour = "black", angle = 0, hjust = 0.5), panel.background = ggplot2::element_blank(), plot.background = ggplot2::element_blank(), panel.grid.major.y =  ggplot2::element_blank(), axis.line = ggplot2::element_line(size = 1, colour = "black")) + ggplot2::guides(colour = ggplot2::guide_legend(override.aes = list(size=2), ncol = 2)) + ggplot2::coord_equal()
+
+png(paste(f, '/', sample, Sys.Date(), '_STdeconvolve_clusterUMAP.png', sep = ''), width = 8, height = 6, units = 'in', res = 300)
+plt
+dev.off()
+
+tempCom <- com
+dat <- data.frame("emb1" = emb[,1], "emb2" = emb[,2], "Cluster" = tempCom)
+cent.pos <- do.call(rbind, tapply(1:nrow(emb), tempCom, function(ii) apply(emb[ii,,drop=F],2,median)))
+cent.pos <- as.data.frame(cent.pos)
+colnames(cent.pos) <- c("x", "y")
+cent.pos$cluster <- rownames(cent.pos)
+cent.pos <- na.omit(cent.pos)
+
+plt <- ggplot2::ggplot(data = dat) + ggplot2::geom_point(ggplot2::aes(x = emb1, y = emb2, color = Cluster), size = 0.01) + ggplot2::scale_color_manual(values = rainbow(n = length(levels(tempCom)))) + ggplot2::scale_y_continuous(expand = c(0, 0), limits = c( min(dat$emb2)-1, max(dat$emb2)+1)) + ggplot2::scale_x_continuous(expand = c(0, 0), limits = c( min(dat$emb1)-1, max(dat$emb1)+1) ) + ggplot2::labs(title = "", x = "t-SNE 1", y = "t-SNE 2") + ggplot2::theme_classic() + ggplot2::theme(axis.text.x = ggplot2::element_text(size=15, color = "black"), axis.text.y = ggplot2::element_text(size=15, color = "black"), axis.title.y = ggplot2::element_text(size=15), axis.title.x = ggplot2::element_text(size=15), axis.ticks.x = ggplot2::element_blank(), plot.title = ggplot2::element_text(size=15), legend.text = ggplot2::element_text(size = 12, colour = "black"), legend.title = ggplot2::element_text(size = 15, colour = "black", angle = 0, hjust = 0.5), panel.background = ggplot2::element_blank(), plot.background = ggplot2::element_blank(), panel.grid.major.y =  ggplot2::element_blank(), axis.line = ggplot2::element_line(size = 1, colour = "black")) + ggplot2::geom_text(data = cent.pos, ggplot2::aes(x = x, y = y, label = cluster), fontface = "bold") +ggplot2::guides(colour = ggplot2::guide_legend(override.aes = list(size=2), ncol = 2)) + ggplot2::coord_equal()
+
+plt
+
+
+ps <- lapply(colnames(deconProp), function(celltype) {
+  STdeconvolve::vizTopic(theta = deconProp, pos = emb, topic = celltype, plotTitle = paste0("X", celltype), size = 1, stroke = 0.5, alpha = 0.5, low = "white", high = "red") + ggplot2::guides(colour = "none")})
+
+png(paste(f, '/', sample, Sys.Date(), '_STdeconvolve_markergeneheatmap.png', sep = ''), width = 25, height = 25, units = 'in', res = 300)
+gridExtra::grid.arrange(grobs = ps,layout_matrix = rbind(c(1, 2, 3, 4), c(5, 6, 7, 8), c(9, 10, 11, 12), c(13, 14, 15, 16)))
+dev.off()
+
+com_proxyTheta <- model.matrix(~ 0 + com)
+rownames(com_proxyTheta) <- names(com)
+# fix names
+colnames(com_proxyTheta) <- unlist(lapply(colnames(com_proxyTheta), function(x) {
+  unlist(strsplit(x, "com"))[2]}))
+com_proxyTheta <- as.data.frame.matrix(com_proxyTheta)
+corMat_prop <- STdeconvolve::getCorrMtx(m1 = as.matrix(com_proxyTheta), m2 = deconProp, type = "t")
+rownames(corMat_prop) <- paste0("com_", seq(nrow(corMat_prop)))
+colnames(corMat_prop) <- paste0("decon_", seq(ncol(corMat_prop)))
+
+## order the cell-types rows based on best match (highest correlation) with each community 
+#pairs <- STdeconvolve::lsatPairs(corMat_prop)
+#m <- corMat_prop[pairs$rowix, pairs$colsix]
+
+#png(paste(f, '/', sample, Sys.Date(), '_STdeconvolve_correlationplot.png', sep = ''), width = 8, height = 6, units = 'in', res = 300)
+#STdeconvolve::correlationPlot(mat = corMat_prop, colLabs = "Transcriptional clusters", rowLabs = "STdeconvolve") + ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90))
+#dev.off()
+
+#dev.off()
+save.image(file = paste(f, '/', sample, Sys.Date(), '_STdeconvolve_sessionimage.RData', sep = ''))
+```
+
+# \_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_
+
+# Giotto (CCC)
+
+## Setup
+
+```{r}
+library(Giotto)
+
+sample <- 'CK17-27'
+
+# 1. set working directory
+results_folder = paste('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/', sample, sep = '')
+
+# 2. set giotto python path
+# set python path to your preferred python version path
+# set python path to NULL if you want to automatically install (only the 1st time) and use the giotto miniconda environment
+#python_path = '/Users/agolfinos/Library/r-miniconda-arm64/bin/python' 
+python_path = '/Users/agolfinos/Library/r-miniconda-arm64/envs/giotto_env/bin/python' 
+
+#python_path = NULL
+if(is.null(python_path)) {
+  installGiottoEnvironment()
+}
+```
+
+## Giotto global instructions and preparations
+
+```{r}
+## create instructions
+instrs = createGiottoInstructions(save_dir = results_folder, save_plot = TRUE,
+                                  show_plot = FALSE, python_path = python_path)
+
+## provide path to visium folder
+data_path = paste('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/', sample, sep = '')
+```
+
+## Create Giotto object & process data
+
+```{r}
+#options(future.globals.maxSize = 16000 * 1024^2)
+
+## directly from visium folder
+visium = createGiottoVisiumObject(visium_dir = data_path, expr_data = 'raw', png_name = 'tissue_lowres_image.png', gene_column_index = 2, instructions = instrs)
+
+## update and align background image
+# problem: image is not perfectly aligned
+spatPlot(gobject = visium, cell_color = 'in_tissue', show_image = T, point_alpha = 0.7, save_param = list(save_name = '2_a_spatplot_image'))
+
+# check name
+showGiottoImageNames(visium) # "image" is the default name
+# adjust parameters to align image (iterative approach)
+visium = updateGiottoImage(visium, image_name = 'image', xmax_adj = 1700, xmin_adj = 1500,
+                                  ymax_adj = 1300, ymin_adj = 1500)
+
+# now it's aligned
+spatPlot(gobject = visium, cell_color = 'in_tissue', show_image = T, point_alpha = 0.7,save_param = list(save_name = '2_b_spatplot_image_adjusted'))
+
+## check metadata
+pDataDT(visium)
+
+## compare in tissue with provided jpg
+spatPlot(gobject = visium, cell_color = 'in_tissue', point_size = 2,cell_color_code = c('0' = 'lightgrey', '1' = 'blue'), save_param = list(save_name = '2_c_in_tissue'))
+
+## subset on spots that were covered by tissue
+metadata = pDataDT(visium)
+in_tissue_barcodes = metadata[in_tissue == 1]$cell_ID
+visium = subsetGiotto(visium, cell_ids = in_tissue_barcodes)
+
+## filter
+visium <- filterGiotto(gobject = visium,
+                              expression_threshold = 1,
+                              gene_det_in_min_cells = 50,
+                              min_det_genes_per_cell = 1000,
+                              expression_values = c('raw'),
+                              verbose = T)
+
+## normalize
+visium <- normalizeGiotto(gobject = visium, scalefactor = 6000, verbose = T, scale_order = c('first_cells'))
+
+## add gene & cell statistics
+## not working? 
+visium <- addStatistics(gobject = visium)
+
+## visualize
+spatPlot2D(gobject = visium, show_image = T, point_alpha = 0.7,
+           save_param = list(save_name = '2_d_spatial_locations'))
+
+spatPlot2D(gobject = visium, show_image = T, point_alpha = 0.7,
+           cell_color = 'nr_genes', color_as_factor = F,
+           save_param = list(save_name = '2_e_nr_genes'))
+
+## highly variable genes (HVG)
+visium <- calculateHVG(gobject = visium, save_param = list(save_name = '3_a_HVGplot'))
+
+## run PCA on expression values (default)
+gene_metadata = fDataDT(visium)
+featgenes = gene_metadata[hvg == 'yes' & perc_cells > 3 & mean_expr_det > 0.4]$gene_ID
+
+visium <- runPCA(gobject = visium, 
+                       genes_to_use = featgenes, 
+                       scale_unit = F, center = T, 
+                       method="factominer")
+
+screePlot(visium, ncp = 30, save_param = list(save_name = '3_b_screeplot'))
+
+plotPCA(gobject = visium, save_param = list(save_name = '3_c_PCA_reduction'))
+
+## run UMAP and tSNE on PCA space (default)
+visium <- runUMAP(visium, dimensions_to_use = 1:15)
+plotUMAP(gobject = visium, save_param = list(save_name = '3_d_UMAP_reduction'))
+
+visium <- runtSNE(visium, dimensions_to_use = 1:15)
+plotTSNE(gobject = visium, save_param = list(save_name = '3_e_tSNE_reduction'))
+
+## sNN network (default)
+visium <- createNearestNetwork(gobject = visium, dimensions_to_use = 1:15, k = 15)
+
+saveRDS(visium, file = paste('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/Giotto/giotto_', sample, '.RDS', sep = ''))
+
+
+```
+
+## Giotto clustering and downstream analysis
+
+```{r}
+sample <- 'CK17-5'
+
+visium <- readRDS(paste('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/Giotto/giotto_', sample, '.RDS', sep = ''))
+
+## Leiden clustering
+visium <- doLeidenCluster(gobject = visium, resolution = 0.4, n_iterations = 10)
+#plotUMAP(gobject = visium_brain, cell_color = 'leiden_clus', show_NN_network = T, point_size = 2.5, save_param = list(save_name = '4_a_UMAP_leiden'))
+```
+
+## Giotto test dataset
+
+```{r}
+library(Giotto)
+
+# to automatically save figures in save_dir set save_plot to TRUE
+temp_dir = '~/Temp/'
+myinstructions = createGiottoInstructions(save_dir = temp_dir,
+                                          save_plot = FALSE, 
+                                          show_plot = F)
+
+# giotto object 
+expr_path = system.file("extdata", "visium_DG_expr.txt.gz", package = 'Giotto')
+loc_path = system.file("extdata", "visium_DG_locs.txt", package = 'Giotto')
+mini_visium <- createGiottoObject(raw_exprs = expr_path,
+                                   spatial_locs = loc_path,
+                                   instructions = myinstructions)
+
+## 1. read image
+png_path = system.file("extdata", "deg_image.png", package = 'Giotto')
+mg_img = magick::image_read(png_path)
+
+## 2. test and modify image alignment
+mypl = spatPlot(mini_visium, return_plot = T, point_alpha = 0.8)
+orig_png = createGiottoImage(gobject = mini_visium, mg_object = mg_img, name = 'image',
+                             xmax_adj = 450, xmin_adj = 550,
+                             ymax_adj = 200, ymin_adj = 200)
+mypl_image = addGiottoImageToSpatPlot(mypl, orig_png)
+mypl_image
+
+## 3. add images to Giotto object ##
+image_list = list(orig_png)
+mini_visium = addGiottoImage(gobject = mini_visium,
+                             images = image_list)
+showGiottoImageNames(mini_visium)
+
+# explore gene and cell distribution
+filterDistributions(mini_visium, detection = 'genes')
+filterDistributions(mini_visium, detection = 'cells')
+filterCombinations(mini_visium,
+                   expression_thresholds = c(1),
+                   gene_det_in_min_cells = c(20, 20, 50, 50),
+                   min_det_genes_per_cell = c(100, 200, 100, 200))
+
+# filter and normalize
+mini_visium <- filterGiotto(gobject = mini_visium,
+                            expression_threshold = 1,
+                            gene_det_in_min_cells = 50,
+                            min_det_genes_per_cell = 100,
+                            expression_values = c('raw'),
+                            verbose = T)
+mini_visium <- normalizeGiotto(gobject = mini_visium, scalefactor = 6000, verbose = T)
+mini_visium <- addStatistics(gobject = mini_visium)
+
+mini_visium <- calculateHVG(gobject = mini_visium)
+
+mini_visium <- runPCA(gobject = mini_visium)
+screePlot(mini_visium, ncp = 30)
+plotPCA(gobject = mini_visium)
+
+mini_visium <- runUMAP(mini_visium, dimensions_to_use = 1:10)
+plotUMAP(gobject = mini_visium)
+mini_visium <- runtSNE(mini_visium, dimensions_to_use = 1:10)
+plotTSNE(gobject = mini_visium)
+
+mini_visium <- createNearestNetwork(gobject = mini_visium, dimensions_to_use = 1:10, k = 15)
+mini_visium <- doLeidenCluster(gobject = mini_visium, resolution = 0.4, n_iterations = 1000)
+
+pDataDT(mini_visium)
+
+# visualize UMAP cluster results
+plotUMAP(gobject = mini_visium, cell_color = 'leiden_clus', show_NN_network = T, point_size = 2.5)
+
+# visualize UMAP and spatial results
+spatDimPlot(gobject = mini_visium, cell_color = 'leiden_clus', spat_point_shape = 'voronoi')
+
+# heatmap and dendrogram
+showClusterHeatmap(gobject = mini_visium, cluster_column = 'leiden_clus')
+showClusterDendrogram(mini_visium, h = 0.5, rotate = T, cluster_column = 'leiden_clus')
+```

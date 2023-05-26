@@ -1,0 +1,1655 @@
+---
+title: "GeoMx_pipeline"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r import packages}
+library(NanoStringNCTools)
+library(GeomxTools)
+library(knitr)
+library(dplyr)
+library(ggforce)
+library(ggplot2)
+library(scales)
+library(reshape2)  
+library(cowplot)   
+library(umap)
+library(Rtsne)
+library(pheatmap)
+library(Biobase)
+library(readxl)
+
+#geomx <- readRDS('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/GeoMx_CTA_2022-03-17/Objects/bothplates_hnc_geomx_postQC+norm.RDS')
+
+#if you make any updates to the geomx object, please save it using this line
+#saveRDS(geomx, file = '/Volumes/hdlab/Projects/RawData_FromUWBiotech/GeoMx_CTA_2022-03-17/Objects/bothplates_hnc_geomx_postQC+norm.RDS')
+```
+
+# [K17 manuscript]
+
+## • Set parameters
+```{r}
+geomx <- readRDS('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/GeoMx_CTA_2022-03-17/Objects/BOTHPLATES_R1_hnc_geomx_postQC_12142022.RDS')
+
+path <- '/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/K17_manuscript_figs/'
+
+ann_meta <- c('K17_status', 'Anatomic.location', 'Response')
+```
+
+## • Modify annotations
+```{r}
+pData(geomx) <- pData(geomx) %>%
+  dplyr::mutate(K17_status = dplyr::case_when(
+    endsWith(IHC_K17_classification1, "0") ~ "Low",
+    endsWith(IHC_K17_classification1, "1") ~ "High"))
+```
+
+## • Assessing QC metric numbers
+```{r}
+length(table(paste(pData(geomx)$roi, pData(geomx)$segment))) #129, compared to initial 173
+
+roi_annotations <- read_csv('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/GeoMx_CTA_2022-03-17/All_DCCs_and_intermediatefiles/Fitzpatrick_Dinh_220216_20220606T1702_LabWorksheet.csv')
+
+roi_annotations2 <- read_csv('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/GeoMx_CTA_2022-03-17/All_DCCs_and_intermediatefiles/K17_ROI_ANNOTATIONS.csv')
+
+exp_rois <- round(as.numeric(unique(pData(geomx)$roi)), digits = 1)
+setdiff(unique(roi_annotations$roi), exp_rois)
+# [1] NA
+
+setdiff(unique(roi_annotations2$`Sample ID`), exp_rois)
+# numeric(0)
+
+setdiff(exp_rois, unique(roi_annotations$roi))
+#  [1]  1.1  1.2  1.3  1.4 14.1 14.2 14.3 21.1 21.2 21.3 21.4 21.5 27.1 27.2 27.3 23.1 23.2 23.3
+# [19] 23.4  5.1  5.2  5.3  5.4
+
+setdiff(exp_rois, unique(roi_annotations2$`Sample ID`))
+# [1] 23.1 23.2 23.3 23.4  5.1  5.2  5.3  5.4
+
+unique(pData(geomx)$`Patient number (CK17-)`)
+
+#[1] "1"  "14" "21" "27" "23" "5"  "4"  "7"  "22" "9" 
+```
+
+
+# [Sample table] 
+```{r}
+roi <- as.data.frame.matrix(table(pData(geomx)$`Patient number (CK17-)`, pData(geomx)$roi))
+
+colnames(roi) <- as.numeric(colnames(roi))
+test <- round(colnames(roi), digits = 1)
+
+write.csv(roi, file = paste(path, 'patient_by_roi_table.csv', sep = ''))
+
+segment <- as.data.frame.matrix(table(pData(geomx)$`Patient number (CK17-)`, pData(geomx)$segment))
+write.csv(segment, file = paste(path, 'patient_by_segment_table.csv', sep = ''))
+```
+
+
+## • [Volcano plot] IHC k17 classification 0 vs. 1 in "tumor"
+
+```{r}
+geomx_vp(split.meta = 'K17_status', splitmeta_oi = c('Low', 'High'), topmeta = 't_vs_s', topmeta_oi = 'tumor', out = path, add_labels = c('HLA-A', 'HLA-B'))
+```
+
+## • [Heatmap] All segments (tfh and mac genes)
+
+```{r}
+# mac genes
+geomx_heatmap(geomx = geomx, genes = 'custom', gene_set = c('MMP9', 'SPP1', 'IL1B', 'C1QA', 'C1QB', 'C1QC', 'CCL4', 'APOE'), segment = 'CD45 normal', add_segment_names = FALSE, path = path, width = 9, height = 5, metadata = ann_meta)
+
+# tfh genes
+geomx_heatmap(geomx = geomx, genes = 'custom', gene_set = c('BTLA', 'CCR6', 'CCR7', 'CD84', 'CXCL13', 'CXCR4', 'CXCR5', 'ICOS', 'IL21', 'IL21R', 'CD200', 'IL6ST'), segment = 'CD45 normal',  path = path, width = 9, height = 5, metadata = ann_meta, add_segment_names = FALSE)
+```
+
+## • [Heatmap] All segments tumor 0 vs 1 top genes
+```{r}
+# reading in DE data
+df <- read.csv('/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/K17_manuscript_figs/2023-03-09paired=FALSEvolcano_plot_input.csv')
+
+genes <- df[df$Color %in% c(c('FDR < 0.001', 'FDR < 0.05')),]$Gene
+genes <- c(genes, 'HLA-A', 'HLA-B')
+
+geomx_tumor <- geomx[,pData(geomx)$segment %in% c('K17', 'PCK no K17')]
+
+geomx_heatmap(geomx = geomx_tumor, genes = 'custom', gene_set = genes, segment = 'all',  path = path, width = 15, height = 7, metadata = c('K17_status', 'Anatomic.location', 'Response'))
+```
+
+# Creating/editing annotation file
+
+```{r creating annotation file}
+a1 <- read_excel('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/GeoMx_CTA_2022-03-17/All_DCCs_and_intermediatefiles/Patient_clinical_annotations.xlsx')
+pheno_a <- read_excel('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/GeoMx_CTA_2022-03-17/All_DCCs_and_intermediatefiles/Fitzpatrick_Dinh 220215_20220216T1334_LabWorksheet.xlsx')
+pheno_b <- read_excel('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/GeoMx_CTA_2022-03-17/All_DCCs_and_intermediatefiles/Fitzpatrick Dinh 220216_20220223T1835_LabWorksheet.xlsx')
+
+ann_a <- merge(a1, pheno_a, by.x = 'Patient number (CK17-)', by.y = "patient_id")
+ann_a <- ann_a[!is.na(ann_a$Sample_ID), ]
+
+#write.csv(ann_a, '/Volumes/hdlab/Projects/RawData_FromUWBiotech/GeoMx_CTA_2022-03-17/All_DCCs_and_intermediatefiles/plateA_final_annotations.csv')
+
+ann_b <- merge(a1, pheno_b, by.x = 'Patient number (CK17-)', by.y = 'patient_id')
+ann_b <- ann_b[!is.na(ann_b$Sample_ID),]
+
+#write.csv(ann_b, '/Volumes/hdlab/Projects/RawData_FromUWBiotech/GeoMx_CTA_2022-03-17/All_DCCs_and_intermediatefiles/plateB_final_annotations.csv')
+
+ann_all <- rbind(ann_a, ann_b)
+
+#write.csv(ann_all, '/Volumes/hdlab/Projects/RawData_FromUWBiotech/GeoMx_CTA_2022-03-17/All_DCCs_and_intermediatefiles/Bothplates_final_annotations.csv')
+
+################## adding new annotations based on ROI 04/27/2022 ########################
+bp <- readxl::read_excel('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/GeoMx_CTA_2022-03-17/All_DCCs_and_intermediatefiles/BothPlates_final_annotations.xlsx')
+bp$roi <- as.numeric(bp$roi)
+
+an <- readxl::read_excel('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/GeoMx_CTA_2022-03-17/All_DCCs_and_intermediatefiles/K17_ROI_ANNOTATIONS.xlsx')
+
+ann <- merge(bp, an, by.x = 'roi', by.y = "Sample ID", all = TRUE)
+
+meta <- read.csv('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/GeoMx_CTA_2022-03-17/12-13-22_K17_ROI_ANNOTATIONS.csv')
+
+ann <- merge(ann, meta, by.x = 'roi', by.y = 'Sample.ID', all = TRUE)
+
+write.csv(ann, file = '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/GeoMx_CTA_2022-03-17/BothPlates_final_annotations12142022.csv')
+```
+
+# R1 only files -- BOTH plates
+
+# Quality control (do not use)
+
+```{r}
+a1 <- read_excel('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/GeoMx_CTA_2022-03-17/All_DCCs_and_intermediatefiles/Patient_clinical_annotations.xlsx')
+
+pheno_b <- read_excel('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/GeoMx_CTA_2022-03-17/HNC_GeoMx_PlateA_R1/Fitzpatrick_Dinh 220215_20220606T1715_LabWorksheet.xlsx')
+
+
+# fixing little issues 
+pheno_b$patient_id <- sapply(strsplit(pheno_b$roi, ".", fixed = TRUE), `[`, 1)
+
+
+# merging together our two first metadata files
+ann_b <- merge(a1, pheno_b, by.x = 'Patient number (CK17-)', by.y = 'patient_id')
+ann_b <- ann_b[!is.na(ann_b$Sample_ID),]
+
+# merging together our combined and third metadata files
+ann_b <- merge(ann_b, meta, by.x = 'roi', by.y = 'Sample.ID')
+
+write.csv(ann_b, '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/GeoMx_CTA_2022-03-17/HNC_GeoMx_PlateA_R1/plateA_allannotations_R1only_updated12062022.csv')
+
+ann_b <- read.csv('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/GeoMx_CTA_2022-03-17/HNC_GeoMx_PlateA_R1/plateA_allannotations_R1only_updated12062022.csv')
+```
+
+## • Read in files
+
+```{r}
+datadir <- file.path('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/GeoMx_CTA_2022-03-17/All_DCCS_and_intermediatefiles_R1ONLY/')
+DCCFiles <- list.files(path = datadir, pattern = '.dcc$', full.names = TRUE, ignore.case = TRUE)
+PKCFiles <- list.files(path = datadir, pattern = '.pkc$', full.names = TRUE, ignore.case = TRUE)
+phenoFiles <- list.files(path = datadir, pattern = 'BothPlates_final_annotations12142022.xlsx$', full.names = TRUE, ignore.case = TRUE)
+```
+
+## • Make object and assess initial data quality and distribution
+
+```{r}
+#creating the object that contains all data
+geomx <- readNanoStringGeoMxSet(dccFiles = DCCFiles, pkcFiles = PKCFiles, phenoDataFile = phenoFiles, phenoDataSheet = 'BothPlates_final_annotations121')
+
+#assessing our PKC files to make sure they look as expected
+pkcs <- annotation(geomx)
+modules <- gsub(".pkc", "", pkcs)
+knitr::kable(data.frame(PKCs = pkcs, modules = modules))
+
+####### SANKEY PLOT #############
+
+# select annotations we want to show, use `` to surround column names with spaces or symbols
+count_mat <- count(Biobase::pData(geomx), Response, `slide name`, `p16 status`, segment)
+
+# gather the data and plot in order: class, slide name, region, segment
+test_gr <- gather_set_data(count_mat, 1:4)
+test_gr$x <- factor(test_gr$x, levels = c("Response", "slide name", "p16 status", "segment"))
+
+# plot Sankey
+ggplot(test_gr, aes(x, id = id, split = y, value = n)) + geom_parallel_sets(aes(fill = `p16 status`), alpha = 0.5, axis.width = 0.1) + geom_parallel_sets_axes(axis.width = 0.2) + geom_parallel_sets_labels(color = "white", size = 5) + theme_classic(base_size = 17) + theme(legend.position = "bottom", axis.ticks.y = element_blank(), axis.line = element_blank(), axis.text.y = element_blank()) + scale_y_continuous(expand = expansion(0)) + scale_x_discrete(expand = expansion(0)) + labs(x = "", y = "") + annotate(geom = "segment", x = 4.25, xend = 4.25, y = 20, yend = 120, lwd = 2) + annotate(geom = "text", x = 4.19, y = 70, angle = 90, size = 5, hjust = 0.5, label = "100 segments")
+```
+
+## • CHECKPOINT: Save and load object
+
+```{r}
+saveRDS(geomx, file = '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/GeoMx_CTA_2022-03-17/Objects/R1only_BOTHPLATES_hnc_geomx_preQC_12142022.RDS')
+
+geomx <- readRDS(file = '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/GeoMx_CTA_2022-03-17/Objects/R1only_BOTHPLATES_hnc_geomx_preQC_12142022.RDS')
+```
+
+## • Calculate Segment QC
+
+```{r}
+#shifting all zeroes to one to enable downstream transformations
+geomx <- shiftCountsOne(geomx, useDALogic = TRUE)
+
+#checking a number of QC parameters
+QC_params <- list(minSegmentReads = 1000, # Minimum number of reads (1000)
+         percentTrimmed = 80,    # Minimum % of reads trimmed (80%)
+         percentStitched = 80,   # Minimum % of reads stitched (80%)
+         percentAligned = 75,    # Minimum % of reads aligned (75%)
+         percentSaturation = 50, # Minimum sequencing saturation (50%)
+         minNegativeCount = 1,   # Minimum negative control counts (10)
+         maxNTCCount = 9000,     # Maximum counts observed in NTC well (1000)
+         minNuclei = 20,         # Minimum # of nuclei estimated (100)
+         minArea = 1000)         # Minimum segment area (1000)
+
+#adding them to our object
+geomx <-setSegmentQCFlags(geomx, qcCutoffs = QC_params)        
+
+# Collate QC Results
+QCResults <- protocolData(geomx)[["QCFlags"]]
+flag_columns <- colnames(QCResults)
+QC_Summary <- data.frame(Pass = colSums(!QCResults[, flag_columns]), Warning = colSums(QCResults[, flag_columns]))
+QCResults$QCStatus <- apply(QCResults, 1L, function(x) {
+    ifelse(sum(x) == 0L, "PASS", "WARNING")
+})
+QC_Summary["TOTAL FLAGS", ] <-c(sum(QCResults[, "QCStatus"] == "PASS"), sum(QCResults[, "QCStatus"] == "WARNING"))
+```
+
+## • Visualize segment QC
+
+```{r}
+col_by <- "segment"
+
+# Graphical summaries of QC statistics plot function
+QC_histogram <- function(assay_data = NULL, annotation = NULL,
+                         fill_by = NULL, thr = NULL, scale_trans = NULL) {
+    plt <- ggplot(assay_data, aes_string(x = paste0("unlist(`", annotation, "`)"), fill = fill_by)) +
+        geom_histogram(bins = 50) + geom_vline(xintercept = thr, lty = "dashed", color = "black") +
+        theme_bw() + guides(fill = "none") + facet_wrap(as.formula(paste("~", fill_by)), nrow = 4) +
+        labs(x = annotation, y = "Segments, #", title = annotation)
+    if(!is.null(scale_trans)) {
+        plt <- plt + scale_x_continuous(trans = scale_trans)
+    }
+    plt
+}
+
+QC_histogram(sData(geomx), "Trimmed (%)", col_by, 80)
+QC_histogram(sData(geomx), "Stitched (%)", col_by, 80)
+QC_histogram(sData(geomx), "Aligned (%)", col_by, 75)
+QC_histogram(sData(geomx), "Saturated (%)", col_by, 50) + labs(title = "Sequencing Saturation (%)",x = "Sequencing Saturation (%)")
+#QC_histogram(sData(geomx), "area", col_by, 1000, scale_trans = "log10")
+```
+
+## • Calculate NegGeoMean
+
+```{r}
+# calculate the negative geometric means for each module
+negativeGeoMeans <- esBy(negativeControlSubset(geomx), GROUP = "Module", FUN = function(x) { 
+             assayDataApply(x, MARGIN = 2, FUN = ngeoMean, elt = "exprs") 
+         }) 
+protocolData(geomx)[["NegGeoMean"]] <- negativeGeoMeans
+
+# explicitly copy the Negative geoMeans from sData to pData
+negCols <- paste0("NegGeoMean_", modules)
+Biobase::pData(geomx)[, negCols] <- sData(geomx)[["NegGeoMean"]]
+for(ann in negCols) {
+    plt <- QC_histogram(Biobase::pData(geomx), ann, col_by, 2, scale_trans = "log10")
+    print(plt)
+}
+
+# detatch neg_geomean columns ahead of aggregateCounts call
+Biobase::pData(geomx) <- Biobase::pData(geomx)[, !colnames(Biobase::pData(geomx)) %in% negCols]
+```
+
+## • Visualize all QC metrics
+
+```{r}
+knitr::kable(QC_Summary, caption = "QC Summary Table for each Segment")
+
+dim(geomx)
+#> Features  Samples 
+#>    8659       173 
+
+qc_pass <- geomx[, QCResults$QCStatus == "PASS"]
+dim(qc_pass)
+#> Features  Samples 
+#>    8659       140 
+#>    
+geomx <- geomx[, QCResults$QCStatus == "PASS"]
+```
+
+## • Probe QC
+
+```{r}
+#Generally keep the qcCutoffs parameters unchanged. Set removeLocalOutliers to FALSE if you do not want to remove local outliers
+geomx <- setBioProbeQCFlags(geomx, qcCutoffs = list(minProbeRatio = 0.1, percentFailGrubbs = 20), removeLocalOutliers = TRUE)
+
+ProbeQCResults <- Biobase::fData(geomx)[["QCFlags"]]
+
+# Define QC table for Probe QC
+qc_df <- data.frame(Passed = sum(rowSums(ProbeQCResults[, -1]) == 0), Global = sum(ProbeQCResults$GlobalGrubbsOutlier), Local = sum(rowSums(ProbeQCResults[, -2:-1]) > 0 & !ProbeQCResults$GlobalGrubbsOutlier))
+
+#Subset object to exclude all that did not pass Ratio & Global testing
+ProbeQCPassed <- subset(geomx, Biobase::fData(geomx)[["QCFlags"]][,c("LowProbeRatio")] == FALSE & Biobase::fData(geomx)[["QCFlags"]][,c("GlobalGrubbsOutlier")] == FALSE)
+
+dim(ProbeQCPassed)
+#> Features  Samples 
+#>    8649       140
+geomx <- ProbeQCPassed 
+```
+
+## • Condense to targets
+
+```{r}
+# Check how many unique targets the object has
+length(unique(featureData(geomx)[["TargetName"]]))
+#> [1] 1812
+
+# collapse to targets
+target_geomx <- aggregateCounts(geomx)
+dim(target_geomx)
+#> Features  Samples 
+#>    1812       140
+Biobase::exprs(target_geomx)[1:5, 1:2]
+#>         DSP-1001660009216-A-A02.dcc    DSP-1001660009216-A-A03.dcc
+#> ACTA2                     25.145494                    8.057232
+#> FOXA2                      9.251128                    3.307798
+#> NANOG                     14.356322                    7.880880
+#> TRAC                      26.374780                   10.532100
+#> TRBC1/2                   11.466209                    3.169786
+```
+
+## • Calculate genes above the LOQ (1 SD above negative probe)
+
+```{r}
+# Define LOQ SD threshold and minimum value
+cutoff <- 1
+minLOQ <- 1
+
+# Calculate LOQ per module tested
+LOQ <- data.frame(row.names = colnames(target_geomx))
+for(module in modules) {
+    vars <- paste0(c("NegGeoMean_", "NegGeoSD_"), module)
+    if(all(vars[1:2] %in% colnames(Biobase::pData(target_geomx)))) {
+        LOQ[, module] <- pmax(minLOQ, Biobase::pData(target_geomx)[, vars[1]] * Biobase::pData(target_geomx)[, vars[2]] ^ cutoff)
+    }
+}
+Biobase::pData(target_geomx)$LOQ <- LOQ
+
+
+#filtering out either segments and/or genes with abnormally low signal based on the LOQ
+LOQ_Mat <- c()
+for(module in modules) {
+    ind <- Biobase::fData(target_geomx)$Module == module
+    Mat_i <- t(esApply(target_geomx[ind, ], MARGIN = 1, FUN = function(x) {
+                           x > LOQ[, module]
+                       }))
+    LOQ_Mat <- rbind(LOQ_Mat, Mat_i)
+}
+# ensure ordering since this is stored outside of the geomxSet
+LOQ_Mat <- LOQ_Mat[Biobase::fData(target_geomx)$TargetName, ]
+
+# Save detection rate information to pheno data
+Biobase::pData(target_geomx)$GenesDetected <- colSums(LOQ_Mat, na.rm = TRUE)
+Biobase::pData(target_geomx)$GeneDetectionRate <- Biobase::pData(target_geomx)$GenesDetected / nrow(target_geomx)
+
+# Determine detection thresholds: 1%, 5%, 10%, 15%, >15%
+Biobase::pData(target_geomx)$DetectionThreshold <- cut(Biobase::pData(target_geomx)$GeneDetectionRate,
+        breaks = c(0, 0.01, 0.05, 0.1, 0.15, 1), labels = c("<1%", "1-5%", "5-10%", "10-15%", ">15%"))
+```
+
+## • Visualize gene detection rate
+
+```{r}
+# stacked bar plot of different cut points (1%, 5%, 10%, 15%)
+ggplot(Biobase::pData(target_geomx), aes(x = DetectionThreshold)) + geom_bar(aes(fill = Response)) + geom_text(stat = "count", aes(label = ..count..), vjust = -0.5) + theme_bw() + scale_y_continuous(expand = expansion(mult = c(0, 0.1))) + labs(x = "Gene Detection Rate", y = "Segments, #", fill = "Segment Type")
+
+#setting our filtering threshold for gene detection to at least 1%
+target_geomx <- target_geomx[, Biobase::pData(target_geomx)$GeneDetectionRate >= .10]
+
+dim(target_geomx)
+#> Features  Samples 
+#>    1812       129
+```
+
+## • Sankey plot
+
+```{r}
+# select annotations to show, use `` to surround column names with spaces or special symbols
+count_mat <- count(Biobase::pData(geomx), Response, `slide name`, `p16 status`, segment)
+
+# gather the data and plot in order: class, slide name, region, segment
+test_gr <- gather_set_data(count_mat, 1:4)
+test_gr$x <- factor(test_gr$x, levels = c("Response", "slide name", "p16 status", "segment"))
+
+# plot Sankey
+ggplot(test_gr, aes(x, id = id, split = y, value = n)) + geom_parallel_sets(aes(fill = `p16 status`), alpha = 0.5, axis.width = 0.1) + geom_parallel_sets_axes(axis.width = 0.2) + geom_parallel_sets_labels(color = "white", size = 5) + theme_classic(base_size = 17) + theme(legend.position = "bottom", axis.ticks.y = element_blank(), axis.line = element_blank(), axis.text.y = element_blank()) + scale_y_continuous(expand = expansion(0)) + scale_x_discrete(expand = expansion(0)) + labs(x = "", y = "")# + annotate(geom = "segment", x = 4.25, xend = 4.25, y = 20, yend = 120, lwd = 2) + annotate(geom = "text", x = 4.19, y = 70, angle = 90, size = 5, hjust = 0.5, label = "100 segments")
+
+saveRDS(target_geomx, '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/GeoMx_CTA_2022-03-17/Objects/BOTHPLATES_R1_hnc_geomx_postQC_12142022.RDS')
+```
+
+## • Calculate gene detection rate
+
+```{r}
+# Calculate detection rate:
+LOQ_Mat <- LOQ_Mat[, colnames(target_geomx)]
+Biobase::fData(target_geomx)$DetectedSegments <- rowSums(LOQ_Mat, na.rm = TRUE)
+Biobase::fData(target_geomx)$DetectionRate <- Biobase::fData(target_geomx)$DetectedSegments / nrow(Biobase::pData(target_geomx))
+
+# Plot detection rate:
+plot_detect <- data.frame(Freq = c(1, 5, 10, 20, 30, 50))
+plot_detect$Number <- unlist(lapply(c(0.01, 0.05, 0.1, 0.2, 0.3, 0.5), 
+                                    function(x) {sum(Biobase::fData(target_geomx)$DetectionRate >= x)}))
+plot_detect$Rate <- plot_detect$Number / nrow(Biobase::fData(target_geomx))
+rownames(plot_detect) <- plot_detect$Freq
+```
+
+## • Plot gene detection rate
+
+```{r}
+#plotting bar plot
+ggplot(plot_detect, aes(x = as.factor(Freq), y = Rate, fill = Rate)) + geom_bar(stat = "identity") + geom_text(aes(label = formatC(Number, format = "d", big.mark = ",")), vjust = 1.6, color = "black", size = 4) + scale_fill_gradient2(low = "orange2", mid = "lightblue", high = "dodgerblue3", midpoint = 0.65, limits = c(0,1), labels = scales::percent) + theme_bw() + scale_y_continuous(labels = scales::percent, limits = c(0,1), expand = expansion(mult = c(0, 0))) + labs(x = "% of Segments", y = "Genes Detected, % of Panel > LOQ")
+```
+
+## • Filter by gene detection rate
+
+```{r}
+# Subset to target genes detected in >10% of the samples. Also manually include the neg ctrl probe, for downstream use
+negativeProbefData <- subset(Biobase::fData(target_geomx), CodeClass == "Negative")
+neg_probes <- unique(negativeProbefData$TargetName)
+
+target_geomx <- target_geomx[Biobase::fData(target_geomx)$DetectionRate >= 0.1 | Biobase::fData(target_geomx)$TargetName %in% neg_probes, ]
+dim(target_geomx)
+#> Features  Samples 
+#>    1576      129
+
+geomx <- target_geomx
+saveRDS(geomx, '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/GeoMx_CTA_2022-03-17/Objects/BOTHPLATES_R1_hnc_geomx_postQC_12142022.RDS')
+```
+
+## • Read in RDS
+
+```{r}
+geomx <- readRDS('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/GeoMx_CTA_2022-03-17/Objects/BOTHPLATES_R1_hnc_geomx_postQC_12142022.RDS')
+```
+
+# -----Analysis------------
+
+# Figures for Taja/Megan's K17 pathology manuscript
+
+## • Comparing CD45 AOIs to PCK no K17
+
+```{r}
+geomx_vp(split.meta = 'segment', splitmeta_oi = c('CD45 normal', 'PCK no K17'), top.split = FALSE, out = '/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/CD45vsPCKnoK17/', paired = TRUE)
+```
+
+## • Comparing Cd45 AOIs to Triple Negative
+
+```{r}
+geomx_vp(split.meta = 'segment', splitmeta_oi = c('CD45 normal', 'triple negative'), top.split = FALSE, out = '/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/CD45vsTripleNegative/', paired = TRUE)
+```
+
+## • Tumor split by 0, 1 IHC K17
+
+```{r}
+geomx_vp(split.meta = 'IHC_K17_classification1', splitmeta_oi = c('0', '1'), top.split = TRUE, topmeta = c('t_vs_s'), topmeta_oi = c('tumor'), out = '/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/K170vs1_tumor_volcplot/', paired = FALSE)
+```
+
+## • Tumor split by response status
+```{r}
+geomx_vp(split.meta = 'Response', splitmeta_oi = c('non responder', 'responder'), top.split = TRUE, topmeta = c('t_vs_s'), topmeta_oi = c('tumor'), out = '/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/RvsNR_tumor_volcplot/', paired = FALSE)
+```
+
+
+## • PCK segment split by 0,1 K17 status
+
+```{r}
+geomx_vp(split.meta = 'IHC_K17_classification1', splitmeta_oi = c('0', '1'), top.split = TRUE, topmeta = c('segment'), topmeta_oi = c('PCK no K17'), out = '/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/0vs1_PCKnoK17_volcplot/', paired = FALSE)
+```
+
+## • K17 segment split by 0,1 K17 status
+
+```{r}
+geomx_vp(split.meta = 'IHC_K17_classification1', splitmeta_oi = c('0', '1'), top.split = TRUE, topmeta = c('segment'), topmeta_oi = c('K17'), out = '/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/0vs1_K17_volcplot/', paired = FALSE)
+```
+
+## • PCK vs. K17
+
+```{r}
+geomx_vp(split.meta = 'segment', splitmeta_oi = c('PCK no K17', 'K17'), top.split = FALSE, out = '/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/PCKnoK17vsK17_volcplot/', paired = FALSE)
+```
+
+## • 0 split by PCK no K17 and K17
+
+```{r}
+geomx_vp(split.meta = 'segment', splitmeta_oi = c('PCK no K17', 'K17'), top.split = TRUE, topmeta = c('IHC_K17_classification1'), topmeta_oi = c('0'), out = '/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/PCKnoK17vsK17_0_volcplot/', paired = FALSE)
+```
+
+## • 1 split by PCK no K17 and K17
+
+```{r}
+geomx_vp(split.meta = 'segment', splitmeta_oi = c('PCK no K17', 'K17'), top.split = TRUE, topmeta = c('IHC_K17_classification1'), topmeta_oi = c('1'), out = '/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/PCKnoK17vsK17_1_volcplot/', paired = FALSE)
+```
+
+## Normalization
+
+```{r}
+geomx <- readRDS('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/GeoMx_CTA_2022-03-17/Objects/BOTHPLATES_R1_hnc_geomx_postQC_12142022.RDS')
+
+# Graph Q3 value vs negGeoMean of Negatives
+ann_of_interest <- "segment"
+Stat_data <- data.frame(row.names = colnames(exprs(geomx)), Segment = colnames(exprs(geomx)),
+                        Annotation = Biobase::pData(geomx)[, ann_of_interest], Q3 = unlist(apply(exprs(geomx), 2, 
+                        quantile, 0.75, na.rm = TRUE)), NegProbe = exprs(geomx)[neg_probes, ])
+Stat_data_m <- melt(Stat_data, measure.vars = c("Q3", "NegProbe"), variable.name = "Statistic", value.name = "Value")
+
+plt1 <- ggplot(Stat_data_m, aes(x = Value, fill = Statistic)) + geom_histogram(bins = 40) + theme_bw() + scale_x_continuous(trans = "log2") + facet_wrap(~Annotation, nrow = 1) + scale_fill_brewer(palette = 3, type = "qual") + labs(x = "Counts", y = "Segments, #")
+
+plt2 <- ggplot(Stat_data, aes(x = NegProbe, y = Q3, color = Annotation)) +
+    geom_abline(intercept = 0, slope = 1, lty = "dashed", color = "darkgray") + geom_point() + guides(color = "none") + theme_bw() + scale_x_continuous(trans = "log2") + scale_y_continuous(trans = "log2") + theme(aspect.ratio = 1) + labs(x = "Negative Probe GeoMean, Counts", y = "Q3 Value, Counts")
+
+plt3 <- ggplot(Stat_data, aes(x = NegProbe, y = Q3 / NegProbe, color = Annotation)) +
+    geom_hline(yintercept = 1, lty = "dashed", color = "darkgray") + geom_point() + theme_bw() + scale_x_continuous(trans = "log2") + scale_y_continuous(trans = "log2") + theme(aspect.ratio = 1) + labs(x = "Negative Probe GeoMean, Counts", y = "Q3/NegProbe Value, Counts")
+
+btm_row <- plot_grid(plt2, plt3, nrow = 1, labels = c("B", ""),rel_widths = c(0.43,0.57))
+
+plot_grid(plt1, btm_row, ncol = 1, labels = c("A", ""))
+
+# Q3 norm (75th percentile) for WTA/CTA  with or without custom spike-ins
+geomx <- NanoStringNCTools::normalize(geomx, norm_method = "quant", 
+                             desiredQuantile = .75, toElt = "q_norm")
+
+# Background normalization for WTA/CTA without custom spike-in
+geomx <- NanoStringNCTools::normalize(geomx , norm_method = "neg", 
+                             fromElt = "exprs", toElt = "neg_norm")
+
+geomx <- NanoStringNCTools::normalize(geomx , norm_method = "neg", 
+                             fromElt = "q_norm", toElt = "negq_norm")
+
+#pre normalization boxplot of first 10 segments
+boxplot(exprs(geomx)[,1:10], col = "#9EDAE5", main = "Raw Counts", log = "y", names = 1:10, xlab = "Segment", ylab = "Counts, Raw")
+
+#post normalization boxplot of first 10 segments
+boxplot(assayDataElement(geomx[,1:10], elt = "q_norm"), col = "#2CA02C", main = "Q3 Norm Counts", log = "y", names = 1:10, xlab = "Segment", ylab = "Counts, Q3 Normalized")
+
+boxplot(assayDataElement(geomx[,1:10], elt = "neg_norm"), col = "#FF7F0E", main = "Neg Norm Counts", log = "y", names = 1:10, xlab = "Segment", ylab = "Counts, Neg. Normalized")
+
+boxplot(assayDataElement(geomx[,1:10], elt = "negq_norm"), col = "#7F00FF", main = "Neg + Q3 Norm Counts", log = "y", names = 1:10, xlab = "Segment", ylab = "Counts, Neg. and Q3 Normalized")
+
+saveRDS(geomx, file = '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/GeoMx_CTA_2022-03-17/Objects/BOTHPLATES_R1_hnc_geomx_postQC_12142022.RDS')
+```
+
+# Volcano plots (Wilcoxan DE analysis)
+
+## • IHC k17 classification 0 vs. 1 in "tumor"
+
+```{r}
+input <- read.csv('/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/K170vs1_tumor_volcplot/2022-12-23paired=FALSEvolcano_plot_input.csv')
+
+sub <- unique(rbind(subset(input, abs(log2foldChange) > 0.5 & FDR < 0.05)))
+
+ggplot(input, aes(x = log2foldChange, y = -log10(FDR), color = Color, label = Gene)) +
+  geom_vline(xintercept = c(0.5, -0.5), lty = "dashed") + geom_hline(yintercept = -log10(0.05), lty = "dashed") + geom_point() + labs(x = "Enriched in K17 Low <-----  log2(FC)  ------> Enriched in K17 High", y = "Significance, -log10(FDR)", color = "Significance") + scale_color_manual(values = c(`FDR < 0.001` = "dodgerblue", `FDR < 0.05` = "lightblue",`P < 0.05` = "orange2", `NS or FC < 0.5` = "gray"), guide = guide_legend(override.aes = list(size = 4))) + scale_y_continuous(expand = expansion(mult = c(0,0.05))) + ggrepel::geom_text_repel(data = sub, size = 4, point.padding = 0.15, color = "black", min.segment.length = .1, box.padding = .2, lwd = 2,max.overlaps = 50) + theme_classic(base_size = 16) + theme(legend.position = "bottom") + ggtitle('Significantly upregulated genes in tumor')
+ggsave('/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/K170vs1_tumor_volcplot/2022-12-23_lowVhigh_intumor_volcanoPlot.png', width = 9, height = 7, units = 'in', dpi = 300)
+```
+
+## • OLD FUNCTION RUN
+
+```{r}
+# PCK vs. K17 responders
+geomx_vp(segments_oi = c('PCK no K17', 'K17'), response = 'responder', out_dir = '/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/PCKvsK17_responders_volcplot/')
+
+# PCK vs. K17 nonresponders
+geomx_vp(segments_oi = c('PCK no K17', 'K17'), response = 'non responder', out_dir = '/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/PCKvsK17_nonresponders_volcplot/')
+```
+
+
+## • OLD FUNCTION: TN vs. K17 responders
+
+```{r, warning = FALSE}
+geomx_vp(segments_oi = c('triple negative', 'K17'), response = 'responder', out_dir = '/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/TNvsK17_responders_volcplot/')
+```
+
+## • OLD FUNCTION: TN vs. K17 non responders
+
+```{r, warning = FALSE}
+geomx_vp(segments_oi = c('triple negative', 'K17'), response = 'non responder', out_dir = '/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/TNvsK17_nonresponders_volcplot/')
+```
+
+## • OLD FUNCTION: TN and PCK responders
+
+```{r, warning = FALSE}
+geomx_vp(segments_oi = c('triple negative', 'PCK no K17'), response = 'responder', out_dir = '/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/TNvsPCK_responders_volcplot/')
+```
+
+## • OLD FUNCTION: TN and PCK non responders
+
+```{r warning = FALSE}
+geomx_vp(segments_oi = c('triple negative', 'PCK no K17'), response = 'non responder', out_dir = '/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/TNvsPCK_nonresponders_volcplot/')
+```
+
+## • OLD FUNCTION: TN and PCK all responses
+
+```{r, warning = FALSE}
+geomx_vp(segments_oi = c('triple negative', 'PCK no K17'), response = NULL, out_dir = '/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/TNvsPCK_allresponses_volcplot/')
+```
+
+## • OLD FUNCTION: TN and K17 all responses
+
+```{r, warning=FALSE}
+geomx_vp(segments_oi = c('triple negative', 'K17'), response = NULL, out_dir = '/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/TNvsK17_allresponses_volcplot/')
+```
+
+## • PCK and K17 all responses
+
+```{r, warning=FALSE}
+#geomx_vp(segments_oi = c('PCK no K17', 'K17'), response = NULL, out_dir = '/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/PCKvsK17_allresponses_volcplot/')
+
+geomx_vp(split.meta = 'segment', splitmeta_oi = c('K17', 'PCK no K17'), topmeta = 'Response', topmeta_oi = c('responder', 'non responder'), out_dir = '/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/PCKvsK17_allresponses_volcplot/', paired = FALSE)
+```
+
+## • R and NR tumor
+
+```{r}
+geomx_vp(split.meta = c('Response'), splitmeta_oi = c('responder', 'non responder'), topmeta = c('t_vs_s'), topmeta_oi = c('tumor'), out_dir = '/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/RvsNR_tumor_volcplot/', paired = FALSE)
+```
+
+## • R and NR stromal
+
+```{r}
+geomx_vp(split.meta = c('Response'), splitmeta_oi = c('responder', 'non responder'), topmeta = c('t_vs_s'), topmeta_oi = c('stromal'), out_dir = '/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/RvsNR_stroma_volcplot/', paired = FALSE)
+```
+
+## • K17 low and high tumor
+
+```{r}
+geomx_vp(split.meta = c('K17 status'), splitmeta_oi = c('low', 'high'), topmeta = c('t_vs_s'), topmeta_oi = c('tumor'), out_dir = '/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/K17hivslo_tumor_volcplot/', paired = FALSE)
+```
+
+## • K17 low and high stromal
+
+```{r}
+geomx_vp(split.meta = c('K17 status'), splitmeta_oi = c('low', 'high'), topmeta = c('t_vs_s'), topmeta_oi = c('stromal'), out_dir = '/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/K17hivslo_stroma_volcplot/', paired = FALSE)
+```
+
+## • PCK vs. K17 K17hi
+
+```{r}
+geomx_vp(split.meta = c('segment'), splitmeta_oi = c('PCK no K17', 'K17'), topmeta = c('K17 status'), topmeta_oi = c('high'), out_dir = '/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/PCKvsK17_K17hi_volcplot/', paired = TRUE)
+```
+
+## • PCK vs. K17 K17lo
+
+```{r}
+geomx_vp(split.meta = c('segment'), splitmeta_oi = c('PCK no K17', 'K17'), topmeta = c('K17 status'), topmeta_oi = c('low'), out_dir = '/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/PCKvsK17_K17lo_volcplot/', paired = TRUE)
+```
+
+## Adding annotations to our geomx object
+
+```{r}
+pData(geomx) <- pData(geomx) %>%
+  dplyr::mutate(t_vs_s = dplyr::case_when(
+    endsWith(segment, "K17") ~ "tumor",
+    endsWith(segment, "negative") ~ "stromal",
+    endsWith(segment, "normal") ~ "stromal",
+    ))
+```
+
+## 
+
+------------------------------------------------------------------------
+
+## Heatmap for WARF meeting 06/20/2022
+
+```{r}
+geomx = geomx 
+genes = 'all'
+path = '/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/'
+segment = 'all'
+response = 'all'
+
+  test <- log2(assayDataElement(geomx, elt = 'q_norm'))
+
+  # create a log2 transform of the data for analysis
+  assayDataElement(object = geomx, elt = "log_q") <- assayDataApply(geomx, 2, FUN = log, base = 2, elt = "q_norm")
+  
+  # create CV function
+  calc_CV <- function(x) {sd(x) / mean(x)}
+  CV_dat <- assayDataApply(geomx, elt = "log_q", MARGIN = 1, calc_CV)
+  
+  # show the highest CD genes and their CV values
+  sort(CV_dat, decreasing = TRUE)[1:5]
+  
+  # Identify genes in the top 3rd of the CV values
+  if (genes == 'all') {
+    GOI <- names(CV_dat)[CV_dat > quantile(CV_dat, 0.9)]
+    GOI <- unique(c(GOI, 'KRT17', 'LAMP3'))
+  }
+  
+  if (genes == 'keratin'){
+    GOI <- rownames(geomx)[rownames(geomx) %like% '%^KRT%']
+  }
+  
+  if (genes == 'collagen'){
+    GOI <- rownames(geomx)[rownames(geomx) %like% '%^COL%']
+  }
+  
+  if (genes == 'cytokines'){
+    GOI <- rownames(geomx)[rownames(geomx) %like any% c('%^CXCL%', '%^CXCR%', '%^CCL%', '%^CCR%')]
+  }
+  
+  pData(geomx)[, c('roi')] <- as.numeric(pData(geomx)[, c('roi')])
+  pData(geomx)[, c('roi')] <- as.character(pData(geomx)[, c('roi')])
+  
+  if (segment != 'all'){
+    geomx <- geomx[,pData(geomx)$segment == segment]
+  }
+  
+  if (response != 'all'){
+    geomx <- geomx[,pData(geomx)$Response == response]
+  }
+  
+  cols <- list(Response = c('responder' = 'indianred3', 'non responder' = 'steelblue3'), `p16 status` = c('positive' = 'indianred3', 'negative' = 'steelblue3'), `K17 status` = c('high' = 'indianred3', 'low' = 'steelblue3'), segment = c('CD45 normal' = 'darkgreen', 'K17' = 'green', 'PCK no K17' = 'yellow', 'triple negative' = 'orange'), `Primary tu location` = c('hypopharynx' = 'darkgreen', 'maxillary sinus' = 'green', 'oral cavity' = 'yellow', 'oropharynx' = 'orange'), Classification = c('leading edge' = 'darkgreen', 'surface' = 'green', 'intratumoral' = 'yellow', 'detached tumor and intraepithelial' = 'orange', 'tumor nest' = 'lightgreen', "NA" = 'white'), K17 = c('FOCAL' = 'darkgreen', 'P' = 'green', 'N' = 'yellow', 'NA' = "white"), "Patient number (CK17-)" = c('1' = 'aliceblue', '14' = 'azure3', '21' = 'darkolivegreen', '22' = 'darkorange', '23' = 'darkorchid', '27' = 'red', '4' = 'cornflowerblue', '7' = 'seagreen', '9' = 'firebrick', '5' = 'yellow'), `Plate ID` = c('A' = 'indianred3', 'B' = 'steelblue3'))
+    
+  geomx_test <- geomx
+  colnames(geomx_test) <- paste(pData(geomx_test)$roi, pData(geomx_test)$segment)
+
+  x <- assayDataElement(geomx_test[GOI, ], elt = 'log_q')
+  # this line is for the horizontal heatmap only
+  #xx <- pheatmap::pheatmap(t(x), scale = "row", show_rownames = TRUE, show_colnames = TRUE, border_color = NA, clustering_method = "average", #clustering_distance_rows = "correlation", clustering_distance_cols = "correlation", breaks = seq(-3, 3, 0.05), #color = colorRampPalette(c("purple3", "black", "yellow2"))(120), annotation_col = pData(geomx_test)[,c("Response", "segment", "K17 status", 'p16 status', 'Primary tu location', 'Classification', 'K17', "Patient number (CK17-)", 'Plate ID')], annotation_colors = cols)
+  xx <- pheatmap::pheatmap(x, scale = "row", show_rownames = TRUE, show_colnames = TRUE, border_color = NA, clustering_method = "average",
+           clustering_distance_rows = "correlation", clustering_distance_cols = "correlation", breaks = seq(-3, 3, 0.05),
+           color = colorRampPalette(c("purple3", "black", "yellow2"))(120), annotation_col = 
+           pData(geomx_test)[, c("Response", "segment", "K17 status", 'p16 status', 'Primary tu location', "Patient number (CK17-)", 'Classification', 'K17')], annotation_colors = cols)
+  
+  save_pheatmap_pdf <- function(x, filename, width=20, height=25) {
+     stopifnot(!missing(x))
+     stopifnot(!missing(filename))
+     pdf(filename, width=width, height=height)
+     grid::grid.newpage()
+     grid::grid.draw(x$gtable)
+     dev.off()
+  }
+  save_pheatmap_pdf(xx, filename = paste(path, "clusteringheatmap.pdf", sep = ''))
+```
+
+# Cor.test panCK vs. K17 segments
+
+```{r}
+geomx <- readRDS('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/GeoMx_CTA_2022-03-17/Objects/BOTHPLATES_R1_hnc_geomx_postQC_12062022.RDS')
+```
+
+## • Subsetting
+
+```{r}
+pck <- geomx[,pData(geomx)[c('segment')] == 'PCK no K17']
+k17 <- geomx[,pData(geomx)[c('segment')] == 'K17']
+```
+
+## • Correlation test
+
+Currently trying to get only paired samples
+
+```{r}
+setdiff(rownames(pck), rownames(k17))
+setdiff(pData(pck)[c('roi')], pData(k17)[c('roi')]) #14
+setdiff(pData(k17)[c('roi')], pData(pck)[c('roi')]) #9
+
+# only finding and keeping the rois that are shared between both
+shared <- intersect(pData(pck)[c('roi')], pData(k17)[c('roi')])#28
+s <- shared$roi
+
+pck_mini <- pck[,pData(pck)[[c('roi')]] %in% s]
+k17_mini <- k17[,pData(k17)[[c('roi')]] %in% s]
+
+unique(pData(pck_mini)[c('roi')])
+unique(pData(k17_mini)[c('roi')])
+
+df <- data.frame(gene = character(0), statistic = numeric(0), pval = numeric(0))
+
+pdf('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/GeoMx_CTA_2022-03-17/correlation_test_pckvsk17_scatterplots.pdf', width =  7, height =7)
+for (x in rownames(pck_mini)){
+  p <- as.data.frame(pck_mini[x])[[x]]
+  k <- as.data.frame(k17_mini[x])[[x]]
+  if (!is.null(p) & !is.null(k)){
+    t <- cor.test(p, k, alternative = c('two.sided'), method = c('spearman'))
+    pval <- t$p.value
+    stat <- as.numeric(t$estimate)
+    row <- c(x, stat, pval)
+    df <- rbind(df, row)
+    test <- data.frame(p, k)
+    ggplot(test, aes(x=p, y=k)) + geom_point() + geom_smooth(method=lm) + labs(x="PanCK score", y="K17 score", title=x, subtitle=paste('Stat =', round(stat, 3), 'pval =', round(pval, 3), sep = ' '))
+  }
+}
+dev.off()
+
+df$significance <- 'No'
+
+colnames(df) <- c('gene', 'statistic', 'pval', 'significance')
+
+df$significance[df$pval < 0.05] <- 'Yes'
+
+table(df$significance)
+#  No   Yes 
+# 1353  187
+# only four of these have a p-value < 0.01
+
+df2 <- df[df$significance == 'Yes',]
+
+df1 <- df[df$pval < 0.01,]
+
+#write.csv(df, file = '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/GeoMx_CTA_2022-03-17/correlation_test_pckvsk17_scatterplots.csv')
+#write.csv(df1, file = '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/GeoMx_CTA_2022-03-17/correlation_test_pckvsk17_scatterplots_p<0.01.csv')
+#write.csv(df2, file = '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/GeoMx_CTA_2022-03-17/correlation_test_pckvsk17_scatterplots_p<0.05.csv')
+```
+
+# [K17 MANUSCRIPT] Heatmap with 12/2022 new K17 annotations
+
+```{r}
+geomx <- readRDS('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/GeoMx_CTA_2022-03-17/Objects/BOTHPLATES_R1_hnc_geomx_postQC_12142022.RDS')
+```
+
+## • [K17 MANUSCRIPT] All segments
+
+```{r automated with function}
+# mac genes
+geomx_heatmap(geomx = geomx, genes = 'custom', gene_set = c('MMP9', 'SPP1', 'IL1B', 'C1QA', 'C1QB', 'C1QC', 'CCL4', 'APOE'), segment = 'CD45 normal',  path = '/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/', width = 9, height = 5, metadata = c('IHC_K17_classification1', 'segment', 'Response'))
+
+# tfh genes
+geomx_heatmap(geomx = geomx, genes = 'custom', gene_set = c('BTLA', 'CCR6', 'CCR7', 'CD84', 'CXCL13', 'CXCR4', 'CXCR5', 'ICOS', 'IL21', 'IL21R', 'CD200', 'IL6ST'), segment = 'CD45 normal',  path = '/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/', width = 9, height = 5, metadata = c('IHC_K17_classification1', 'segment', 'Response'))
+```
+## • [K17 MANUSCRIPT] Tumor K17 0 vs. 1 heatmap w/ top genes
+```{r}
+path <- '/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/K170vs1_tumor_volcplot/'
+
+# reading in DE data
+df <- read.csv(paste(path, '2022-12-16paired=FALSEvolcano_plot_input.csv', sep = ''))
+
+genes <- df[df$Color %in% c(c('FDR < 0.001', 'FDR < 0.05')),]$Gene
+
+geomx_heatmap(geomx = geomx, genes = 'custom', gene_set = genes, segment = 'all',  path = '/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/', width = 15, height = 7, metadata = c('IHC_K17_classification1', 'segment', 'Response'))
+```
+
+
+```{r manual}
+geomx <- geomx
+genes = 'all'
+path = '/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/'
+segment = 'all'
+response = 'all'
+
+test <- log2(assayDataElement(geomx, elt = 'q_norm'))
+
+# create a log2 transform of the data for analysis
+assayDataElement(object = geomx, elt = "log_q") <- assayDataApply(geomx, 2, FUN = log, base = 2, elt = "q_norm")
+
+# create CV function
+calc_CV <- function(x) {sd(x) / mean(x)}
+CV_dat <- assayDataApply(geomx, elt = "log_q", MARGIN = 1, calc_CV)
+
+# show the highest CD genes and their CV values
+sort(CV_dat, decreasing = TRUE)[1:5]
+
+# Identify genes in the top 3rd of the CV values
+if (genes == 'all') {
+  GOI <- names(CV_dat)[CV_dat > quantile(CV_dat, 0.9)]
+  GOI <- unique(c(GOI, 'KRT17', 'LAMP3'))
+}
+
+if (genes == 'keratin'){
+  GOI <- rownames(geomx)[rownames(geomx) %like% '%^KRT%']
+}
+
+if (genes == 'collagen'){
+  GOI <- rownames(geomx)[rownames(geomx) %like% '%^COL%']
+}
+
+if (genes == 'cytokines'){
+  GOI <- rownames(geomx)[rownames(geomx) %like any% c('%^CXCL%', '%^CXCR%', '%^CCL%', '%^CCR%')]
+}
+
+pData(geomx)[, c('roi')] <- as.numeric(pData(geomx)[, c('roi')])
+pData(geomx)[, c('roi')] <- as.character(pData(geomx)[, c('roi')])
+
+if (segment != 'all'){
+  geomx <- geomx[,pData(geomx)$segment == segment]
+}
+
+if (response != 'all'){
+  geomx <- geomx[,pData(geomx)$Response == response]
+}
+
+cols <- list(Response = c('responder' = 'indianred3', 'non responder' = 'steelblue3'), `p16 status` = c('positive' = 'indianred3', 'negative' = 'steelblue3'), `K17 status` = c('high' = 'indianred3', 'low' = 'steelblue3'), segment = c('CD45 normal' = 'darkgreen', 'K17' = 'green', 'PCK no K17' = 'yellow', 'triple negative' = 'orange'), `Primary tu location` = c('hypopharynx' = 'darkgreen', 'maxillary sinus' = 'green', 'oral cavity' = 'yellow', 'oropharynx' = 'orange'), Classification = c('leading edge' = 'darkgreen', 'surface' = 'green', 'intratumoral' = 'yellow', 'detached tumor and intraepithelial' = 'orange', 'tumor nest' = 'lightgreen', "NA" = 'white'), IHC_K17_classification1 = c('0' = 'steelblue3', '1' = 'indianred3'), "Patient number (CK17-)" = c('1' = 'aliceblue', '14' = 'azure3', '21' = 'darkolivegreen', '22' = 'darkorange', '23' = 'darkorchid', '27' = 'red', '4' = 'cornflowerblue', '7' = 'seagreen', '9' = 'firebrick', '5' = 'yellow'), `Plate ID` = c('A' = 'indianred3', 'B' = 'steelblue3'))
+  
+geomx_test <- geomx
+colnames(geomx_test) <- paste(pData(geomx_test)$roi, pData(geomx_test)$segment)
+
+x <- assayDataElement(geomx_test[GOI, ], elt = 'log_q')
+# this line is for the horizontal heatmap only
+#xx <- pheatmap::pheatmap(t(x), scale = "row", show_rownames = TRUE, show_colnames = TRUE, border_color = NA, clustering_method = "average", #clustering_distance_rows = "correlation", clustering_distance_cols = "correlation", breaks = seq(-3, 3, 0.05), #color = colorRampPalette(c("purple3", "black", "yellow2"))(120), annotation_col = pData(geomx_test)[,c("Response", "segment", "K17 status", 'p16 status', 'Primary tu location', 'Classification', 'K17', "Patient number (CK17-)", 'Plate ID')], annotation_colors = cols)
+xx <- pheatmap::pheatmap(x, scale = "row", show_rownames = TRUE, show_colnames = TRUE, border_color = NA, clustering_method = "average",
+         clustering_distance_rows = "correlation", clustering_distance_cols = "correlation", breaks = seq(-3, 3, 0.05),
+         color = colorRampPalette(c("purple3", "black", "yellow2"))(120), annotation_col = 
+         pData(geomx_test)[, c("Response", "segment", "K17 status", 'p16 status', "Patient number (CK17-)", 'IHC_K17_classification1', 'Anatomic.location2')], annotation_colors = cols)
+
+save_pheatmap_pdf <- function(x, filename, width=20, height=25) {
+   stopifnot(!missing(x))
+   stopifnot(!missing(filename))
+   pdf(filename, width=width, height=height)
+   grid::grid.newpage()
+   grid::grid.draw(x$gtable)
+   dev.off()
+}
+save_pheatmap_pdf(xx, filename = paste(path, "clusteringheatmap_allsegments.pdf", sep = ''))
+```
+
+## • PanCK segments only
+
+```{r}
+geomx <- geomx[,pData(geomx)[c('segment')] == 'PCK no K17']
+genes = 'all'
+path = '/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/'
+segment = 'all'
+response = 'all'
+
+test <- log2(assayDataElement(geomx, elt = 'q_norm'))
+
+# create a log2 transform of the data for analysis
+assayDataElement(object = geomx, elt = "log_q") <- assayDataApply(geomx, 2, FUN = log, base = 2, elt = "q_norm")
+
+# create CV function
+calc_CV <- function(x) {sd(x) / mean(x)}
+CV_dat <- assayDataApply(geomx, elt = "log_q", MARGIN = 1, calc_CV)
+
+# show the highest CD genes and their CV values
+sort(CV_dat, decreasing = TRUE)[1:5]
+
+# Identify genes in the top 3rd of the CV values
+if (genes == 'all') {
+  GOI <- names(CV_dat)[CV_dat > quantile(CV_dat, 0.9)]
+  GOI <- unique(c(GOI, 'KRT17', 'LAMP3'))
+}
+
+if (genes == 'keratin'){
+  GOI <- rownames(geomx)[rownames(geomx) %like% '%^KRT%']
+}
+
+if (genes == 'collagen'){
+  GOI <- rownames(geomx)[rownames(geomx) %like% '%^COL%']
+}
+
+if (genes == 'cytokines'){
+  GOI <- rownames(geomx)[rownames(geomx) %like any% c('%^CXCL%', '%^CXCR%', '%^CCL%', '%^CCR%')]
+}
+
+pData(geomx)[, c('roi')] <- as.numeric(pData(geomx)[, c('roi')])
+pData(geomx)[, c('roi')] <- as.character(pData(geomx)[, c('roi')])
+
+if (segment != 'all'){
+  geomx <- geomx[,pData(geomx)$segment == segment]
+}
+
+if (response != 'all'){
+  geomx <- geomx[,pData(geomx)$Response == response]
+}
+
+cols <- list(Response = c('responder' = 'indianred3', 'non responder' = 'steelblue3'), `p16 status` = c('positive' = 'indianred3', 'negative' = 'steelblue3'), `K17 status` = c('high' = 'indianred3', 'low' = 'steelblue3'), segment = c('CD45 normal' = 'darkgreen', 'K17' = 'green', 'PCK no K17' = 'yellow', 'triple negative' = 'orange'), `Primary tu location` = c('hypopharynx' = 'darkgreen', 'maxillary sinus' = 'green', 'oral cavity' = 'yellow', 'oropharynx' = 'orange'), Classification = c('leading edge' = 'darkgreen', 'surface' = 'green', 'intratumoral' = 'yellow', 'detached tumor and intraepithelial' = 'orange', 'tumor nest' = 'lightgreen', "NA" = 'white'), IHC_K17_classification1 = c('0' = 'steelblue3', '1' = 'indianred3'), "Patient number (CK17-)" = c('1' = 'aliceblue', '14' = 'azure3', '21' = 'darkolivegreen', '22' = 'darkorange', '23' = 'darkorchid', '27' = 'red', '4' = 'cornflowerblue', '7' = 'seagreen', '9' = 'firebrick', '5' = 'yellow'), `Plate ID` = c('A' = 'indianred3', 'B' = 'steelblue3'))
+  
+geomx_test <- geomx
+colnames(geomx_test) <- paste(pData(geomx_test)$roi, pData(geomx_test)$segment)
+
+x <- assayDataElement(geomx_test[GOI, ], elt = 'log_q')
+# this line is for the horizontal heatmap only
+#xx <- pheatmap::pheatmap(t(x), scale = "row", show_rownames = TRUE, show_colnames = TRUE, border_color = NA, clustering_method = "average", #clustering_distance_rows = "correlation", clustering_distance_cols = "correlation", breaks = seq(-3, 3, 0.05), #color = colorRampPalette(c("purple3", "black", "yellow2"))(120), annotation_col = pData(geomx_test)[,c("Response", "segment", "K17 status", 'p16 status', 'Primary tu location', 'Classification', 'K17', "Patient number (CK17-)", 'Plate ID')], annotation_colors = cols)
+xx <- pheatmap::pheatmap(x, scale = "row", show_rownames = TRUE, show_colnames = TRUE, border_color = NA, clustering_method = "average",
+         clustering_distance_rows = "correlation", clustering_distance_cols = "correlation", breaks = seq(-3, 3, 0.05),
+         color = colorRampPalette(c("purple3", "black", "yellow2"))(120), annotation_col = 
+         pData(geomx_test)[, c("Response", "segment", "K17 status", 'p16 status', "Patient number (CK17-)", 'IHC_K17_classification1', 'Anatomic.location2')], annotation_colors = cols)
+
+save_pheatmap_pdf <- function(x, filename, width=20, height=25) {
+   stopifnot(!missing(x))
+   stopifnot(!missing(filename))
+   pdf(filename, width=width, height=height)
+   grid::grid.newpage()
+   grid::grid.draw(x$gtable)
+   dev.off()
+}
+save_pheatmap_pdf(xx, filename = paste(path, "clusteringheatmap_PCKnoK17.pdf", sep = ''))
+```
+
+## • Triple negative segments only
+
+```{r}
+geomx <- geomx[,pData(geomx)[c('segment')] == 'triple negative']
+genes = 'all'
+path = '/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/'
+segment = 'all'
+response = 'all'
+
+test <- log2(assayDataElement(geomx, elt = 'q_norm'))
+
+# create a log2 transform of the data for analysis
+assayDataElement(object = geomx, elt = "log_q") <- assayDataApply(geomx, 2, FUN = log, base = 2, elt = "q_norm")
+
+# create CV function
+calc_CV <- function(x) {sd(x) / mean(x)}
+CV_dat <- assayDataApply(geomx, elt = "log_q", MARGIN = 1, calc_CV)
+
+# show the highest CD genes and their CV values
+sort(CV_dat, decreasing = TRUE)[1:5]
+
+# Identify genes in the top 3rd of the CV values
+if (genes == 'all') {
+  GOI <- names(CV_dat)[CV_dat > quantile(CV_dat, 0.9)]
+  GOI <- unique(c(GOI, 'KRT17', 'LAMP3'))
+}
+
+if (genes == 'keratin'){
+  GOI <- rownames(geomx)[rownames(geomx) %like% '%^KRT%']
+}
+
+if (genes == 'collagen'){
+  GOI <- rownames(geomx)[rownames(geomx) %like% '%^COL%']
+}
+
+if (genes == 'cytokines'){
+  GOI <- rownames(geomx)[rownames(geomx) %like any% c('%^CXCL%', '%^CXCR%', '%^CCL%', '%^CCR%')]
+}
+
+pData(geomx)[, c('roi')] <- as.numeric(pData(geomx)[, c('roi')])
+pData(geomx)[, c('roi')] <- as.character(pData(geomx)[, c('roi')])
+
+if (segment != 'all'){
+  geomx <- geomx[,pData(geomx)$segment == segment]
+}
+
+if (response != 'all'){
+  geomx <- geomx[,pData(geomx)$Response == response]
+}
+
+cols <- list(Response = c('responder' = 'indianred3', 'non responder' = 'steelblue3'), `p16 status` = c('positive' = 'indianred3', 'negative' = 'steelblue3'), `K17 status` = c('high' = 'indianred3', 'low' = 'steelblue3'), segment = c('CD45 normal' = 'darkgreen', 'K17' = 'green', 'PCK no K17' = 'yellow', 'triple negative' = 'orange'), `Primary tu location` = c('hypopharynx' = 'darkgreen', 'maxillary sinus' = 'green', 'oral cavity' = 'yellow', 'oropharynx' = 'orange'), Classification = c('leading edge' = 'darkgreen', 'surface' = 'green', 'intratumoral' = 'yellow', 'detached tumor and intraepithelial' = 'orange', 'tumor nest' = 'lightgreen', "NA" = 'white'), IHC_K17_classification1 = c('0' = 'steelblue3', '1' = 'indianred3', 'NA' = 'white'), "Patient number (CK17-)" = c('1' = 'aliceblue', '14' = 'azure3', '21' = 'darkolivegreen', '22' = 'darkorange', '23' = 'darkorchid', '27' = 'red', '4' = 'cornflowerblue', '7' = 'seagreen', '9' = 'firebrick', '5' = 'yellow'), `Plate ID` = c('A' = 'indianred3', 'B' = 'steelblue3'))
+  
+geomx_test <- geomx
+colnames(geomx_test) <- paste(pData(geomx_test)$roi, pData(geomx_test)$segment)
+
+x <- assayDataElement(geomx_test[GOI, ], elt = 'log_q')
+# this line is for the horizontal heatmap only
+#xx <- pheatmap::pheatmap(t(x), scale = "row", show_rownames = TRUE, show_colnames = TRUE, border_color = NA, clustering_method = "average", #clustering_distance_rows = "correlation", clustering_distance_cols = "correlation", breaks = seq(-3, 3, 0.05), #color = colorRampPalette(c("purple3", "black", "yellow2"))(120), annotation_col = pData(geomx_test)[,c("Response", "segment", "K17 status", 'p16 status', 'Primary tu location', 'Classification', 'K17', "Patient number (CK17-)", 'Plate ID')], annotation_colors = cols)
+xx <- pheatmap::pheatmap(x, scale = "row", show_rownames = TRUE, show_colnames = TRUE, border_color = NA, clustering_method = "average",clustering_distance_rows = "correlation", clustering_distance_cols = "correlation", breaks = seq(-3, 3, 0.05), color = colorRampPalette(c("purple3", "black", "yellow2"))(120), annotation_col = pData(geomx_test)[, c("Response", "segment", "K17 status", 'p16 status', "Patient number (CK17-)", 'IHC_K17_classification1', 'Anatomic.location2')], annotation_colors = cols)
+
+save_pheatmap_pdf <- function(x, filename, width=20, height=25) {
+   stopifnot(!missing(x))
+   stopifnot(!missing(filename))
+   pdf(filename, width=width, height=height)
+   grid::grid.newpage()
+   grid::grid.draw(x$gtable)
+   dev.off()
+}
+save_pheatmap_pdf(xx, filename = paste(path, "clusteringheatmap_triplenegative.pdf", sep = ''))
+```
+
+## • K17 segments only
+
+```{r}
+geomx <- geomx[,pData(geomx)[c('segment')] == 'K17']
+genes = 'all'
+path = '/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/'
+segment = 'all'
+response = 'all'
+
+test <- log2(assayDataElement(geomx, elt = 'q_norm'))
+
+# create a log2 transform of the data for analysis
+assayDataElement(object = geomx, elt = "log_q") <- assayDataApply(geomx, 2, FUN = log, base = 2, elt = "q_norm")
+
+# create CV function
+calc_CV <- function(x) {sd(x) / mean(x)}
+CV_dat <- assayDataApply(geomx, elt = "log_q", MARGIN = 1, calc_CV)
+
+# show the highest CD genes and their CV values
+sort(CV_dat, decreasing = TRUE)[1:5]
+
+# Identify genes in the top 3rd of the CV values
+if (genes == 'all') {
+  GOI <- names(CV_dat)[CV_dat > quantile(CV_dat, 0.9)]
+  GOI <- unique(c(GOI, 'KRT17', 'LAMP3'))
+}
+
+if (genes == 'keratin'){
+  GOI <- rownames(geomx)[rownames(geomx) %like% '%^KRT%']
+}
+
+if (genes == 'collagen'){
+  GOI <- rownames(geomx)[rownames(geomx) %like% '%^COL%']
+}
+
+if (genes == 'cytokines'){
+  GOI <- rownames(geomx)[rownames(geomx) %like any% c('%^CXCL%', '%^CXCR%', '%^CCL%', '%^CCR%')]
+}
+
+pData(geomx)[, c('roi')] <- as.numeric(pData(geomx)[, c('roi')])
+pData(geomx)[, c('roi')] <- as.character(pData(geomx)[, c('roi')])
+
+if (segment != 'all'){
+  geomx <- geomx[,pData(geomx)$segment == segment]
+}
+
+if (response != 'all'){
+  geomx <- geomx[,pData(geomx)$Response == response]
+}
+
+cols <- list(Response = c('responder' = 'indianred3', 'non responder' = 'steelblue3'), `p16 status` = c('positive' = 'indianred3', 'negative' = 'steelblue3'), `K17 status` = c('high' = 'indianred3', 'low' = 'steelblue3'), segment = c('CD45 normal' = 'darkgreen', 'K17' = 'green', 'PCK no K17' = 'yellow', 'triple negative' = 'orange'), `Primary tu location` = c('hypopharynx' = 'darkgreen', 'maxillary sinus' = 'green', 'oral cavity' = 'yellow', 'oropharynx' = 'orange'), IHC_K17_classification1 = c('0' = 'steelblue3', '1' = 'indianred3'), K17 = c('FOCAL' = 'darkgreen', 'P' = 'green', 'N' = 'yellow', 'NA' = "white"), "Patient number (CK17-)" = c('1' = 'aliceblue', '14' = 'azure3', '21' = 'darkolivegreen', '22' = 'darkorange', '23' = 'darkorchid', '27' = 'red', '4' = 'cornflowerblue', '7' = 'seagreen', '9' = 'firebrick', '5' = 'yellow'), `Plate ID` = c('A' = 'indianred3', 'B' = 'steelblue3'))
+  
+geomx_test <- geomx
+colnames(geomx_test) <- paste(pData(geomx_test)$roi, pData(geomx_test)$segment)
+
+x <- assayDataElement(geomx_test[GOI, ], elt = 'log_q')
+# this line is for the horizontal heatmap only
+#xx <- pheatmap::pheatmap(t(x), scale = "row", show_rownames = TRUE, show_colnames = TRUE, border_color = NA, clustering_method = "average", #clustering_distance_rows = "correlation", clustering_distance_cols = "correlation", breaks = seq(-3, 3, 0.05), #color = colorRampPalette(c("purple3", "black", "yellow2"))(120), annotation_col = pData(geomx_test)[,c("Response", "segment", "K17 status", 'p16 status', 'Primary tu location', 'Classification', 'K17', "Patient number (CK17-)", 'Plate ID')], annotation_colors = cols)
+xx <- pheatmap::pheatmap(x, scale = "row", show_rownames = TRUE, show_colnames = TRUE, border_color = NA, clustering_method = "average",clustering_distance_rows = "correlation", clustering_distance_cols = "correlation", breaks = seq(-3, 3, 0.05), color = colorRampPalette(c("purple3", "black", "yellow2"))(120), annotation_col = pData(geomx_test)[, c("Response", "segment", "K17 status", 'p16 status', "Patient number (CK17-)", 'IHC_K17_classification1', 'Anatomic.location2')], annotation_colors = cols)
+
+save_pheatmap_pdf <- function(x, filename, width=20, height=25) {
+   stopifnot(!missing(x))
+   stopifnot(!missing(filename))
+   pdf(filename, width=width, height=height)
+   grid::grid.newpage()
+   grid::grid.draw(x$gtable)
+   dev.off()
+}
+save_pheatmap_pdf(xx, filename = paste(path, "clusteringheatmap_K17.pdf", sep = ''))
+```
+
+## • upregulated genes from K17 IHC 0 and 1 in tumor
+
+```{r}
+geomx <- readRDS('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/GeoMx_CTA_2022-03-17/Objects/BOTHPLATES_R1_hnc_geomx_postQC_12142022.RDS')
+
+path <- '/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/K170vs1_tumor_volcplot/'
+
+# reading in DE data
+df <- read.csv(paste(path, '2022-12-16paired=FALSEvolcano_plot_input.csv', sep = ''))
+
+genes <- df[df$Color %in% c(c('FDR < 0.001', 'FDR < 0.05')),]$Gene
+
+
+geomx <- geomx[,pData(geomx)[c('segment')] %like any% c('K17', 'PCK no K17')]
+genes = 'custom'
+custom_gene_vector <- genes
+path = '/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/'
+segment = 'all'
+response = 'all'
+
+test <- log2(assayDataElement(geomx, elt = 'q_norm'))
+
+# create a log2 transform of the data for analysis
+assayDataElement(object = geomx, elt = "log_q") <- assayDataApply(geomx, 2, FUN = log, base = 2, elt = "q_norm")
+
+# create CV function
+calc_CV <- function(x) {sd(x) / mean(x)}
+CV_dat <- assayDataApply(geomx, elt = "log_q", MARGIN = 1, calc_CV)
+
+# show the highest CD genes and their CV values
+sort(CV_dat, decreasing = TRUE)[1:5]
+
+# Identify genes in the top 3rd of the CV values
+if (genes == 'all') {
+  GOI <- names(CV_dat)[CV_dat > quantile(CV_dat, 0.9)]
+  GOI <- unique(c(GOI, 'KRT17', 'LAMP3'))
+}
+
+if (genes == 'keratin'){
+  GOI <- rownames(geomx)[rownames(geomx) %like% '%^KRT%']
+}
+
+if (genes == 'collagen'){
+  GOI <- rownames(geomx)[rownames(geomx) %like% '%^COL%']
+}
+
+if (genes == 'cytokines'){
+  GOI <- rownames(geomx)[rownames(geomx) %like any% c('%^CXCL%', '%^CXCR%', '%^CCL%', '%^CCR%')]
+}
+
+if (genes == 'custom'){
+  GOI <- rownames(geomx)[rownames(geomx) %in% custom_gene_vector]
+}
+
+pData(geomx)[, c('roi')] <- as.numeric(pData(geomx)[, c('roi')])
+pData(geomx)[, c('roi')] <- as.character(pData(geomx)[, c('roi')])
+
+if (segment != 'all'){
+  geomx <- geomx[,pData(geomx)$segment == segment]
+}
+
+if (response != 'all'){
+  geomx <- geomx[,pData(geomx)$Response == response]
+}
+
+cols <- list(Response = c('responder' = 'indianred3', 'non responder' = 'steelblue3'), `p16 status` = c('positive' = 'indianred3', 'negative' = 'steelblue3'), `K17 status` = c('high' = 'indianred3', 'low' = 'steelblue3'), segment = c('CD45 normal' = 'darkgreen', 'K17' = 'green', 'PCK no K17' = 'yellow', 'triple negative' = 'orange'), `Primary tu location` = c('hypopharynx' = 'darkgreen', 'maxillary sinus' = 'green', 'oral cavity' = 'yellow', 'oropharynx' = 'orange'), IHC_K17_classification1 = c('0' = 'steelblue3', '1' = 'indianred3'), K17 = c('FOCAL' = 'darkgreen', 'P' = 'green', 'N' = 'yellow', 'NA' = "white"), "Patient number (CK17-)" = c('1' = 'aliceblue', '14' = 'azure3', '21' = 'darkolivegreen', '22' = 'darkorange', '23' = 'darkorchid', '27' = 'red', '4' = 'cornflowerblue', '7' = 'seagreen', '9' = 'firebrick', '5' = 'yellow'), `Plate ID` = c('A' = 'indianred3', 'B' = 'steelblue3'))
+  
+geomx_test <- geomx
+colnames(geomx_test) <- paste(pData(geomx_test)$roi, pData(geomx_test)$segment)
+
+x <- assayDataElement(geomx_test[GOI, ], elt = 'log_q')
+# this line is for the horizontal heatmap only
+#xx <- pheatmap::pheatmap(t(x), scale = "row", show_rownames = TRUE, show_colnames = TRUE, border_color = NA, clustering_method = "average", #clustering_distance_rows = "correlation", clustering_distance_cols = "correlation", breaks = seq(-3, 3, 0.05), #color = colorRampPalette(c("purple3", "black", "yellow2"))(120), annotation_col = pData(geomx_test)[,c("Response", "segment", "K17 status", 'p16 status', 'Primary tu location', 'Classification', 'K17', "Patient number (CK17-)", 'Plate ID')], annotation_colors = cols)
+xx <- pheatmap::pheatmap(x, scale = "row", show_rownames = TRUE, show_colnames = TRUE, border_color = NA, clustering_method = "average",clustering_distance_rows = "correlation", clustering_distance_cols = "correlation", breaks = seq(-3, 3, 0.05), color = colorRampPalette(c("purple3", "black", "yellow2"))(120), annotation_col = pData(geomx_test)[, c("Response", "segment", "K17 status", 'p16 status', "Patient number (CK17-)", 'IHC_K17_classification1', 'Anatomic.location2')], annotation_colors = cols)
+
+save_pheatmap_pdf <- function(x, filename, width=20, height=25) {
+   stopifnot(!missing(x))
+   stopifnot(!missing(filename))
+   pdf(filename, width=width, height=height)
+   grid::grid.newpage()
+   grid::grid.draw(x$gtable)
+   dev.off()
+}
+save_pheatmap_pdf(xx, filename = paste(path, "clusteringheatmap.pdf", sep = ''))
+```
+
+# GSEA tool (Broad)
+
+## • File prep
+
+```{r}
+geomx_mini <- geomx[,pData(geomx)[['IHC_K17_classification1']] == '1']
+
+readCount <- assayDataElement(geomx_mini, elt = 'q_norm')
+write.csv(readCount, '/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/IHCK171_GSEA_expression_data.csv')
+
+geomx_mini <- geomx[,pData(geomx)[['IHC_K17_classification1']] == '0']
+
+readCount <- assayDataElement(geomx_mini, elt = 'q_norm')
+write.csv(readCount, '/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/IHCK170_GSEA_expression_data.csv')
+
+zero <- read.csv('/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/IHCK170_GSEA_expression_data.csv')
+one <- read.csv('/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/IHCK171_GSEA_expression_data.csv')
+```
+
+## • Making plots
+
+### •• c5 K17 0 vs. K17 1
+
+```{r}
+gene_set_symbol <- 'c5'
+
+ranked <- read.delim('/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/Broad_GSEA/c5_go_bp_K170vsK171/ranked_gene_list_K17_0_versus_K17_1_1671738718855.tsv')
+
+zero <- read.delim('/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/Broad_GSEA/c5_go_bp_K170vsK171/gsea_report_for_K17_0_1671738718855.tsv')
+
+zero_mini <- zero[zero$NOM.p.val < 0.05,]
+
+one <- read.delim('/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/Broad_GSEA/c5_go_bp_K170vsK171/gsea_report_for_K17_1_1671738718855.tsv')
+
+one_mini <- one[one$NOM.p.val < 0.05,]
+
+ggplot(data=zero_mini, aes(y=NES, x=reorder(NAME, NES), fill = NES)) + geom_bar(stat="identity") + coord_flip() + labs(y = 'Normalized enrichment score', x = 'gene set', fill = 'Normalized enrichment score') + ggtitle(paste('K17 0', gene_set_symbol, 'gene set enrichment', sep = ' ')) + theme_light() + scale_fill_gradientn(colours = c("blue", "purple", "red"))
+ggsave('/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/Broad_GSEA/gsea_barplot_k170.png', units = 'in', dpi = 300, width = 15, height = 7)
+
+ggplot(data=one_mini, aes(y=NES, x=reorder(NAME, NES), fill = NES)) + geom_bar(stat="identity") + coord_flip() + labs(y = 'Normalized enrichment score', x = 'gene set', fill = 'Normalized enrichment score') + ggtitle(paste('K17 1', gene_set_symbol, 'gene set enrichment', sep = ' ')) + theme_light() + scale_fill_gradientn(colours = c("red", "purple", "blue"))
+ggsave('/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/Broad_GSEA/gsea_barplot_k171.png', units = 'in', dpi = 300, width = 15, height = 12)
+```
+
+### •• c7 k17 0 vs. K17 1
+
+```{r}
+gene_set_symbol <- 'c7'
+path <- '/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/Broad_GSEA/c7_immune_K170vsK171/'
+ranked <- read.delim(paste(path, 'ranked_gene_list_K17_0_versus_K17_1_1671741382142.tsv', sep = ''))
+zero <- read.delim(paste(path, 'gsea_report_for_K17_0_1671741382142.tsv', sep = ''))
+one <- read.delim(paste(path, 'gsea_report_for_K17_1_1671741382142.tsv', sep = ''))
+
+zero_mini <- zero[zero$NOM.p.val < 0.05,]
+
+one_mini <- one[one$NOM.p.val < 0.01,]
+
+ggplot(data=zero_mini, aes(y=NES, x=reorder(NAME, NES), fill = NES)) + geom_bar(stat="identity") + coord_flip() + labs(y = 'Normalized enrichment score', x = 'gene set', fill = 'Normalized enrichment score') + ggtitle(paste('K17 0', gene_set_symbol, 'gene set enrichment', sep = ' ')) + theme_light() + scale_fill_gradientn(colours = c("blue", "purple", "red"))
+ggsave(paste(path, 'gsea_barplot_k170.png', sep = ''), units = 'in', dpi = 300, width = 15, height = 7)
+
+ggplot(data=one_mini, aes(y=NES, x=reorder(NAME, NES), fill = NES)) + geom_bar(stat="identity") + coord_flip() + labs(y = 'Normalized enrichment score', x = 'gene set', fill = 'Normalized enrichment score') + ggtitle(paste('K17 1', gene_set_symbol, 'gene set enrichment', sep = ' ')) + theme_light() + scale_fill_gradientn(colours = c("red", "purple", "blue"))
+ggsave(paste(path, 'gsea_barplot_k171.png', sep = ''), units = 'in', dpi = 300, width = 15, height = 10)
+```
+
+### •• c6 k17 0 vs. K17 1
+
+```{r}
+gene_set_symbol <- 'c6'
+path <- '/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/Broad_GSEA/c6_K170vsK171/'
+ranked <- read.delim(paste(path, 'ranked_gene_list_K17_0_versus_K17_1_1671744860102.tsv', sep = ''))
+zero <- read.delim(paste(path, 'gsea_report_for_K17_0_1671744860102.tsv', sep = ''))
+one <- read.delim(paste(path, 'gsea_report_for_K17_1_1671744860102.tsv', sep = ''))
+
+zero_mini <- zero[zero$NOM.p.val < 0.05,]
+
+one_mini <- one[one$NOM.p.val < 0.05,]
+
+ggplot(data=zero_mini, aes(y=NES, x=reorder(NAME, NES), fill = NES)) + geom_bar(stat="identity") + coord_flip() + labs(y = 'Normalized enrichment score', x = 'gene set', fill = 'Normalized enrichment score') + ggtitle(paste('K17 0', gene_set_symbol, 'gene set enrichment', sep = ' ')) + theme_light() + scale_fill_gradientn(colours = c("blue", "purple", "red"))
+ggsave(paste(path, 'gsea_barplot_k170.png', sep = ''), units = 'in', dpi = 300, width = 15, height = 7)
+
+ggplot(data=one_mini, aes(y=NES, x=reorder(NAME, NES), fill = NES)) + geom_bar(stat="identity") + coord_flip() + labs(y = 'Normalized enrichment score', x = 'gene set', fill = 'Normalized enrichment score') + ggtitle(paste('K17 1', gene_set_symbol, 'gene set enrichment', sep = ' ')) + theme_light() + scale_fill_gradientn(colours = c("red", "purple", "blue"))
+ggsave(paste(path, 'gsea_barplot_k171.png', sep = ''), units = 'in', dpi = 300, width = 15, height = 10)
+```
+
+### •• c8 k17 0 vs. K17 1
+
+```{r}
+gene_set_symbol <- 'c8'
+path <- '/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/Broad_GSEA/c8_K170vsK171/'
+ranked <- read.delim(paste(path, 'ranked_gene_list_K17_0_versus_K17_1_1671745407678.tsv', sep = ''))
+zero <- read.delim(paste(path, 'gsea_report_for_K17_0_1671745407678.tsv', sep = ''))
+one <- read.delim(paste(path, 'gsea_report_for_K17_1_1671745407678.tsv', sep = ''))
+
+zero_mini <- zero[zero$NOM.p.val < 0.05,]
+one_mini <- one[one$NOM.p.val < 0.05,]
+
+ggplot(data=zero_mini, aes(y=NES, x=reorder(NAME, NES), fill = NES)) + geom_bar(stat="identity") + coord_flip() + labs(y = 'Normalized enrichment score', x = 'gene set', fill = 'Normalized enrichment score') + ggtitle(paste('K17 0', gene_set_symbol, 'gene set enrichment', sep = ' ')) + theme_light() + scale_fill_gradientn(colours = c("blue", "purple", "red"))
+ggsave(paste(path, 'gsea_barplot_k170.png', sep = ''), units = 'in', dpi = 300, width = 15, height = 7)
+
+ggplot(data=one_mini, aes(y=NES, x=reorder(NAME, NES), fill = NES)) + geom_bar(stat="identity") + coord_flip() + labs(y = 'Normalized enrichment score', x = 'gene set', fill = 'Normalized enrichment score') + ggtitle(paste('K17 1', gene_set_symbol, 'gene set enrichment', sep = ' ')) + theme_light() + scale_fill_gradientn(colours = c("red", "purple", "blue"))
+ggsave(paste(path, 'gsea_barplot_k171.png', sep = ''), units = 'in', dpi = 300, width = 15, height = 10)
+```
+
+### •• c5 K17 1 vs. K17 0
+
+```{r}
+gene_set_symbol <- 'c5_go_bp'
+path <- '/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/Broad_GSEA/c5_go_bp_K171vsK170/'
+ranked <- read.delim(paste(path, 'ranked_gene_list_K17_1_versus_K17_0_1671746232543.tsv', sep = ''))
+zero <- read.delim(paste(path, 'gsea_report_for_K17_0_1671746232543.tsv', sep = ''))
+one <- read.delim(paste(path, 'gsea_report_for_K17_1_1671746232543.tsv', sep = ''))
+
+zero_mini <- zero[zero$NOM.p.val < 0.05,]
+one_mini <- one[one$NOM.p.val < 0.05,]
+
+ggplot(data=zero_mini, aes(y=NES, x=reorder(NAME, NES), fill = NES)) + geom_bar(stat="identity") + coord_flip() + labs(y = 'Normalized enrichment score', x = 'gene set', fill = 'Normalized enrichment score') + ggtitle(paste('K17 0', gene_set_symbol, 'gene set enrichment', sep = ' ')) + theme_light() + scale_fill_gradientn(colours = c("blue", "purple", "red"))
+ggsave(paste(path, 'gsea_barplot_k170.png', sep = ''), units = 'in', dpi = 300, width = 15, height = 7)
+
+ggplot(data=one_mini, aes(y=NES, x=reorder(NAME, NES), fill = NES)) + geom_bar(stat="identity") + coord_flip() + labs(y = 'Normalized enrichment score', x = 'gene set', fill = 'Normalized enrichment score') + ggtitle(paste('K17 1', gene_set_symbol, 'gene set enrichment', sep = ' ')) + theme_light() + scale_fill_gradientn(colours = c("red", "purple", "blue"))
+ggsave(paste(path, 'gsea_barplot_k171.png', sep = ''), units = 'in', dpi = 300, width = 15, height = 10)
+```
+
+### •• c6 K17 1 vs. K17 0
+
+```{r}
+gene_set_symbol <- 'c6'
+path <- '/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/Broad_GSEA/c6_K171vsK170/'
+ranked <- read.delim(paste(path, 'ranked_gene_list_K17_1_versus_K17_0_1671746010398.tsv', sep = ''))
+zero <- read.delim(paste(path, 'gsea_report_for_K17_0_1671746010398.tsv', sep = ''))
+one <- read.delim(paste(path, 'gsea_report_for_K17_1_1671746010398.tsv', sep = ''))
+
+zero_mini <- zero[zero$NOM.p.val < 0.05,]
+one_mini <- one[one$NOM.p.val < 0.05,]
+
+ggplot(data=zero_mini, aes(y=NES, x=reorder(NAME, NES), fill = NES)) + geom_bar(stat="identity") + coord_flip() + labs(y = 'Normalized enrichment score', x = 'gene set', fill = 'Normalized enrichment score') + ggtitle(paste('K17 0', gene_set_symbol, 'gene set enrichment', sep = ' ')) + theme_light() + scale_fill_gradientn(colours = c("blue", "purple", "red"))
+ggsave(paste(path, 'gsea_barplot_k170.png', sep = ''), units = 'in', dpi = 300, width = 15, height = 7)
+
+ggplot(data=one_mini, aes(y=NES, x=reorder(NAME, NES), fill = NES)) + geom_bar(stat="identity") + coord_flip() + labs(y = 'Normalized enrichment score', x = 'gene set', fill = 'Normalized enrichment score') + ggtitle(paste('K17 1', gene_set_symbol, 'gene set enrichment', sep = ' ')) + theme_light() + scale_fill_gradientn(colours = c("red", "purple", "blue"))
+ggsave(paste(path, 'gsea_barplot_k171.png', sep = ''), units = 'in', dpi = 300, width = 15, height = 10)
+```
+
+### •• c7 immune signature K17 1 vs. K17 0
+
+```{r}
+gene_set_symbol <- 'c7'
+path <- '/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/Broad_GSEA/c7_immune_K171vsK170/'
+ranked <- read.delim(paste(path, 'ranked_gene_list_K17_1_versus_K17_0_1671745836582.tsv', sep = ''))
+zero <- read.delim(paste(path, 'gsea_report_for_K17_0_1671745836582.tsv', sep = ''))
+one <- read.delim(paste(path, 'gsea_report_for_K17_1_1671745836582.tsv', sep = ''))
+
+zero_mini <- zero[zero$NOM.p.val < 0.05,]
+one_mini <- one[one$NOM.p.val < 0.05,]
+
+ggplot(data=zero_mini, aes(y=NES, x=reorder(NAME, NES), fill = NES)) + geom_bar(stat="identity") + coord_flip() + labs(y = 'Normalized enrichment score', x = 'gene set', fill = 'Normalized enrichment score') + ggtitle(paste('K17 0', gene_set_symbol, 'gene set enrichment', sep = ' ')) + theme_light() + scale_fill_gradientn(colours = c("blue", "purple", "red"))
+ggsave(paste(path, 'gsea_barplot_k170.png', sep = ''), units = 'in', dpi = 300, width = 15, height = 7)
+
+ggplot(data=one_mini, aes(y=NES, x=reorder(NAME, NES), fill = NES)) + geom_bar(stat="identity") + coord_flip() + labs(y = 'Normalized enrichment score', x = 'gene set', fill = 'Normalized enrichment score') + ggtitle(paste('K17 1', gene_set_symbol, 'gene set enrichment', sep = ' ')) + theme_light() + scale_fill_gradientn(colours = c("red", "purple", "blue"))
+ggsave(paste(path, 'gsea_barplot_k171.png', sep = ''), units = 'in', dpi = 300, width = 15, height = 25)
+```
+
+# GSEA (cluster profiler)
+
+```{r}
+# SET THE DESIRED ORGANISM HERE
+organism = "org.Hs.eg.db"
+BiocManager::install(organism, character.only = TRUE)
+library(organism, character.only = TRUE)
+
+path <- '/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/K170vs1_tumor_volcplot/'
+
+# reading in DE data
+df <- read.csv(paste(path, '2022-12-16paired=FALSEvolcano_plot_input.csv', sep = ''))
+
+# we want the log2 fold change 
+original_gene_list <- df$log2foldChange
+
+# name the vector
+names(original_gene_list) <- df$Gene
+
+# omit any NA values 
+gene_list<-na.omit(original_gene_list)
+
+# sort the list in decreasing order (required for clusterProfiler)
+gene_list = sort(gene_list, decreasing = TRUE)
+
+keytypes(org.Hs.eg.db)
+#"ACCNUM"       "ALIAS"        "ENSEMBL"      "ENSEMBLPROT"  "ENSEMBLTRANS" "ENTREZID"     #"ENZYME"       "EVIDENCE"     "EVIDENCEALL" 
+# "GENENAME"     "GENETYPE"     "GO"           "GOALL"        "IPI"          "MAP"        #"OMIM"         "ONTOLOGY"     "ONTOLOGYALL" 
+# "PATH"         "PFAM"         "PMID"         "PROSITE"      "REFSEQ"       "SYMBOL"       "UCSCKG"       "UNIPROT"
+
+library(clusterProfiler)
+library(enrichplot)
+
+gse <- gseGO(geneList=gene_list, 
+             ont ="ALL", 
+             keyType = "SYMBOL", 
+             nPerm = 100000, 
+             minGSSize = 3, 
+             maxGSSize = 800, 
+             pvalueCutoff = 0.05, 
+             verbose = TRUE, 
+             OrgDb = organism, 
+             pAdjustMethod = "BH")
+
+
+```
+
+## • GSEA dotplot
+
+```{r}
+require(DOSE)
+
+png(paste(path,'GSEA_dotplot_100000permutations.png', sep = ''), units = 'in', width = 10, height = 9, res = 300)
+dotplot(gse, showCategory=10, split=".sign") + facet_grid(.~.sign)
+dev.off()
+```
+
+## • GSEA enrichment network
+
+```{r}
+library(ggplot2)
+ridgeplot(gse) + labs(x = "enrichment distribution")
+```
+
+# GSEA function (fgsea)
+
+```{r}
+gene_set_symbol <- 'c5'
+path <- '/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/K170vs1_tumor_volcplot/'
+group <- 'K17 0'
+pct_match_threshold <- 5
+
+
+pattern <-  paste(gene_set_symbol, '\\.', sep = '')
+
+gene_set <- list.files(path = '/Volumes/hqdinh2/Projects/HNC_SPORE/Resources/mSigDB_hallmarkSigs/', pattern = '^c5')
+
+marks <- qusage::read.gmt(paste('/Volumes/hqdinh2/Projects/HNC_SPORE/Resources/mSigDB_hallmarkSigs/', gene_set, sep = ''))
+
+volc.genes <- read.csv(paste(path, '2022-12-16paired=FALSEvolcano_plot_input.csv', sep = ''))
+
+# setting the enriched group for segmentation purposes
+volc.genes$enriched_group <- "None"
+volc.genes$enriched_group[volc.genes$log2foldChange > 0] <- 'K17 1'
+volc.genes$enriched_group[volc.genes$log2foldChange < 0] <- 'K17 0'
+
+# getting the genes specific to this group
+genes <- volc.genes[volc.genes$enriched_group == group,]
+
+gene_list <- as.character(genes$FDR)
+names(gene_list) <- genes$Gene
+
+GSEA(gene_list, GO_file = paste('/Volumes/hqdinh2/Projects/HNC_SPORE/Resources/mSigDB_hallmarkSigs/', gene_set, sep = ''), pval = 0.05)
+
+gene_list = gene_list
+GO_file = paste('/Volumes/hqdinh2/Projects/HNC_SPORE/Resources/mSigDB_hallmarkSigs/', gene_set, sep = '')
+pval = 0.05
+
+GSEA = function(gene_list, GO_file, pval) {
+  set.seed(54321)
+  library(dplyr)
+  library(fgsea)
+
+  if ( any( duplicated(names(gene_list)) )  ) {
+    warning("Duplicates in gene names")
+    gene_list = gene_list[!duplicated(names(gene_list))]
+  }
+  if  ( !all( order(gene_list, decreasing = TRUE) == 1:length(gene_list)) ){
+    warning("Gene list not sorted")
+    gene_list = sort(gene_list, decreasing = TRUE)
+  }
+  myGO = fgsea::gmtPathways(GO_file)
+
+  fgRes <- fgsea::fgsea(pathways = myGO,
+                           stats = gene_list,
+                           minSize=15, ## minimum gene set size
+                           maxSize=400, ## maximum gene set size
+                           nperm=10000) %>% 
+                  as.data.frame() %>% 
+                  dplyr::filter(padj < !!pval) %>% 
+                  arrange(desc(NES))
+  message(paste("Number of signficant gene sets =", nrow(fgRes)))
+
+  message("Collapsing Pathways -----")
+  concise_pathways = collapsePathways(data.table::as.data.table(fgRes),
+                                      pathways = myGO,stats = gene_list)
+  fgRes = fgRes[fgRes$pathway %in% concise_pathways$mainPathways, ]
+  message(paste("Number of gene sets after collapsing =", nrow(fgRes)))
+
+  fgRes$Enrichment = ifelse(fgRes$NES > 0, "Up-regulated", "Down-regulated")
+  filtRes = rbind(head(fgRes, n = 10),tail(fgRes, n = 10 ))
+
+  total_up = sum(fgRes$Enrichment == "Up-regulated")
+  total_down = sum(fgRes$Enrichment == "Down-regulated")
+  header = paste0("Top 10 (Total pathways: Up=", total_up,", Down=",    total_down, ")")
+
+  colos = setNames(c("firebrick2", "dodgerblue2"),c("Up-regulated", "Down-regulated"))
+
+g1= ggplot(filtRes, aes(reorder(pathway, NES), NES)) +
+  geom_point( aes(fill = Enrichment, size = size), shape=21) +
+  scale_fill_manual(values = colos ) +
+  scale_size_continuous(range = c(2,10)) +
+  geom_hline(yintercept = 0) +
+  coord_flip() +
+  labs(x="Pathway", y="Normalized Enrichment Score",
+       title=header) + th
+
+  output = list("Results" = fgRes, "Plot" = g1)
+  return(output)
+}
+```
+
+# GSEA barplot for Taja/Megan's K17 manuscript
+
+```{r}
+marks <- qusage::read.gmt('/Volumes/hqdinh2/Projects/HNC_SPORE/Resources/mSigDB_hallmarkSigs/c5.go.bp.v7.5.1.symbols.gmt')
+
+volc.genes <- read.csv('/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/PCKnoK17vsK17_volcplot/2022-12-14paired=FALSEvolcano_plot_input.csv')
+volc.genes <- volc.genes[volc.genes$Color %in% c('FDR < 0.001', 'FDR < 0.05'),]
+volc.genes$enriched_group <- 'PCK no K17'
+volc.genes$enriched_group[volc.genes$log2foldChange < 0] <- 'K17'
+
+#pck <- volc.genes$X[volc.genes$enriched_group == 'PCK no K17']
+#k17 <- volc.genes$X[volc.genes$enriched_group == 'K17']
+
+
+group <- 'K17'
+
+genes <- volc.genes$X[volc.genes$enriched_group == group]
+intersects <- vector(mode = "list", length = 0)
+for (x in 1:length(marks)){
+  intersects[[names(marks)[[x]]]] <- intersect(marks[[x]], genes)
+}
+
+l <- lengths(intersects)
+m <- lengths(marks)
+n <- l/m
+df <- data.frame(n)
+df$program <- rownames(df)
+df <- df[df$n > 0,]
+df <- df %>% arrange(desc(df)) %>% na.omit()
+df$n <- df$n * 100
+
+ggplot(data=df, aes(y=n, x=reorder(program, n), fill = n)) + geom_bar(stat="identity") + coord_flip() + labs(y = '% match from gene set', x = 'gene set', fill = '% match from gene set') + ggtitle(paste(group, 'segment hallmark gene set enrichment', sep = ' ')) + scale_fill_gradient(low="grey",high="red") + theme_light()
+
+write.csv(df, file = paste('/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/PCKvsK17_allresponses_volcplot/', group, '_hallmark_gsea_barplot.csv', sep = ''))
+
+ggsave(paste('/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/PCKvsK17_allresponses_volcplot/', group, '_hallmark_gsea_barplot.png', sep = ''), height = 5, width = 10, units = 'in', dpi = 300)
+
+```
+
+# GSEA barplot from volcano plot markers (for Wei K22 app)
+
+```{r}
+gene_set_symbol <- 'c5'
+path <- '/Volumes/hqdinh2/Projects/HNC_SPORE/GeoMx_Feb2022/K170vs1_tumor_volcplot/'
+group <- 'K17 0'
+pct_match_threshold <- 5
+
+
+pattern <-  paste(gene_set_symbol, '\\.', sep = '')
+
+gene_set <- list.files(path = '/Volumes/hqdinh2/Projects/HNC_SPORE/Resources/mSigDB_hallmarkSigs/', pattern = '^c5')
+
+marks <- qusage::read.gmt(paste('/Volumes/hqdinh2/Projects/HNC_SPORE/Resources/mSigDB_hallmarkSigs/', gene_set, sep = ''))
+
+volc.genes <- read.csv(paste(path, '2022-12-16paired=FALSEvolcano_plot_input.csv', sep = ''))
+
+# only keeping genes that were significant
+volc.genes <- volc.genes[volc.genes$Color %in% c('FDR < 0.001', 'FDR < 0.05'),]
+
+# setting the enriched group for segmentation purposes
+volc.genes$enriched_group <- "None"
+volc.genes$enriched_group[volc.genes$log2foldChange > 0] <- 'K17 1'
+volc.genes$enriched_group[volc.genes$log2foldChange < 0] <- 'K17 0'
+
+# getting the genes specific to this group
+genes <- volc.genes$X[volc.genes$enriched_group == group]
+
+# finding which genes match to which terms
+intersects <- vector(mode = "list", length = 0)
+for (x in 1:length(marks)){
+  intersects[[names(marks)[[x]]]] <- intersect(marks[[x]], genes)
+}
+
+# get the number of matching genes for each term
+l <- lengths(intersects)
+
+# get the length of the original term's gene list
+m <- lengths(marks)
+
+# divide the two to get a percentage match
+n <- l/m
+
+# make a DF with all the terms and their n value
+df <- data.frame(n)
+df$program <- rownames(df)
+df <- df[df$n > 0,]
+df <- df %>% arrange(desc(df)) %>% na.omit()
+df$n <- df$n * 100
+df <- df[df$n > pct_match_threshold,]
+df <- df[1:25,]
+
+ggplot(data=df, aes(y=n, x=reorder(program, n), fill = n)) + geom_bar(stat="identity") + coord_flip() + labs(y = '% match from gene set', x = 'gene set', fill = '% match from gene set') + ggtitle(paste(group, gene_set_symbol, 'gene set enrichment', sep = ' ')) + scale_fill_gradient(low="grey",high="red") + theme_light()
+
+write.csv(df, file = paste(path, group, '_', gene_set_symbol, '_gsea_barplot.csv', sep = ''))
+
+ggsave(paste(path, group, '_', gene_set_symbol, '_gsea_barplot.png', sep = ''), height = 5, width = 18, units = 'in', dpi = 300)
+
+```
+
+# ------------------------------
