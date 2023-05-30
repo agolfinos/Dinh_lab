@@ -1,5 +1,6 @@
 ---
 title: "Functions"
+author: Athena Golfinos-Owens
 output: html_document
 ---
 
