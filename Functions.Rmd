@@ -17,13 +17,31 @@ knitr::opts_chunk$set(echo = TRUE)
 Run this function in the CONSOLE as it has figure outputs that cannot be seen if you are running code in-line
 NOTE: this function requires user input that you can determine the values of based on the output figures
 
-seu: seurat object (individual sample, pre-processing)
-out: path to output a log of pre-processing steps
+seu: name of your seurat object (individual sample, pre-processing)
+
+out: absolute or relative path where the function will output a log of pre-processing steps
+
 pct_doublets: expected doublet percentage. Please reference the 10X documentation for appropriate values for this argument
-feature_subset: would you like to be presented with the nCount_RNA, nFeature_RNA, and % mitochondrial cells to set cutoffs for filtering? If FALSE, there will be no opportunity to do so 
-normalize: set this to TRUE if the data is raw. Set to FALSE if the data has been integrated, as you cannot normalize again
+
+feature_subset: Recommend keeping this as TRUE. Would you like to be presented with the nCount_RNA, nFeature_RNA, and % mitochondrial cell violin plots to set cutoffs for filtering? If FALSE, there will be no opportunity to do so 
+
+batch_id: This is the name of the metadata column in seu@metadata that contains batch related information. This could be sample ID, tissue, etc. This is anything that may introduce technical batch effects, such as sequencing date, source animal, etc. 
+
+reduction: For a raw object from a single sample, keep this as pca. However, if you are running this pipeline on an atlas of integrated data where you used this function to do harmony integrated, you should change this to 'harmonyRNA". 
+
+harmony: This should be set to FALSE unless your atlas has been merged to contain multiple batches. If this is the case, you should change to TRUE. You should also then change your reduction to "harmonyRNA"
+
+seurat_integration: Leave this as FALSE unless you have a specific reason for changing to TRUE. 
+
+normalize: Recommend keeping this as TRUE. You should set this to TRUE if the data is raw. ONLY Set to FALSE if the data has been integrated using Seurat integration as you cannot normalize again. 
+
+test_npcs: This sets how many PCs will be initially calculated. As you will be selecting a set number of PCs to run the UMAP with during the running of this function, this is NOT the number of PCs to use in calculation of the UMAP. This is simply the number of PCs to show in an elbow plot. Recommend leaving this as is unless you have a large dataset (>20,000 cells), as 200 might be needed to fully see where the variance wanes. 
+
+assay: Leave this as RNA unless you have a different assay you have added to the object that you would prefer to use. 
+
+
 ```{r}
-seu_pp1 <- function(seu, out, remove_doublets = TRUE, pct_doublets, feature_subset = TRUE, batch_id = 'orig.ident', reduction = 'pca', harmony = TRUE, seurat_integration = FALSE, normalize = TRUE, test_npcs = 100, assay = 'RNA'){
+seu_pp1 <- function(seu, out, remove_doublets = TRUE, pct_doublets, feature_subset = TRUE, batch_id = 'orig.ident', reduction = 'pca', harmony = FALSE, seurat_integration = FALSE, normalize = TRUE, test_npcs = 100, assay = 'RNA'){
   
   require(dplyr)
   require(Seurat)
