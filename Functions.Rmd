@@ -12,16 +12,6 @@ knitr::opts_chunk$set(echo = TRUE)
 
 # Seurat single-cell data
 
-## • [DEPRECATED] Seurat pre-processing helper 0
-```{r}
-seu_pp0 <- function(seu, nFeature_min = 200, nFeature_max = 4000, batch_id = 'orig.ident') {
-  print(VlnPlot(seu, features = c("nCount_RNA", "nFeature_RNA")))
-  seu <- subset(seu, subset = nFeature_RNA > nFeature_min & nFeature_RNA < nFeature_max)
-  print(table(seu[[batch_id]]))
-  return(seu)
-}
-```
-
 ## • Seurat pre-processing helper 1 (normalize through PC selection)
 
 Run this function in the CONSOLE as it has figure outputs that cannot be seen if you are running code in-line
