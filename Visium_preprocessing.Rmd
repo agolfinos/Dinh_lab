@@ -7,12 +7,62 @@ date: "2023-05-31"
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+
+library(Seurat)
+library(hdf5r)
+library(ggplot2)
+library(patchwork)
 ```
 
-## R Markdown
+# Visium pre-processing
 
+This function loads in the H5 file from your SpaceRanger output, 
 ```{r}
-summary(cars)
+in_dir <- "Z:\\Computational_Toxicology\\Athena\\Test_visium\\"
+h5_name <- "V1_Mouse_Brain_Sagittal_Anterior_Section_2_filtered_feature_bc_matrix.h5"
+out_dir <- "Z:\\Computational_Toxicology\\Athena\\Test_visium\\"
+
+
+# attach required packages
+require(ggplot2)
+require(Seurat)
+require(patchwork)
+
+sink(paste(out_dir, '_preprocessing_console_output.txt', sep = ''), append = T)
+
+cat('\nNEW ANALYSIS\n')
+cat(paste('Date of analysis: ', Sys.Date(), "\n"))
+cat(paste('Input directory: ', in_dir, "\n"))
+cat(paste('H5 file name: ', h5_name, "\n"))
+cat(paste("Output directory: ", out, "\n"))
+
+# load in the data
+seu <- Seurat::Load10X_Spatial(data.dir = in_dir, filename = h5_name)
+
+# visualize the heterogeneity of coverage
+plot1 <- VlnPlot(seu, features = "nCount_Spatial", pt.size = 0.1) + NoLegend()
+plot2 <- SpatialFeaturePlot(seu, features = "nCount_Spatial") + theme(legend.position = "right")
+print(wrap_plots(plot1, plot2))
+
+# normalize with SCTransform
+seu <- SCTransform(seu, assay = "Spatial", verbose = FALSE)
+
+# run PCA using the SCT assay
+seu <- RunPCA(seu, assay = "SCT", verbose = FALSE, npcs = 200)
+print(ElbowPlot(seu, ndims = 200))
+
+# taking user input as to how many principal components to use 
+npcs <- as.integer(readline("Enter the number of PCs to use: "))
+
+cat(paste("Batch_ID: ", batch_id, "\n"))
+cat(paste("Assay used: ", assay, "\n"))
+
+# find nearest neighbors
+seu <- FindNeighbors(seu, reduction = "pca", dims = 1:npcs)
+
+# finding clusters
+seu <- FindClusters(seu, verbose = FALSE)
+brain <- RunUMAP(brain, reduction = "pca", dims = 1:30)
 ```
 
 
