@@ -39,6 +39,8 @@ test_npcs: This sets how many PCs will be initially calculated. As you will be s
 
 assay: Leave this as RNA unless you have a different assay you have added to the object that you would prefer to use. 
 
+Output: 
+The output of this function is a processed seurat object
 
 ```{r}
 seu_pp1 <- function(seu, out, remove_doublets = TRUE, pct_doublets, feature_subset = TRUE, batch_id = 'orig.ident', reduction = 'pca', harmony = FALSE, seurat_integration = FALSE, normalize = TRUE, test_npcs = 100, assay = 'RNA'){
@@ -48,6 +50,8 @@ seu_pp1 <- function(seu, out, remove_doublets = TRUE, pct_doublets, feature_subs
   require(harmony)
   require(grid)
   require(DoubletFinder)
+  require(DescTools)
+  require(dplyr)
   
   sink(paste(out, '_preprocessing_console_output.txt', sep = ''), append = T)
   
@@ -151,6 +155,19 @@ seu_pp1 <- function(seu, out, remove_doublets = TRUE, pct_doublets, feature_subs
 ```
 
 ## • SoupX run
+
+This function runs the soupx tool for removing ambient RNA "soup" from your samples
+
+seu: Your seurat object
+
+tmpDir: The path to your original filtered (or raw if you want to use that) h5 file from running cellranger
+
+outdir: Provide the path to a folder that already exists (please make the folder if it's not already made) where you would like to store record-keeping related outputs. This is not the path that will be used to store the seurat object
+
+seuout: Provide the path to a folder that already exists (please make the folder if it's not already made) where you would like to store the post-processing seurat object
+
+Output: 
+
 ```{r}
 soupX_run <- function(seu, tmpDir, outdir = './outputs/', seuout = './seurat_objs/', sample){
   
@@ -195,14 +212,7 @@ soupX_run <- function(seu, tmpDir, outdir = './outputs/', seuout = './seurat_obj
 ```{r}
 marker_plotting <- function(seu, features, group.by){
   
-  color_clusters <- c("#DC050C", "#FB8072", "#1965B0", "#7BAFDE", 
-                      "#882E72", "#B17BA6", "#FF7F00", "#FDB462",
-                      "#E7298A", "#E78AC3","#33A02C", "#B2DF8A", 
-                      "#55A1B1", "#8DD3C7", "#A6761D", "#E6AB02", 
-                      "#7570B3", "#BEAED4", "#666666", "#999999", 
-                      "#AA8282", "#D4B7B7", "#8600BF", "#BA5CE3", 
-                      "#808000","#AEAE5C", "#1E90FF", "#00BFFF", 
-                      "#56FF0D", "#FFFF00")
+  color_clusters <- c("#DC050C", "#FB8072", "#1965B0", "#7BAFDE", "#882E72", "#B17BA6", "#FF7F00", "#FDB462", "#E7298A", "#E78AC3","#33A02C", "#B2DF8A", "#55A1B1", "#8DD3C7", "#A6761D", "#E6AB02", "#7570B3", "#BEAED4", "#666666", "#999999", "#AA8282", "#D4B7B7", "#8600BF", "#BA5CE3", "#808000","#AEAE5C", "#1E90FF", "#00BFFF", "#56FF0D", "#FFFF00")
   
   require(Seurat)
   require(cowplot)
@@ -265,24 +275,6 @@ cluster_eval <- function(seu, group.by, batch.id){
 }
 ```
 
-
-## • [DEPRECATED] Seurat pre-processing helper 2 (Find Neighbors through UMAP)
-
-Completes the following steps: Find neighbors, run harmony, run UMAP with the harmony reduction, and then find cluster resolutions from 0.1 to 3
-```{r}
-#seu <- seu
-#npcs <- 50
-#reduction = 'harmony'
-
-#seu_pp2 <- function(seu, npcs = 20, reduction, assay = 'RNA'){
-  #seu <- FindNeighbors(seu, dims = 1:npcs, reduction = reduction, assay = assay)
-  #seu <- RunUMAP(seu, dims = 1:npcs, reduction = reduction, assay = assay)
-  #for (x in seq.int(0.1, 3, by = 0.1)){
-    #seu <- FindClusters(seu, resolution = x, verbose = FALSE)
-  #}
-  #return(seu)
-#}
-```
 
 ## • Add clustering resolutions 0.1-3
 
@@ -370,7 +362,7 @@ de_dotplot_1v1 <- function(seu, metadata, x, y){
 ## • frequency plots
 
 ```{r}
-#freqs <- freq_boxplot(seu, metadata = 'global.cluster', split.meta = 'hpv_status', out = './figures/global_cluster_all_', out_width = 19, out_height = 10)
+#freqs <- freq_plot(seu, metadata = 'global.cluster', split.meta = 'hpv_status', out = './figures/global_cluster_all_', out_width = 19, out_height = 10)
 
 SEU = epi_moc2
 metadata = 'RNA_snn_res.0.4'
@@ -380,7 +372,7 @@ out_width = 8
 out_height = 8
 out_units = 'in'
 out_res = 300
-#freq_boxplot(seurat, celltype = c('N0_Retnlg', 'N1_Tnf', 'N2_Isg', 'N3_Npm1'), metadata = 'global.cluster2', split.meta = 'tissue', out = '/Volumes/hqdinh2/Projects/HNC_SPORE/Golfinosetal2022/neut_freq_boxplot.png')
+#freq_plot(seurat, celltype = c('N0_Retnlg', 'N1_Tnf', 'N2_Isg', 'N3_Npm1'), metadata = 'global.cluster2', split.meta = 'tissue', out = '/Volumes/hqdinh2/Projects/HNC_SPORE/Golfinosetal2022/neut_freq_boxplot.png')
 
 ##################################################################
 freq_plot <- function(SEU, metadata, split.meta = 'tissue_hpv', graph_type = c('stacked_barplot', 'freq_boxplot'), out, out_width = 12, out_height = 8, out_units = 'in', out_res = 300){
@@ -473,8 +465,6 @@ freq_plot <- function(SEU, metadata, split.meta = 'tissue_hpv', graph_type = c('
     write.csv(df, file = paste(out, 'stacked_barplot_data.csv', sep = ''))
     return(df)
   }
-  
-  
 }
 ############################################################################
 ```
@@ -563,7 +553,7 @@ return(df)
 ```
 
 
-### •• Wilcox test for frequency boxplots
+### •• Wilcox test--freq boxplots
 
 Input: dataframe that is a direct output from the previous function (frequency boxplots), out folder where you want the csv file stored
 
