@@ -10,9 +10,9 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 
-# Seurat single-cell data
+# Seurat single-cell processing
 
-## • Seurat pre-processing helper 1 (normalize through PC selection)
+## Seurat pre-processing helper 1 (normalize through UMAP)
 
 Run this function in the CONSOLE as it has figure outputs that cannot be seen if you are running code in-line
 NOTE: this function requires user input that you can determine the values of based on the output figures
@@ -154,7 +154,7 @@ seu_pp1 <- function(seu, out, remove_doublets = TRUE, pct_doublets, feature_subs
 }
 ```
 
-## • SoupX run
+## SoupX run
 
 This function runs the soupx tool for removing ambient RNA "soup" from your samples
 
@@ -209,7 +209,22 @@ soupX_run <- function(seu, tmpDir, outdir = './outputs/', seuout = './seurat_obj
 }
 ```
 
-## • Marker plotting (VlnPlot, DotPlot, DimPlot, FeaturePlot)
+## Add clustering resolutions 0.1-3
+
+```{r}
+add_cluster_res <- function(seu, start = 0.1, end = 3){
+  # getting clustering resolutions from 0.1-3
+  for (x in seq.int(start, end, by = 0.1)){
+    seu <- FindClusters(seu, resolution = x, verbose = FALSE)
+  }
+  return(seu)
+}
+```
+
+# ________________________
+# Seurat cluster/marker evaluation
+
+## Marker plotting (VlnPlot, DotPlot, DimPlot, FeaturePlot)
 ```{r}
 marker_plotting <- function(seu, features, group.by){
   
@@ -228,7 +243,7 @@ marker_plotting <- function(seu, features, group.by){
 }
 ```
 
-## • Cluster evaluation (nCount, nFeature, doublet score)
+## Cluster evaluation (nCount, nFeature, doublet score)
 ```{r}
 #seu = my2
 #group.by = 'predicted.id'
@@ -278,19 +293,8 @@ cluster_eval <- function(seu, group.by, batch.id){
 ```
 
 
-## • Add clustering resolutions 0.1-3
 
-```{r}
-add_cluster_res <- function(seu, start = 0.1, end = 3){
-  # getting clustering resolutions from 0.1-3
-  for (x in seq.int(start, end, by = 0.1)){
-    seu <- FindClusters(seu, resolution = x, verbose = FALSE)
-  }
-  return(seu)
-}
-```
-
-## • DE genes DotPlot (all clusters)
+## DE genes DotPlot (all clusters)
 
 ```{r}
 #de_dotplot(seu, 'global.cluster')
@@ -329,7 +333,7 @@ de_dotplot <- function(seu, metadata, out = './figures/', n_marks = 10, min_pct 
 }
 ```
 
-## • DE genes DotPlot (1 vs 1 clusters)
+## DE genes DotPlot (1 vs 1 clusters)
 
 ```{r}
 library(Seurat)
@@ -361,7 +365,10 @@ de_dotplot_1v1 <- function(seu, metadata, x, y){
 }
 ```
 
-## • frequency plots
+# ____________________________
+# Seurat comparison analyses
+
+## frequency plots
 
 ```{r}
 #freqs <- freq_plot(seu, metadata = 'global.cluster', split.meta = 'hpv_status', out = './figures/global_cluster_all_', out_width = 19, out_height = 10)
@@ -469,91 +476,7 @@ freq_plot <- function(SEU, metadata, split.meta = 'tissue_hpv', graph_type = c('
 ############################################################################
 ```
 
-## ™ Testing new function
-```{r}
-SEU = zhou_myeloid
-metadata = 'predicted.id'
-split.meta = 'predicted.id'
-out = '/Volumes/hqdinh2/Projects/HNC_SPORE/Zhou_HNC_mice/Figures/zhou_myeloid_freq_boxplots.png'
-out_width = 7
-out_height = 8
-out_units = 'in'
-out_res = 300
-
-Idents(SEU) <- metadata
-new.ident <- sort(unique(Idents(SEU)))
-samples <- unique(SEU[['predicted.id']][,1])
-tmp <- match(SEU@meta.data[['predicted.id']], samples)
-sample_ind <- unique(tmp)
-ids <- Idents(SEU)
-tmp_v <- matrix(0, nrow = length(samples), ncol = length(new.ident))
-rownames(tmp_v) <- samples
-total_in_sample <- rep(0, length(samples))
-tmp <- SEU$orig.ident
-tmp <- plyr::count(tmp)
-total_in_sample = tmp$freq
-names(total_in_sample) <- tmp$x
-total_in_sample <- total_in_sample[match(samples, names(total_in_sample))]
-for (i in 1:length(new.ident)) {
-  tmp <- ids[which(ids == new.ident[i])]
-  tmp <- SEU[['treatment']][,1][match(names(tmp), rownames(SEU@meta.data))]
-  tmp <- plyr::count(tmp)
-  for (j in 1:nrow(tmp)) {
-    ind <- which(rownames(tmp_v) == tmp$x[j])
-    tmp_v[ind,i] <- tmp$freq[j]
-  }
-}
-colnames(tmp_v) <- new.ident
-ind <- order(colnames(tmp_v))
-t2 <- tmp_v
-for (i in 1:nrow(t2)) {
-  t2[i,] = t2[i,]/sum(t2[i,])
-}
-t2 <- as.data.frame(t2)
-t2 <- as.matrix(t2)
-
-meta <- SEU[[c('nCount_RNA' ,'treatment')]]
-rownames(meta) <- NULL
-meta <- unique(meta)
-df <- NULL
-for (i in 1:nrow(t2)) {
-  for (j in 1:ncol(t2)) {
-    df <- rbind(df, c(rownames(t2)[i], meta[['treatment']][which(meta$orig.ident == rownames(t2)[i])], colnames(t2)[j], as.numeric(t2[i,j])))
-  }
-}
-colnames(df) <- c('Sample', 'Group', 'Cluster', 'Freqs')
-df <- as.data.frame(df)
-df$Group <- as.character(df$Group)
-df$Freqs <- as.numeric(as.character(df$Freqs))
-
-all_p <- data.frame(subset = character(), p = numeric())
-
-for (x in unique(df$Cluster)) {
-  f <- df[df$Cluster == x,]
-  groups <- unique(df$Group)
-  f1 <- f[f$Group == groups[1],]$Freqs
-  f2 <- f[f$Group == groups[2],]$Freqs
-  wcx <- wilcox.test(f1, f2, paired = FALSE)
-  row <- c(x, wcx$p.value)
-  all_p <- rbind(all_p, row)
-  all_p[,2] <- format(round(as.numeric(all_p[,2]), 2), nsmall = 2)
-}
-
-p_filtered <- all_p
-
-sub_title <- paste(p_filtered[,1], p_filtered[,2], sep = '=')
-
-
-png(out, width = out_width, height = out_height, units = out_units, res = out_res)
-ggplot(df) +geom_boxplot(aes(x = Group, y = Freqs, color = Group, fill = Group), position = position_dodge(), alpha = 0.5, outlier.color = NA) + geom_point(aes(x = Group, y = Freqs, color = Group), alpha = 0.8, position = position_jitterdodge()) + facet_wrap(~ Cluster, scales = 'free', nrow = 2) + theme_bw() + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(), strip.text = element_text(size = 12)) + scale_shape_manual(values = 1:5) + ggtitle(label = paste('Subset frequency by', split.meta, sep = ' '))
-
-ggsave(out, width = out_width, height = out_height, units = out_units, dpi = out_res)
-dev.off()
-return(df)
-```
-
-
-### •• Wilcox test--freq boxplots
+### Wilcox test--freq boxplots
 
 Input: dataframe that is a direct output from the previous function (frequency boxplots), out folder where you want the csv file stored
 
@@ -598,7 +521,7 @@ wilcox_by_condition <- function(df = df, out){
 }
 ```
 
-## • Volcano plots: plotting comparisons
+## Volcano plots: plotting comparisons
 
 ```{r Volcano plot of two metadata}
 seu <- seu
@@ -662,7 +585,109 @@ volcPlot <- function(seu, seu_name, meta, cell1, cell2, select_labs=NULL, out='/
 }
 ```
 
-## • cellphoneDB functions
+# ______________________________________
+# Deconvolution
+
+## SCDC deconvolution function
+
+seu: Name of your single cell seurat object
+
+markers_sc: Markers for all the single cell data clusters. Should be the output from the DE genes DotPlot function. 
+
+metadata: the metadata column in your seurat single cell object that was used to calculate markers_sc
+
+sp: the spatial transcriptomics seurat object from 10X Visium data
+
+out: Absolute or relative path to where you want the SCDC results saved
+
+```{r}
+#ck17_5 <- scdc_decon(seu = cillo_kurten, markers_sc = readRDS('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/singlecellmarkers_fordeconvolution.RDS'), metadata = 'mreg_cxcl9_globalcluster4', sp = ck17_5, out = '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-5_analysis/')
+
+#saveRDS(sp, '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-5_analysis/cleaned_ck17_5_seurat_2022-07-06.RDS')
+
+scdc_decon <- function(seu, markers_sc, metadata, sp, out){
+  
+  require(Seurat)
+  require(DescTools)
+  require(dplyr)
+  require(BioBase)
+  require(SCDC)
+  
+  DefaultAssay(sp) <- 'SCT'
+  #deconvoluting using our single cell data
+  hnc_til <- seu[,!seu$tissue %like% c('PBMC', 'Tonsil')]
+  table(hnc_til[[metadata]])
+  
+  # Filter for genes that are also present in the ST data
+  markers_sc <- markers_sc[markers_sc$gene %in% rownames(sp), ]
+  
+  # Select top 20 genes per cluster, select top by first p-value, then absolute
+  # diff in pct, then quota of pct.
+  markers_sc$pct.diff <- markers_sc$pct.1 - markers_sc$pct.2
+  markers_sc$log.pct.diff <- log2((markers_sc$pct.1 * 99 + 1)/(markers_sc$pct.2 * 99 + 1))
+  markers_sc %>% dplyr::group_by(cluster) %>% dplyr::top_n(-100, p_val) %>%
+      dplyr::top_n(50, pct.diff) %>% dplyr::top_n(20, log.pct.diff) -> top20
+  m_feats <- unique(as.character(top20$gene))
+  
+  eset_SC <- ExpressionSet(assayData = as.matrix(hnc_til@assays$RNA@counts[m_feats,
+      ]), phenoData = AnnotatedDataFrame(hnc_til@meta.data))
+  eset_ST <- ExpressionSet(assayData = as.matrix(sp@assays$Spatial@counts[m_feats,
+      ]), phenoData = AnnotatedDataFrame(sp@meta.data))
+  
+  #running deconvolution
+  deconvolution <- SCDC::SCDC_prop(bulk.eset = eset_ST, sc.eset = eset_SC, ct.varname = metadata, ct.sub = as.character(unique(eset_SC[[metadata]])))
+  
+  # now adding deconvolution output and adding it to the Seurat object as a new assay
+  sp@assays[['SCDC']] <- SeuratObject::CreateAssayObject(data = t(deconvolution$prop.est.mvw))
+  
+  if (length(sp@assays$SCDC@key) == 0) {
+      sp@assays$SCDC@key = "scdc_"
+  }
+  
+  DefaultAssay(sp) <- 'SCDC'
+  
+  sp <- Seurat::FindSpatiallyVariableFeatures(sp, assay = "SCDC", selection.method = "markvariogram", features = rownames(sp), r.metric = 5, slot = "data")
+  top.clusters <- head(SpatiallyVariableFeatures(sp), 4)
+  SpatialPlot(object = sp, features = top.clusters, ncol = 2)
+  
+  outf <- paste(out, 'seurat_allsubset_proportions.pdf', sep = '')
+  
+  pdf(file = outf, width = 15, height = 20)
+  Seurat::SpatialPlot(sp, feature = rownames(sp@assays$SCDC@data), ncol = 6)
+  dev.off()
+  
+  return(sp)
+
+}
+```
+
+# __________________________
+# Cell-cell communication
+
+## Create CellChat
+```{r}
+creat_cellchat <- function(seurat) {
+  data.input<-GetAssayData(seurat,assay = "RNA", slot = "data")
+
+  #extract cell type labels
+  labels<-seurat$cluster
+  meta <- data.frame(group = labels, row.names = names(labels))
+  cellchat <- createCellChat(object = data.input, meta = meta, group.by = "group")
+  cellchat@DB <- CellChatDB.human
+  cellchat <- subsetData(cellchat)
+  cellchat <- identifyOverExpressedGenes(cellchat,thresh.p = 0.1)
+  cellchat <- identifyOverExpressedInteractions(cellchat)
+  cellchat <- computeCommunProb(cellchat)
+  cellchat <- computeCommunProbPathway(cellchat)
+  cellchat <- filterCommunication(cellchat, min.cells = 5)
+
+  cellchat <- aggregateNet(cellchat)
+  cellchat  
+}
+```
+
+
+## cellphoneDB functions
 
 ```{r pre-run}
 #gets counts for cellphoneDB from your seurat object
@@ -920,7 +945,10 @@ cowplot::plot_grid(p1, NULL, p2, rel_widths = c(0.2, 0, 1), align = "h", scale =
 }
 ```
 
-## • Seurat to annData (for Python)
+# ______________________________________
+# Misc helper functions
+
+## Seurat to annData (for Python)
 
 ```{r}
 #load('/Volumes/hdlab/Projects/HNC_SPORE/Seurat_Objs/MOC2_mouse/Seurat_MOC2_K17KO_2021-11-01**.rda')
@@ -938,7 +966,7 @@ seurat_to_adata <- function(out, seu){
 seurat_to_adata(out, seu)
 ```
 
-# saving images
+## saving images
 
 ```{r saving png--best for single janky plots where you cannot use ggsave}
 # usage:
@@ -973,7 +1001,10 @@ save_img <- function(outname, width, height, plot) {
 }
 ```
 
-# Monocle3 Pseudotime
+# ____________________________
+# Pseudotime
+
+## Monocle3 Pseudotime
 
 ```{r}
 monocle3_pseudotime <- function(SEU, ROOT, out) {
@@ -993,31 +1024,14 @@ monocle3_pseudotime <- function(SEU, ROOT, out) {
 }
 ```
 
-# Create CellChat
-```{r}
-creat_cellchat <- function(seurat) {
-  data.input<-GetAssayData(seurat,assay = "RNA", slot = "data")
 
-  #extract cell type labels
-  labels<-seurat$cluster
-  meta <- data.frame(group = labels, row.names = names(labels))
-  cellchat <- createCellChat(object = data.input, meta = meta, group.by = "group")
-  cellchat@DB <- CellChatDB.human
-  cellchat <- subsetData(cellchat)
-  cellchat <- identifyOverExpressedGenes(cellchat,thresh.p = 0.1)
-  cellchat <- identifyOverExpressedInteractions(cellchat)
-  cellchat <- computeCommunProb(cellchat)
-  cellchat <- computeCommunProbPathway(cellchat)
-  cellchat <- filterCommunication(cellchat, min.cells = 5)
 
-  cellchat <- aggregateNet(cellchat)
-  cellchat  
-}
-```
 
+
+# __________________________________
 # GeoMx
 
-## • Volcano plot
+## Volcano plot
 
 ```{r}
 split.meta = c('Response')
@@ -1129,7 +1143,7 @@ geomx_vp <- function(split.meta, splitmeta_oi, top.split = FALSE, topmeta = NULL
 
 ```
 
-## • Heatmap w/ selection of response status, genes of interest + segment
+## Heatmap w/ selection of response status, genes of interest + segment
 
 ```{r}
 
@@ -1216,99 +1230,11 @@ geomx_heatmap <- function(geomx, genes = 'all', gene_set = NULL, path, add_segme
 }
 ```
 
-# Seurat deconvolution function
 
-seu: Name of your single cell seurat object
-
-markers_sc: Markers for all the single cell data clusters. Should be the output from the DE genes DotPlot function. 
-
-metadata: the metadata column in your seurat single cell object that was used to calculate markers_sc
-
-sp: the spatial transcriptomics seurat object from 10X Visium data
-
-out: Absolute or relative path to where you want the SCDC results saved
-
-```{r}
-#ck17_5 <- seurat_decon(seu = cillo_kurten, markers_sc = readRDS('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/singlecellmarkers_fordeconvolution.RDS'), metadata = 'mreg_cxcl9_globalcluster4', sp = ck17_5, out = '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-5_analysis/')
-
-#saveRDS(sp, '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-5_analysis/cleaned_ck17_5_seurat_2022-07-06.RDS')
-
-scdc_decon <- function(seu, markers_sc, metadata, sp, out){
-  
-  DefaultAssay(sp) <- 'SCT'
-  #deconvoluting using our single cell data
-  hnc_til <- seu[,!seu$tissue %like% c('PBMC', 'Tonsil')]
-  table(hnc_til[[metadata]])
-  
-  # Filter for genes that are also present in the ST data
-  markers_sc <- markers_sc[markers_sc$gene %in% rownames(sp), ]
-  
-  # Select top 20 genes per cluster, select top by first p-value, then absolute
-  # diff in pct, then quota of pct.
-  markers_sc$pct.diff <- markers_sc$pct.1 - markers_sc$pct.2
-  markers_sc$log.pct.diff <- log2((markers_sc$pct.1 * 99 + 1)/(markers_sc$pct.2 * 99 + 1))
-  markers_sc %>% dplyr::group_by(cluster) %>% dplyr::top_n(-100, p_val) %>%
-      dplyr::top_n(50, pct.diff) %>% dplyr::top_n(20, log.pct.diff) -> top20
-  m_feats <- unique(as.character(top20$gene))
-  
-  eset_SC <- ExpressionSet(assayData = as.matrix(hnc_til@assays$RNA@counts[m_feats,
-      ]), phenoData = AnnotatedDataFrame(hnc_til@meta.data))
-  eset_ST <- ExpressionSet(assayData = as.matrix(sp@assays$Spatial@counts[m_feats,
-      ]), phenoData = AnnotatedDataFrame(sp@meta.data))
-  
-  #running deconvolution
-  deconvolution <- SCDC::SCDC_prop(bulk.eset = eset_ST, sc.eset = eset_SC, ct.varname = metadata, ct.sub = as.character(unique(eset_SC[[metadata]])))
-  
-  # now adding deconvolution output and adding it to the Seurat object as a new assay
-  sp@assays[['SCDC']] <- SeuratObject::CreateAssayObject(data = t(deconvolution$prop.est.mvw))
-  
-  if (length(sp@assays$SCDC@key) == 0) {
-      sp@assays$SCDC@key = "scdc_"
-  }
-  
-  DefaultAssay(sp) <- 'SCDC'
-  
-  sp <- Seurat::FindSpatiallyVariableFeatures(sp, assay = "SCDC", selection.method = "markvariogram", features = rownames(sp), r.metric = 5, slot = "data")
-  top.clusters <- head(SpatiallyVariableFeatures(sp), 4)
-  SpatialPlot(object = sp, features = top.clusters, ncol = 2)
-  
-  outf <- paste(out, 'seurat_allsubset_proportions.pdf', sep = '')
-  
-  pdf(file = outf, width = 15, height = 20)
-  Seurat::SpatialPlot(sp, feature = rownames(sp@assays$SCDC@data), ncol = 6)
-  dev.off()
-  
-  return(sp)
-
-}
-```
-
-# Cellchat to Matrix
-
-```{r}
-cellchat_to_matrix <- function(cellchat){
-  
-  require(CellChat)
-  require(dplyr)
-  require(DescTools)
-  
-  pair_score<-c()
-  for (j in seq(1,length(levels(cellchat@idents)))){
-    for (k in seq(1,length(levels(cellchat@idents)))){
-      for (i in rownames(cellchat@LR$LRsig)){
-        pair_score<-c(pair_score, sum(cellchat@net$prob[,,i][j,k]))
-      }
-    }
-  }
-  pair_matrix<-matrix(pair_score,nrow=length(rownames(cellchat@LR$LRsig)))
-  rownames(pair_matrix)<-rownames(cellchat@LR$LRsig)
-  return(pair_matrix)
-}
-```
-
+# ___________________________________
 # Visium
 
-## • REGULAR HEATMAP Unweighted co-localization of L-R pairs
+## REGULAR HEATMAP Unweighted co-localization of L-R pairs
 
 ```{r}
 seu <- ck17_5
@@ -1490,7 +1416,7 @@ visium_cooc_heatmap <- function(seu, seuname, meta = 'BayesSpace',  out = '/Volu
 }  
 ```
 
-## • REGULAR HEATMAP Immune Weighted co-localization of L-R pairs
+## REGULAR HEATMAP Immune Weighted co-localization of L-R pairs
 
 ```{r}
 #seu <- ck17_5
@@ -1588,7 +1514,7 @@ weighted_visium_cooc_heatmap <- function(seu, seuname, meta = 'BayesSpace',  out
 }  
 ```
 
-## • OVERLAY HEATMAP Weighted co-localization of L-R pairs
+## OVERLAY HEATMAP Weighted co-localization of L-R pairs
 
 ```{r}
 #weighted_colocalization(ck17_7, seu_name = 'ck17_7', marks = c('PLTP', 'SPP1'))
@@ -1724,9 +1650,10 @@ weighted_colocalization <- function(seu, name, default_assay = 'SCT', marks, out
 }
 ```
 
+# __________________________________
 # Frequency boxplot pipeline
 
-## • Get freqs (for boxplot)
+## Get freqs (for boxplot)
 
 ```{r}
 get_freqs <- function(immune.combined, cluster_res) {
@@ -1759,7 +1686,7 @@ get_freqs <- function(immune.combined, cluster_res) {
 }
 ```
 
-## • Boxplot Wilcox test
+## Boxplot Wilcox test
 
 ```{r}
 #df <- df
