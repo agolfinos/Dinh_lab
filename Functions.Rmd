@@ -12,7 +12,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 # Seurat single-cell processing
 
-## Seurat pre-processing helper 1 (normalize through UMAP)
+## Seurat pre-processing helper (normalize through UMAP)
 
 Run this function in the CONSOLE as it has figure outputs that cannot be seen if you are running code in-line
 NOTE: this function requires user input that you can determine the values of based on the output figures
