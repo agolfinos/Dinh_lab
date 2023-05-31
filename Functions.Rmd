@@ -174,6 +174,7 @@ soupX_run <- function(seu, tmpDir, outdir = './outputs/', seuout = './seurat_obj
   require(SoupX)
   require(Seurat)
   require(DescTools)
+  require(dplyr)
   
   toc1 = Seurat::Read10X_h5(paste(tmpDir, "sample_filtered_feature_bc_matrix.h5", sep = ''))
   toc1 = toc1[rownames(toc1) %in% rownames(seu),colnames(toc1) %in% colnames(seu)]
@@ -229,16 +230,17 @@ marker_plotting <- function(seu, features, group.by){
 
 ## • Cluster evaluation (nCount, nFeature, doublet score)
 ```{r}
+#seu = my2
+#group.by = 'predicted.id'
+#batch.id = 'orig.ident'
+
 cluster_eval <- function(seu, group.by, batch.id){
-  
-  seu = my2
-  group.by = 'predicted.id'
-  batch.id = 'orig.ident'
   
   require(Seurat)
   require(ComplexHeatmap)
   require(grid)
   require(DescTools)
+  require(dplyr)
 
   test <- as.data.frame(table(seu[[group.by]], 
         seu[[batch.id]])) %>% tidyr::pivot_wider(names_from = 'Var2', 
@@ -380,8 +382,7 @@ freq_plot <- function(SEU, metadata, split.meta = 'tissue_hpv', graph_type = c('
   require(ggplot2)
   require(DescTools)
   require(Seurat)
-  #cellid <- paste('%', celltype, '%', sep = '')
-  #myeloid_id <- as.character(unique(Idents(SEU))[unique(Idents(SEU)) %like any% c(cellid)])
+
 
   Idents(SEU) <- metadata
   new.ident <- sort(unique(Idents(SEU)))
@@ -413,7 +414,6 @@ freq_plot <- function(SEU, metadata, split.meta = 'tissue_hpv', graph_type = c('
     t2[i,] = t2[i,]/sum(t2[i,])
   }
   t2 <- as.data.frame(t2)
-  #t2 <- t2[colnames(t2) %in% celltype]
   t2 <- as.matrix(t2)
 
   meta <- SEU@meta.data[,c('orig.ident', split.meta)]
@@ -1218,12 +1218,22 @@ geomx_heatmap <- function(geomx, genes = 'all', gene_set = NULL, path, add_segme
 
 # Seurat deconvolution function
 
+seu: Name of your single cell seurat object
+
+markers_sc: Markers for all the single cell data clusters. Should be the output from the DE genes DotPlot function. 
+
+metadata: the metadata column in your seurat single cell object that was used to calculate markers_sc
+
+sp: the spatial transcriptomics seurat object from 10X Visium data
+
+out: Absolute or relative path to where you want the SCDC results saved
+
 ```{r}
 #ck17_5 <- seurat_decon(seu = cillo_kurten, markers_sc = readRDS('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/singlecellmarkers_fordeconvolution.RDS'), metadata = 'mreg_cxcl9_globalcluster4', sp = ck17_5, out = '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-5_analysis/')
 
 #saveRDS(sp, '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-5_analysis/cleaned_ck17_5_seurat_2022-07-06.RDS')
 
-seurat_decon <- function(seu, markers_sc, metadata, sp, out){
+scdc_decon <- function(seu, markers_sc, metadata, sp, out){
   
   DefaultAssay(sp) <- 'SCT'
   #deconvoluting using our single cell data
@@ -1277,8 +1287,11 @@ seurat_decon <- function(seu, markers_sc, metadata, sp, out){
 
 ```{r}
 cellchat_to_matrix <- function(cellchat){
+  
   require(CellChat)
   require(dplyr)
+  require(DescTools)
+  
   pair_score<-c()
   for (j in seq(1,length(levels(cellchat@idents)))){
     for (k in seq(1,length(levels(cellchat@idents)))){
