@@ -1234,6 +1234,88 @@ geomx_heatmap <- function(geomx, genes = 'all', gene_set = NULL, path, add_segme
 # ___________________________________
 # Visium
 
+## Pre-processing helper
+
+This function loads in the H5 file from your SpaceRanger output, normalizes with SCTransform, runs PCA using the SCT normalized counts using user-input PC values, finds nearest neighbors, finds clusters at resolutions ranging from 0.1 to 3, and runs UMAP. It additionally saves a log file of the parameters used for the pre-processing steps so it is documented and reproducible. 
+
+in_dir: The directory that contains the output directory from Space Ranger. At the very least, you should have the filtered h5 file, the tiff image used in running space ranger, and the "spatial" output directory in this directory. 
+
+h5_name: This is the name of the h5 file within the directory. This name should match the argument listed unless you have changed the name following the Space Ranger run. 
+
+out_dir: Where to save the pre-processing output that will be generated as part of the run
+```{r}
+#in_dir <- "Z:\\Computational_Toxicology\\Athena\\Test_visium\\"
+#h5_name <- "V1_Mouse_Brain_Sagittal_Anterior_Section_2_filtered_feature_bc_matrix.h5"
+#out_dir <- "Z:\\Computational_Toxicology\\Athena\\Test_visium\\"
+
+# if using RMarkdown, run this in the console or you will not see the required plots!
+seu <- visium_pp(in_dir = "Z:\\Computational_Toxicology\\Athena\\Test_visium\\", h5_name = "V1_Mouse_Brain_Sagittal_Anterior_Section_2_filtered_feature_bc_matrix.h5", out_dir = "Z:\\Computational_Toxicology\\Athena\\Test_visium\\")
+
+visium_pp <- function(in_dir, h5_name = "filtered_feature_bc_matrix.h5", out_dir){
+  
+  # attach required packages
+  require(ggplot2)
+  require(Seurat)
+  require(patchwork)
+  require(ggplot2)
+  require(hdf5r)
+  
+  sink(paste(out_dir, 'preprocessing_console_output.txt', sep = ''), append = T)
+  
+  cat('\nNEW ANALYSIS\n')
+  cat(paste('Date of analysis: ', Sys.Date(), "\n"))
+  cat(paste('Input directory: ', in_dir, "\n"))
+  cat(paste('H5 file name: ', h5_name, "\n"))
+  cat(paste("Output directory: ", out_dir, "\n"))
+  cat(paste("Normalization method: SCTransform \n"))
+  
+  print("Loading in h5 file and low resolution H&E Image")
+  
+  # load in the data
+  seu <- Seurat::Load10X_Spatial(data.dir = in_dir, filename = h5_name)
+  
+  # visualize the heterogeneity of coverage
+  plot1 <- VlnPlot(seu, features = "nCount_Spatial", pt.size = 0.1) + NoLegend()
+  plot2 <- SpatialFeaturePlot(seu, features = "nCount_Spatial") + theme(legend.position = "right")
+  print(wrap_plots(plot1, plot2))
+  
+  print("Normalizing data with SCTransform")
+  
+  # normalize with SCTransform
+  seu <- SCTransform(seu, assay = "Spatial", verbose = FALSE)
+  
+  print("Running PCA using 200 PCs. Please provide user input when prompted to select the number of PCs used for finding nearest neighbors. Choose a # of PCs right after the point where the plot flattens out")
+  
+  # run PCA using the SCT assay
+  seu <- RunPCA(seu, assay = "SCT", verbose = FALSE, npcs = 200)
+  print(ElbowPlot(seu, ndims = 200))
+  
+  # taking user input as to how many principal components to use 
+  npcs <- as.integer(readline("Enter the number of PCs to use: "))
+  
+  cat(paste("Number of PCs chosen by user: ", npcs, "\n"))
+  
+  # find nearest neighbors
+  seu <- FindNeighbors(seu, reduction = "pca", dims = 1:npcs)
+  
+  # finding clusters ranging from 0.1-3
+  for (x in seq.int(0.1, 3, by = 0.1)){
+      seu <- FindClusters(seu, resolution = x, verbose = FALSE)
+    }
+  
+  cat("Range of resolutions used for cluster identification: 0.1-3 (by 0.1)")
+  
+  # run UMAP
+  seu <- RunUMAP(seu, reduction = "pca", dims = 1:npcs)
+  
+  sink()
+  
+  return(seu)
+}
+```
+
+
+
 ## REGULAR HEATMAP Unweighted co-localization of L-R pairs
 
 ```{r}
