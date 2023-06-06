@@ -95,6 +95,71 @@ visium_pp <- function(in_dir, h5_name = "filtered_feature_bc_matrix.h5", out_dir
 }
 ```
 
+# SCDC load in
+```{r}
+library(anndata)
+library(reticulate)
+anndata <- import("anndata")
+
+# Path to the h5ad file
+h5ad_file <- "Z:\\Computational_Toxicology\\Athena\\Mouse_scRNAseq\\Mouse_cell_atlas\\MCA2.0\\MCA2.0_Fig1_adata.h5ad"
+
+# Load the h5ad file
+adata <- anndata$read_h5ad(h5ad_file)
+```
+
+
+# SCDC prep
+
+sc_ref: This is your single cell RNA-sequencing dataset that you want to use as a reference in the form of a Seurat object. Assumes the count matrix you would like to use is located in the "RNA" assay. 
+
+st_query: This is the spatial transcriptomics Seurat object that you would like to deconvolute. Assumes the count matrix you would like to use is located in the "Spatial" assay. 
+
+markers_sc: This is the output from the FindMarkers function from Seurat. It should have at least the following columns: gene (contains gene name), cluster (contains the cluster name for that DE gene), pct.1 (contains the % in the cluster from the cluster column), pct.2 (contains the average % in all the other clusters combined), p_val (the p-value when comparing pct.1 to pct.2)
+```{r}
+scdc_decon <- function(sc_ref, st_query, markers_sc){
+
+  # Filter for genes that are also present in the ST data
+  markers_sc <- markers_sc[markers_sc$gene %in% rownames(st_query), ]
+  
+  # Select top 20 genes per cluster, select top by first p-value, then absolute
+  # diff in pct, then quota of pct.
+  markers_sc$pct.diff <- markers_sc$pct.1 - markers_sc$pct.2
+  markers_sc$log.pct.diff <- log2((markers_sc$pct.1 * 99 + 1)/(markers_sc$pct.2 * 99 + 1))
+  markers_sc %>% dplyr::group_by(cluster) %>% dplyr::top_n(-100, p_val) %>%
+      dplyr::top_n(50, pct.diff) %>% dplyr::top_n(20, log.pct.diff) -> top20
+  m_feats <- unique(as.character(top20$gene))
+  
+  eset_SC <- ExpressionSet(assayData = as.matrix(sc_ref@assays$RNA@counts[m_feats,
+      ]), phenoData = AnnotatedDataFrame(sc_ref@meta.data))
+  eset_ST <- ExpressionSet(assayData = as.matrix(st_query@assays$Spatial@counts[m_feats,
+      ]), phenoData = AnnotatedDataFrame(st_query@meta.data))
+  
+  #running deconvolution
+  deconvolution <- SCDC::SCDC_prop(bulk.eset = eset_ST, sc.eset = eset_SC, ct.varname = "mreg_cxcl9_globalcluster4", ct.sub = as.character(unique(eset_SC$mreg_cxcl9_globalcluster4)))
+  
+  # now adding deconvolution output and adding it to the Seurat object as a new assay
+  st_query@assays[['SCDC']] <- SeuratObject::CreateAssayObject(data = t(deconvolution$prop.est.mvw))
+  
+  if (length(st_query@assays$SCDC@key) == 0) {
+      st_query@assays$SCDC@key = "scdc_"
+  }
+  
+  DefaultAssay(st_query) <- 'SCDC'
+  st_query_test <- st_query
+  
+  st_query_test <- Seurat::FindSpatiallyVariableFeatures(st_query_test, assay = "SCDC", selection.method = "markvariogram", features = rownames(st_query_test), r.metric = 5, slot = "data")
+  
+  Seurat::SpatialPlot(st_query_test, feature = c('mregDC-CXCL9lo', 'Mac-C1QA', 'mregDC-CXCL9hi'))
+  ggsave('/Volumes/hdlab/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-5_analysis/st_query_mregDC_MacC1QA_proportions.png', width = 3000, height = 1200, units = 'px')
+  
+  Seurat::SpatialPlot(st_query_test, feature = c('CD4-1', 'CD8-2', 'Treg-1'))
+  ggsave('/Volumes/hdlab/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-5_analysis/st_query_CD41_CD82_Treg1_proportions.png', width = 3000, height = 1200, units = 'px')
+  
+  saveRDS(st_query, '/Volumes/hdlab/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-7_analysis/st_query_seurat.RDS')
+}
+```
+
 # SPOTclean prep 
 
 Two parts of 10x Space Ranger output files are required as input to `SpotClean`: the raw gene-by-spot count matrix, and the slide metadata. In this example, you can download and unzip the [Feature / cell matrix (raw)](https://cf.10xgenomics.com/samples/spatial-exp/1.0.0/V1_Adult_Mouse_Brain/V1_Adult_Mouse_Brain_raw_feature_bc_matrix.tar.gz) and [Spatial imaging data](https://cf.10xgenomics.com/samples/spatial-exp/1.0.0/V1_Adult_Mouse_Brain/V1_Adult_Mouse_Brain_spatial.tar.gz) from [V1_Adult_Mouse_Brain](https://support.10xgenomics.com/spatial-gene-expression/datasets/1.0.0/V1_Adult_Mouse_Brain). You will get a folder `raw_feature_bc_matrix` containing `barcodes.tsv.gz`, `features.tsv.gz`, `matrix.mtx.gz`, and a folder `spatial` containing `aligned_fiducials.jpg`, `detected_tissue_image.jpg`, `tissue_hires_image.png`, `tissue_lowres_image.png`, `tissue_positions_list.csv`, `scalefactors_json.json`. The former folder contains the raw gene-by-spot count matrix, and the latter contains slide metadata like slide images and spot IDs and positions.
