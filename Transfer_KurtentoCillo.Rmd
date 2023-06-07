@@ -1,0 +1,109 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r loading in our objects}
+#loading in the Cillo data
+load('/Volumes/hdlab/Projects/HNC_SPORE/Seurat_Objs/HNC_human/hnc_all_annot_2021-09-20.rda')
+
+#load in the Kurten data
+load('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/R_objects/all_individual_seurat_objs_plusmetadata_singletsonly.RData')
+
+```
+
+#this is when I tried just merging and clustering only HN16-HN18 cells, but the clustering didn't look very good so I think I will extract the relevant information from the large kurten dataframe
+```{r merging and QC prepping Kurten data DON'T USE}
+#kurten_mini_immune <- merge(hn16_cd45p, y = c(hn16_cd45p, hn17_cd45p, hn18_cd45p))
+
+save(kurten_mini_immune, file = '/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/R_objects/kurten_hn16-18_merged.rda')
+
+load('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/R_objects/kurten_hn16-18_merged.rda')
+
+kurten_mini_immune <- NormalizeData(kurten_mini_immune)
+kurten_mini_immune <- FindVariableFeatures(kurten_mini_immune, nfeatures = 2000)
+kurten_mini_immune <- ScaleData(kurten_mini_immune)
+kurten_mini_immune <- RunPCA(kurten_mini_immune, features = VariableFeatures(object = kurten_mini_immune), npcs = 100)
+
+ElbowPlot(kurten_mini_immune, ndims = 100) #going to use 30 PCs
+
+kurten_mini_immune <- FindNeighbors(kurten_mini_immune, dims = 1:30)
+kurten_mini_immune <- FindClusters(kurten_mini_immune, resolution = 1)
+kurten_mini_immune <- RunUMAP(kurten_mini_immune, dims = 1:30)
+DimPlot(kurten_mini_immune, group.by = 'orig.ident')
+
+kurten_mini_immune <- harmony::RunHarmony(kurten_mini_immune, "orig.ident")
+kurten_mini_immune <- RunUMAP(kurten_mini_immune, reduction = "harmony", dims = 1:30)
+DimPlot(kurten_mini_immune, group.by = 'orig.ident')
+```
+```{r identifying global clusters in kurten mini immune DON'T USE}
+#identifying T/NK cells
+VlnPlot(kurten_mini_immune, features = c('CD4', 'CD8B', 'CD3D', 'KLRD1', 'PRF1', 'NKG7'), pt.size = 0)
+
+kurten_mini_immune@meta.data$global.cluster <- kurten_mini_immune@active.ident
+kurten_mini_immune@meta.data$global.cluster <- as.character(kurten_mini_immune@meta.data$global.cluster)
+
+kurten_mini_immune@meta.data$global.cluster[kurten_mini_immune@meta.data$global.cluster == '0'] <- 'T/NK cells'
+kurten_mini_immune@meta.data$global.cluster[kurten_mini_immune@meta.data$global.cluster == '2'] <- 'T/NK cells'
+kurten_mini_immune@meta.data$global.cluster[kurten_mini_immune@meta.data$global.cluster == '3'] <- 'T/NK cells'
+kurten_mini_immune@meta.data$global.cluster[kurten_mini_immune@meta.data$global.cluster == '4'] <- 'T/NK cells'
+kurten_mini_immune@meta.data$global.cluster[kurten_mini_immune@meta.data$global.cluster == '6'] <- 'T/NK cells'
+kurten_mini_immune@meta.data$global.cluster[kurten_mini_immune@meta.data$global.cluster == '7'] <- 'T/NK cells'
+kurten_mini_immune@meta.data$global.cluster[kurten_mini_immune@meta.data$global.cluster == '11'] <- 'T/NK cells'
+kurten_mini_immune@meta.data$global.cluster[kurten_mini_immune@meta.data$global.cluster == '16'] <- 'T/NK cells'
+kurten_mini_immune@meta.data$global.cluster[kurten_mini_immune@meta.data$global.cluster == '23'] <- 'T/NK cells'
+
+#identifying B cells
+VlnPlot(kurten_mini_immune, features = c('CD79A', 'CD79B'), pt.size = 0)
+
+kurten_mini_immune@meta.data$global.cluster[kurten_mini_immune@meta.data$global.cluster == '8'] <- 'B cells'
+kurten_mini_immune@meta.data$global.cluster[kurten_mini_immune@meta.data$global.cluster == '9'] <- 'B cells'
+kurten_mini_immune@meta.data$global.cluster[kurten_mini_immune@meta.data$global.cluster == '10'] <- 'B cells'
+kurten_mini_immune@meta.data$global.cluster[kurten_mini_immune@meta.data$global.cluster == '13'] <- 'B cells'
+
+#identifying endothelial cell clusters
+VlnPlot(kurten_mini_immune, features = c('CLDN5', 'CDH5', 'RAMP2'), pt.size = 0)
+
+kurten_mini_immune@meta.data$global.cluster[kurten_mini_immune@meta.data$global.cluster == '21'] <- 'Endothelial cells'
+
+#identifying epithelial cell markers
+VlnPlot(kurten_mini_immune, features = c('KRT14', 'KRT17', 'EPCAM', 'CD68'), pt.size = 0)
+
+kurten_mini_immune@meta.data$global.cluster[kurten_mini_immune@meta.data$global.cluster == '5'] <- 'Epithelial cells'
+kurten_mini_immune@meta.data$global.cluster[kurten_mini_immune@meta.data$global.cluster == '12'] <- 'Epithelial cells'
+
+#identifying fibroblasts
+VlnPlot(kurten_mini_immune, features = c('COL1A1', 'DCN', 'COL1A2'), pt.size = 0)
+kurten_mini_immune@meta.data$global.cluster[kurten_mini_immune@meta.data$global.cluster == '22'] <- 'Fibroblasts'
+
+#identifying pericytes
+#VlnPlot(kurten_mini_immune, features = c('RGS5'), pt.size = 0)
+#kurten_mini_immune@meta.data$global.cluster[kurten_mini_immune@meta.data$global.cluster == '32'] <- 'Pericytes'
+
+#identifying monocyte/macrophage markers
+VlnPlot(kurten_mini_immune, features = c('MS4A7', 'CD68', 'CD14', 'LYZ'), pt.size = 0)
+
+kurten_mini_immune@meta.data$global.cluster[kurten_mini_immune@meta.data$global.cluster == '14'] <- 'Mon/Mac/DC'
+kurten_mini_immune@meta.data$global.cluster[kurten_mini_immune@meta.data$global.cluster == '18'] <- 'Mon/Mac/DC'
+kurten_mini_immune@meta.data$global.cluster[kurten_mini_immune@meta.data$global.cluster == '24'] <- 'Mon/Mac/DC'
+
+#identifying dendritic cell populations
+VlnPlot(kurten_mini_immune, features = c('CD83', 'CD86', 'ITGAM', 'ENPP3', 'LY75'), pt.size = 0)
+
+kurten_mini_immune@meta.data$global.cluster[kurten_mini_immune@meta.data$global.cluster == '37'] <- 'Mon/Mac/DC'
+
+#identifying mast cell populations
+VlnPlot(kurten_mini_immune, features = c('TPSB2', 'TPSAB1'), pt.size = 0)
+kurten_mini_immune@meta.data$global.cluster[kurten_mini_immune@meta.data$global.cluster == '36'] <- 'Mast cells'
+
+DimPlot(kurten_mini_immune, group.by = 'global.cluster', label = TRUE, label.box = TRUE)
+
+de_genes <- FindMarkers(kurten_mini_immune, group.by = 'global.cluster', ident.1 = "16", ident.2 = c('25', 'Epithelial cells', 'T/NK cells'), only.pos = TRUE, min.pct = 0.75)
+de_genes_list <- as.character(rownames(de_genes))
+
+DotPlot(kurten_mini_immune, features = de_genes_list, col.min = 0, group.by = 'global.cluster')
+```
+```{r DON'T USE}
+DimPlot(kurten_mini_immune, group.by = 'global.cluster', label = TRUE, label.box = TRUE)
+```
+

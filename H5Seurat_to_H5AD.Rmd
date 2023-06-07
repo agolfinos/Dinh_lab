@@ -1,0 +1,18 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+#this object is named hnc2
+load('/Volumes/hdlab/Projects/HNC_SPORE/Seurat_Objs/MOC2_mouse/Seurat_MOC2_K17KO_MonMacDC_2021-09-02.rda')
+library(Seurat)
+library(SeuratDisk)
+library(reticulate)
+```
+
+```{r}
+SaveH5Seurat(hnc2, filename = '/Volumes/hdlab/Projects/HNC_SPORE/PAGA/mm_myeloid')
+mm.myeloid.ad <- Convert('/Volumes/hdlab/Projects/HNC_SPORE/PAGA/mm_myeloid.h5Seurat', dest = 'h5ad')
+```
+

@@ -1,0 +1,357 @@
+---
+title: "MOC2_scRNAseq"
+author: "Athena Golfinos-Owens"
+date: '2023-05-02'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(Seurat)
+
+path <- '/Volumes/hqdinh2/Projects/RawData_FromNovoGene/MOC2_K17KO_WeiWang/Full_Seq/'
+seu <- readRDS(paste(path, '/seurat_objects/MOC2_K17ko_2023-05-04.RDS', sep = ''))
+#saveRDS(seu, file = paste(path, '/seurat_objects/MOC2_K17ko_', Sys.Date(), '.RDS', sep = ''))
+  color_clusters <- c("#DC050C", "#FB8072", "#1965B0", "#7BAFDE", 
+                      "#882E72", "#B17BA6", "#FF7F00", "#FDB462",
+                      "#E7298A", "#E78AC3","#33A02C", "#B2DF8A", 
+                      "#55A1B1", "#8DD3C7", "#A6761D", "#E6AB02", 
+                      "#7570B3", "#BEAED4", "#666666", "#999999", 
+                      "#AA8282", "#D4B7B7", "#8600BF", "#BA5CE3", 
+                      "#808000","#AEAE5C", "#1E90FF", "#00BFFF", 
+                      "#56FF0D", "#FFFF00")
+```
+
+# Global clustering
+
+## Create Seurat Objects
+
+```{r}
+ko1 <- Read10X(data.dir = paste(path, '03.CellRangerOutput/KO1_V2/KO1_V2/outs/filtered_feature_bc_matrix', sep = ''))
+ko2 <- Read10X(data.dir = paste(path, '03.CellRangerOutput/KO2_V2/outs/filtered_feature_bc_matrix', sep = ''))
+wt1 <- Read10X(data.dir = paste(path, '03.CellRangerOutput/WT1_V2/outs/filtered_feature_bc_matrix', sep = ''))
+wt2 <- Read10X(data.dir = paste(path, '03.CellRangerOutput/WT2_V2/outs/filtered_feature_bc_matrix', sep = ''))
+
+ko1 <- CreateSeuratObject(counts = ko1, project = "KO1_2023", min.cells = 3, min.features = 200)
+ko2 <- CreateSeuratObject(counts = ko2, project = "KO2_2023", min.cells = 3, min.features = 200)
+wt1 <- CreateSeuratObject(counts = wt1, project = "WT1_2023", min.cells = 3, min.features = 200)
+wt2 <- CreateSeuratObject(counts = wt2, project = "WT2_2023", min.cells = 3, min.features = 200)
+
+ko1$orig.ident <- 'KO1'
+ko2$orig.ident <- 'KO2'
+wt1$orig.ident <- 'WT1'
+wt2$orig.ident <- 'WT2'
+
+ncol(ko1)
+
+#run in the console
+ko1 <- seu_pp1(seu = ko1, out = paste(path, 'outputs/', sep = ''), feature_subset = T, batch_id = 'orig.ident', harmony = F, seurat_integration = F, normalize = T, npcs = 100, assay = 'RNA', pct_doublets = 0.036)
+
+ko2 <- seu_pp1(seu = ko2, out = paste(path, 'outputs/', sep = ''), feature_subset = T, batch_id = 'orig.ident', harmony = F, seurat_integration = F, normalize = T, npcs = 100, assay = 'RNA', pct_doublets = 0.062)
+
+wt1 <- seu_pp1(seu = wt1, out = paste(path, 'outputs/', sep = ''), feature_subset = T, batch_id = 'orig.ident', harmony = F, seurat_integration = F, normalize = T, npcs = 100, assay = 'RNA', pct_doublets = 0.05)
+
+wt2 <- seu_pp1(seu = wt2, out = paste(path, 'outputs/', sep = ''), feature_subset = T, batch_id = 'orig.ident', harmony = F, seurat_integration = F, normalize = T, npcs = 100, assay = 'RNA', pct_doublets = 0.06)
+```
+
+## [DO SOUPX]Subset singlets and merge seurat objects
+
+```{r}
+ko1 <- readRDS(paste(path, 'seurat_objects/KO1_2023_2023-05-02.RDS', sep = ''))
+ko2 <- readRDS(paste(path, 'seurat_objects/KO2_2023-05-02.RDS', sep = ''))
+wt1 <- readRDS(paste(path, 'seurat_objects/WT1_2023-05-02.RDS', sep = ''))
+wt2 <- readRDS(paste(path, 'seurat_objects/WT2_2023-05-02.RDS', sep = ''))
+
+# do soupX here
+
+moc2 <- merge(ko1, ko2)
+moc2 <- merge(moc2, wt1)
+moc2 <- merge(moc2, wt2)
+
+saveRDS(moc2, paste(path, 'seurat_objects/moc2k17ko_all_', Sys.Date(), '.RDS', sep = ''))
+```
+
+## Preprocess merged object
+
+```{r}
+# run in console
+seu <- seu_pp1(seu = seu, out = './outputs/', remove_doublets = F, pct_doublets, feature_subset = F, batch_id = 'orig.ident', reduction = 'harmonyRNA', harmony = T, seurat_integration = F, normalize = T, test_npcs = 200, assay = 'RNA')
+```
+
+## Remove doublets
+
+```{r}
+seu$DF.classifications_0.25_0.3_167[is.na(seu$DF.classifications_0.25_0.3_167)] <- 'Singlet'
+seu <- seu[,seu$DF.classifications_0.25_0.3_167 == 'Singlet']
+
+seu$DF.classifications_0.25_0.3_475[is.na(seu$DF.classifications_0.25_0.3_475)] <- 'Singlet'
+seu <- seu[,seu$DF.classifications_0.25_0.3_475 == 'Singlet']
+
+seu$DF.classifications_0.25_0.22_259[is.na(seu$DF.classifications_0.25_0.22_259)] <- 'Singlet'
+seu <- seu[,seu$DF.classifications_0.25_0.22_259 == 'Singlet']
+
+seu$DF.classifications_0.25_0.3_475[is.na(seu$DF.classifications_0.25_0.3_475)] <- 'Singlet'
+seu <- seu[,seu$DF.classifications_0.25_0.3_475 == 'Singlet']
+
+seu$DF.classifications_0.25_0.3_167[is.na(seu$DF.classifications_0.25_0.3_167)] <- 'Singlet'
+seu <- seu[,seu$DF.classifications_0.25_0.3_167 == 'Singlet']
+
+
+```
+
+## Identifying & naming clusters
+
+```{r}
+# neutrophil markers
+marker_plotting(seu, features = c('Retnlg', 'Csf3r', 'S100a8', 'S100a9'), group.by = 'RNA_snn_res.0.1')
+
+# Mon/Mac/DC markers
+marker_plotting(seu, features = c('Csf1r', 'Adgre1', 'Cxcl9', 'Lyz', 'Kit'), group.by = 'RNA_snn_res.0.1')
+
+# T/NK cell markers
+marker_plotting(seu, features = c('Cd8a', 'Cd4', 'Cd3e', 'Ncr1'), group.by = 'RNA_snn_res.0.1')
+
+# B cell markers
+marker_plotting(seu, features = c('Cd19', 'Ms4a1', 'Cd79a'), group.by = 'RNA_snn_res.0.1')
+
+#non-immune cells
+marker_plotting(seu, features = c('Epcam', 'Pecam1', 'Cdh5', 'Col1a1'), group.by = 'RNA_snn_res.0.1')
+
+
+#seu$global.cluster <- seu$RNA_snn_res.0.1
+
+#de_dotplot(seu, metadata = 'global.cluster')
+#`2023-05-04_de_dotplot_markers`[[2]]
+
+seu$global.cluster <- as.character(seu$global.cluster)
+seu$global.cluster[seu$global.cluster %in% c('2', '10')] <- 'Epithelial cells'
+seu$global.cluster[seu$global.cluster %in% c('0', '1', '6')] <- 'T/NK cells'
+seu$global.cluster[seu$global.cluster %in% c('4', '7')] <- 'Myeloid cells'
+seu$global.cluster[seu$global.cluster == '11'] <- 'Endothelial cells'
+seu$global.cluster[seu$global.cluster == '8'] <- 'Fibroblasts'
+seu$global.cluster[seu$global.cluster == '3'] <- 'B cells'
+seu$global.cluster[seu$global.cluster == '9'] <- 'Basophils'
+seu$global.cluster[seu$global.cluster == '5'] <- 'Neutrophils'
+seu$global.cluster[seu$global.cluster == '12'] <- 'Muscle cells'
+seu$RNA_snn_res.0.7 <- as.character(seu$RNA_snn_res.0.7)
+seu$global.cluster[seu$RNA_snn_res.0.7 == '22'] <- 'Myeloid cells'
+
+DimPlot(seu, group.by = 'global.cluster', label = T)
+```
+
+# Myeloid + neutrophils only
+
+## Save/load object
+
+```{r}
+my <- readRDS('./seurat_objects/myeloid_moc2_k17ko_2023-05-08.RDS')
+#saveRDS(my, './seurat_objects/myeloid_moc2_k17ko_2023-05-08.RDS')
+```
+
+## Pre-processing and initial sanity checks
+
+```{r}
+#my <- seu[,seu$global.cluster %in% c('Myeloid cells', 'Neutrophils')]
+
+# run in the console
+my <- seu_pp1(my, out = './outputs/', remove_doublets = F, feature_subset = F, batch_id = 'orig.ident', reduction = 'pca', harmony = T, seurat_integration = F, normalize = T, test_npcs = 100, assay = 'RNA')
+
+DimPlot(my, group.by = 'RNA_snn_res.0.5')
+DimPlot(my, group.by = 'orig.ident')
+
+```
+
+## Marker plotting
+
+```{r}
+# neutrophil markers
+marker_plotting(my, features = c('Retnlg', 'Csf3r', 'S100a8', 'S100a9'), group.by = 'RNA_snn_res.0.5')
+
+# Mon/Mac/DC markers
+marker_plotting(my, features = c('Csf1r', 'Adgre1', 'Cxcl9', 'Lyz', 'Kit'), group.by = 'RNA_snn_res.0.5')
+
+
+# sanity check/contamination markers
+
+# T/NK cell markers
+marker_plotting(my, features = c('Cd8a', 'Cd4', 'Cd3e', 'Ncr1'), group.by = 'RNA_snn_res.0.5')
+
+# B cell markers
+marker_plotting(my, features = c('Cd19', 'Ms4a1', 'Cd79a'), group.by = 'RNA_snn_res.0.5')
+
+#non-immune cells
+marker_plotting(my, features = c('Epcam', 'Pecam1', 'Cdh5', 'Col1a1'), group.by = 'RNA_snn_res.0.5')
+
+cluster_eval(seu = my, group.by = 'RNA_snn_res.0.5', batch.id = 'orig.ident')
+
+cluster_eval(seu = my, group.by = 'RNA_snn_res.0.5', batch.id = 'orig.ident')
+
+cluster_eval <- function(seu, group.by, batch.id){
+  
+  seu = my
+  group.by = 'RNA_snn_res.0.5'
+  batch.id = 'orig.ident'
+  
+  require(Seurat)
+  require(ComplexHeatmap)
+  require(grid)
+  require(DescTools)
+
+  test <- as.data.frame(table(seu[[group.by]], 
+        seu[[batch.id]])) %>% tidyr::pivot_wider(names_from = 'Var2', 
+        values_from = 'Freq') 
+  rnames <- test$Var1
+  test$Var1 <- NULL
+  rownames(test) <- rnames
+  total <- as.numeric(ncol(seu))
+  pct_df <- as.matrix(test[,1:ncol(test)]/total * 100)
+  p1 <- ComplexHeatmap::Heatmap(pct_df, 
+        name = 'Cluster %', 
+        row_title = 'cluster ID', column_title = 'sample', 
+        column_title_side = 'bottom', 
+        cell_fun = function(j, i, x, y, width, height, fill) 
+        {grid.text(sprintf("%.4f", pct_df[i, j]), x, y, gp = gpar(fontsize=10))
+  })
+  
+  p2 <- VlnPlot(seu, features = c('nCount_RNA', 'nFeature_RNA'), 
+        group.by = group.by)
+  df_meta <- as.vector(colnames(seu@meta.data)[colnames(seu@meta.data) 
+                                              %like% 'pANN_%'])
+  p3 <- FeaturePlot(seu, features = df_meta)
+  #cowplot::plot_grid(p1, p2, p3, ncol = 2, nrow = 2)
+  
+  p4 <- DimPlot(seu, group.by = group.by)
+  figure1 <- multi_panel_figure(
+  width = 180, height = 180,
+  columns = 2, rows = 2)
+  figure1 %<>% fill_panel(p1, row = 1, column = 1)
+  figure1 %<>% fill_panel(p2, row = 1, column = 2)
+  #figure1 %<>% fill_panel(p4, row = 2, column = 1)
+  figure1 %<>% fill_panel(p3, row = 2, column = 1:2)
+  figure1
+}
+
+myeloid_markers <- de_dotplot(seu = my, metadata = 'RNA_snn_res.0.5')
+```
+
+## Annotating global myeloid clusters
+
+```{r}
+my$RNA_snn_res.0.5 <- as.character(my$RNA_snn_res.0.5)
+my$global.cluster <- my$RNA_snn_res.0.5
+
+
+my$global.cluster[my$global.cluster %in% c('0', '2', '5', '7', '8', '9', '10', '13')] <- 'Mon/Mac/DC'
+my$global.cluster[my$global.cluster %in% c('1', '3', '4', '11')] <- 'Neutrophils'
+my$global.cluster[my$global.cluster %in% c('6')] <- 'T cell contamination'
+my$global.cluster[my$global.cluster %in% c('12')] <- 'Stromal cell contamination'
+my$global.cluster[my$global.cluster %in% c('14')] <- 'B cell contamination'
+
+
+DimPlot(my, group.by = 'global.cluster', cols = color_clusters)
+```
+
+# Mon/Mac/DC only
+
+## Save/load object
+
+```{r}
+my2 <- readRDS('./seurat_objects/MonMacDC_moc2_k17ko_2023-05-08.RDS')
+#saveRDS(my2, file = paste('./seurat_objects/MonMacDC_moc2_k17ko_', Sys.Date(), '.RDS', sep = ''))
+```
+
+## Preprocessing
+
+```{r}
+my2 <- my[,my$global.cluster == 'Mon/Mac/DC']
+
+# run in the console
+my2 <- seu_pp1(seu = my2, out = './outputs/', remove_doublets = F, feature_subset = F, batch_id = 'orig.ident', reduction = 'pca', harmony = T, seurat_integration = F, normalize = T, test_npcs = 100, assay = 'RNA') #30 PCs
+```
+
+## Label transfer
+
+```{r}
+load('/Volumes/hqdinh2/Projects/HNC_SPORE/Seurat_Objs/MOC2_mouse/Seurat_MOC2_K17KO_MonMacDC_2021-09-02.rda') # object called hnc2
+DimPlot(hnc2, group.by = 'AEG_res2_annotations')
+
+anchors <- FindTransferAnchors(reference = hnc2, query = my2, dims = 1:30)
+predictions <- TransferData(anchorset = anchors, refdata = hnc2$AEG_res2_annotations, 
+    dims = 1:30)
+my2 <- AddMetaData(my2, metadata = predictions)
+
+DimPlot(my2, group.by = 'predicted.id')
+#cluster_eval(seu = my2, group.by = 'predicted.id', batch.id = 'orig.ident')
+
+freqs <- freq_plot(SEU = my2, metadata = 'predicted.id', split.meta = 'group', graph_type = c('freq_boxplot'), out = './figures/', out_width = 15, out_height = 8, out_units = 'in', out_res = 300)
+```
+
+# Epithelial only
+
+## Load/save objects
+
+```{r}
+epi <- readRDS('./seurat_objects/epithelial_moc2_k17ko_2023-05-09.RDS')
+#saveRDS(epi, file = paste('./seurat_objects/epithelial_moc2_k17ko_', Sys.Date(), '.RDS', sep = '')) 
+```
+
+## Preprocess merged object
+
+```{r}
+epi <- seu_pp1(seu = epi, out = './outputs/', remove_doublets = F, feature_subset = F, batch_id = 'orig.ident', reduction = 'harmonyRNA', harmony = F, seurat_integration = F, normalize = T, test_npcs = 100, assay = 'RNA') # 40 PCS
+
+table(epi$RNA_snn_res.0.4)
+
+epi_dotplot <- de_dotplot(epi, metadata = 'RNA_snn_res.0.4')
+
+epi_boxplot <- freq_plot(epi, metadata = 'RNA_snn_res.0.4', split.meta = 'group', graph_type = c('freq_boxplot'), out = './figures/epithelial_', out_width = 12, out_height = 8, out_units = 'in', out_res = 300)
+```
+
+## Subset management
+
+```{r}
+DimPlot(epi, group.by = 'RNA_snn_res.0.4')
+#epi$global.cluster <- as.character(epi$RNA_snn_res.0.4)
+epi$K17.status <- as.character(epi$RNA_snn_res.0.4)
+epi$K17.status[epi$K17.status %in% c('0', '1', '4')] <- 'K17hi'
+epi$K17.status[epi$K17.status %in% c('2', '3', '5', '6', '7')] <- 'K17lo'
+```
+
+## Compare K17lo subsets between MOC2 + K17KO
+
+```{r}
+epi_k17lo <- epi[,epi$K17.status == 'K17lo']
+
+DimPlot(epi_k17lo, group.by = 'RNA_snn_res.0.4')
+
+k17lo_freqs <- freq_plot(SEU = epi_k17lo, metadata = 'RNA_snn_res.0.4', split.meta = 'group', graph_type = c('freq_boxplot'), out = '/Volumes/hqdinh2/Projects/RawData_FromNovoGene/MOC2_K17KO_WeiWang/Full_Seq/figures/epi_k17lo_', out_width = 8, out_height = 8, out_units = 'in', out_res = 300)
+```
+
+## Compare K17hi and K17lo subsets within just MOC2
+
+```{r}
+epi_moc2 <- epi[,epi$group == 'MOC2']
+
+epi$K17.status2 <- paste(epi$group, epi$K17.status)
+unique(epi$K17.status2)
+epi$K17.status2[epi$K17.status2 %like% c('%K17KO%')] <- 'K17KO'
+
+moc2_marks2 <- de_dotplot(seu = epi, metadata = 'K17.status2', n_marks = 25)
+
+DotPlot(epi, group.by = 'K17.status2', features = c('Ly6c1', 'Msln', 'Vim', 'Slpi', 'Tm4sf1', 'Hspb1', 'Crip2', 'Ly6a', 'Peg3', 'Wfdc2', 'Wnt4', 'Itga6', 'Flrt3', 'Cldn3', 'Lpcat4', 'Alcam', 'Cd44', 'Krt19', 'Fth1', 'Epcam', 'Ezr', 'Enpp2', 'Prl2c2', 'Cxcl1', 'Hbegf', 'Col3a1', 'Gm28153', 'Col1a1', 'Serpine2', 'Gm41609', 'Epha3', 'Ptn', 'Pcdh9', 'Gphn', 'Col6a3', 'Cst3', 'Sdc2', 'Tenm3', 'Tbc1d9b', 'Col12a1', 'Slit2', 'mt-Atp8', 'Camk1d', 'Gpc6', 'Gas1', 'Arid2', 'Tcf4', 'Nav3', 'Col11a1', 'Tuft1')) + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + coord_flip()
+
+moc2_marks <- de_dotplot(seu = epi_moc2, metadata = 'K17.status', n_marks = 25)
+
+volcPlot(seu = epi_moc2, seu_name = 'epi_moc2', meta = 'K17.status', cell1 = 'K17lo', cell2 = 'K17hi', out='./figures/epi_moc2_', test.use = 'wilcox', logfc = 0.1, pval_adj = 0.05, fccutoff = 0.5, pcutoff = 0.05)
+```
+
+## Compare K17lo clusters MOC2 vs. K17KO
+
+```{r}
+k17lo <- epi[,epi$K17.status == 'K17lo']
+
+k17lo_marks <- de_dotplot(seu = k17lo, metadata = 'group', n_marks = 25)
+
+volcPlot(seu = k17lo, seu_name = 'k17lo', meta = 'group', cell1 = 'MOC2', cell2 = 'K17KO', out='./figures/', test.use = 'wilcox', logfc = 0.1, pval_adj = 0.05, fccutoff = 0.5, pcutoff = 0.05)
+```

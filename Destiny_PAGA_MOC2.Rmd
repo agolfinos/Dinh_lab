@@ -1,0 +1,26 @@
+---
+title: "Destiny_PAGA"
+author: "Athena Golfinos"
+date: "9/14/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+DESTINY
+```{r Downloading Destiny}
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+BiocManager::install("destiny")
+```
+
+PAGA
+```{r Pre-processing}
+library("Seurat")
+library("tidyverse")
+library('reticulate')
+```
+

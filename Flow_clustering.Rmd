@@ -1,0 +1,325 @@
+---
+title: "High_dim_flow_analysis"
+output: html_document
+date: '2022-10-03'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load in packages
+
+```{r}
+library(BiocManager)
+library(cytofWorkflow)
+library(here)
+library(tidyverse)
+library(knitr)
+```
+
+# _____Cytek 25-color HNC PBMC pair_____
+
+## • Loading & prepping data
+
+```{r}
+path <- '/Volumes/hqdinh2/Lab Members/Athena/Flow Experiments/Cytek_25_color_test_72537_73701_AEG_02072023/'
+
+# saving path of flow file to data
+my_flow_file <- paste(path, 'Unmixed/Multicolor/', sep = '')
+
+# starting a random seed, saving markers as variable
+set.seed(1333)
+
+md <- read.csv(paste(path, 'Analysis/Dataframes/metadata.csv', sep = ''))
+
+# need all four columns or this will NOT work
+flow_data <- prepData(x = my_flow_file, md = md, transform = TRUE, cofactor = 150, FACS = TRUE)
+
+saveRDS(flow_data, paste(path, 'Analysis/Objects/', Sys.Date(), '_flow_sce.RDS', sep = ''))
+```
+
+## • Clustering, setting maximum k value
+
+```{r}
+flow_data <- readRDS(paste(path, 'Analysis/Objects/', Sys.Date(), '_flow_sce.RDS', sep = ''))
+
+flow_data <- flow_data[!rownames(flow_data) %like any% c('FSC%', 'SSC%', 'Time%', 'AF%')]
+
+# ensuring we have removed any irrelevant markers
+rownames(flow_data)
+
+# below uses FlowSom clustering, k is a resolution term
+flow_data <- CATALYST::cluster(flow_data, features = rownames(flow_data), xdim = 10, ydim = 10, maxK = 30, seed = 1333)
+
+saveRDS(flow_data, paste(path, 'Analysis/Objects/', Sys.Date(), '_flow_sce.RDS', sep = ''))
+```
+
+## • Filter data based on expression
+
+```{r}
+# evaluate expression of markers for filtering
+plot(density(flow_data@assays@data$exprs['CD45',]))
+plot(density(flow_data@assays@data$exprs['ViaDye Red-A',]))
+
+flow_data <- flow_data[, flow_data@assays@data$exprs['CD45',] > 0]
+flow_data <- flow_data[, flow_data@assays@data$exprs['ViaDye Red-A',] < 2]
+```
+
+## • UMAP
+
+### •• Run UMAP
+```{r}
+# subsetting so we do not include unnecessary markers
+flow_data <- flow_data[!rownames(flow_data) %like any% c('FSC%', 'SSC%', 'Time%', 'AF%', 'ViaDye%')]
+flow_data <- flow_data[!rownames(flow_data) == 'CD45']
+
+flow_data <- runDR(flow_data, "UMAP", features = rownames(flow_data), assay = "exprs")
+
+delta_area(flow_data)
+```
+
+### •• Plot UMAP
+```{r}
+plotDR(flow_data, "UMAP", color_by = rownames(flow_data), scale = TRUE, ncol = 5)
+
+png(paste(path, '/Analysis/Figures/UMAP_splitbycondition.png', sep = ''), units = 'in', width = 5, height = 4, res = 300)
+plotDR(flow_data, 'UMAP', color_by = 'meta6', facet = 'condition')
+dev.off()
+```
+
+
+## • Cluster heatmap
+
+```{r}
+library(data.table)
+library(dplyr)
+library(DescTools)
+
+png(filename = paste(path, 'Analysis/Figures/cluster_marker_heatmap.png', sep = ''), units = 'in', width = 6, height = 4, res = 300)
+plotExprHeatmap(flow_data, k = "meta6", by = "cluster_id")
+dev.off()
+```
+
+
+## • Frequency boxplots
+
+```{r}
+png(paste(path, '/Analysis/Figures/panel1_boxplots_splitbycluster.png', sep = ''), units = 'in', width = 7, height = 5, res = 300)
+plotAbundances(flow_data, k = "meta6", by = "cluster_id") + scale_fill_manual(values=c('Green', 'Black', 'Blue', 'Red')) + scale_color_manual(values = c('Blue', 'Red'))
+dev.off()
+```
+
+## • Diagnostic plots
+
+### •• Marker density plots
+```{r}
+p <- plotExprs(flow_data, color_by = "condition")
+p$facet$params$ncol <- 6
+png(paste(path, '/Analysis/Figures/DIAGNOSTIC_marker_densities.png', sep = ''), units = 'in', width = 7, height = 5, res = 300)
+p
+dev.off()
+```
+
+### •• Assessing # of cells
+```{r}
+n_cells(flow_data)
+# 72537 73701 
+# 3199  1077 
+```
+
+### •• Cell counts per sample
+```{r}
+colData(flow_data)$sample_id <- as.factor(colData(flow_data)$sample_id)
+colData(flow_data)$sample_id <- as.character(colData(flow_data)$sample_id)
+
+png(paste(path, '/Analysis/Figures/DIAGNOSTIC_sample_counts.png', sep = ''), units = 'in', width = 3.5, height = 5, res = 300)
+plotCounts(flow_data, group_by = "sample_id", color_by = "condition")
+dev.off()
+```
+
+### •• MDS plot
+```{r}
+plotExprHeatmap(flow_data, scale = "last", hm_pal = rev(hcl.colors(10, "YlGnBu")))
+```
+
+
+# _____Mouse neutrophil PANEL1_____
+
+## • Loading data
+
+```{r}
+# saving path of flow file to data
+my_flow_file <- '/Volumes/oncology/Athena_Dinh/exported CD45+ single live cells panel 1/'
+
+# starting a random seed, saving markers as variable
+set.seed(1333)
+```
+
+## • Prepping data
+
+```{r}
+md <- read.csv('/Volumes/hqdinh2/Projects/HNC_SPORE/Mouse_Neutrophil_ICITRT/Mouse_ICI_TRT_flow_metadata_panel1.csv')
+
+flow_data <- prepData(x = my_flow_file, md = md, transform = TRUE, cofactor = 150, FACS = TRUE)
+
+saveRDS(flow_data, '/Volumes/hqdinh2/Projects/HNC_SPORE/Mouse_Neutrophil_ICITRT/Round1/flow_clustering_singlecellexperiment_panel1.RDS')
+```
+
+## • Clustering, setting maximum k value
+
+```{r}
+flow_data <- readRDS('/Volumes/hqdinh2/Projects/HNC_SPORE/Mouse_Neutrophil_ICITRT/Round1/flow_clustering_singlecellexperiment_panel1.RDS')
+
+flow_data <- flow_data[!rownames(flow_data) %like any% c('FSC%', 'SSC%', 'LD%', 'Time%', 'CD45%')]
+
+rownames(flow_data)[rownames(flow_data) %like% 'CD8%'] <- 'CD8'
+rownames(flow_data)[rownames(flow_data) %like% 'CD45%'] <- 'CD45'
+rownames(flow_data)[rownames(flow_data) %like% 'F4_80%'] <- 'F4_80'
+rownames(flow_data)[rownames(flow_data) %like% 'CD11b%'] <- 'CD11b'
+rownames(flow_data)[rownames(flow_data) %like% 'CD19%'] <- 'CD19'
+rownames(flow_data)[rownames(flow_data) %like% 'CD4%'] <- 'CD4'
+rownames(flow_data)[rownames(flow_data) %like% 'GR1%'] <- 'GR1'
+rownames(flow_data)[rownames(flow_data) %like% 'CD11C%'] <- 'CD11c'
+
+rownames(flow_data)
+
+# below uses FlowSom clustering, k is a resolution term
+flow_data <- CATALYST::cluster(flow_data, features = rownames(flow_data), xdim = 10, ydim = 10, maxK = 30, seed = 1333)
+
+saveRDS(flow_data, '/Volumes/hqdinh2/Projects/HNC_SPORE/Mouse_Neutrophil_ICITRT/Round1/flow_clustering_singlecellexperiment_panel1.RDS')
+```
+
+## • Consensus Cluster Decision
+
+```{r}
+delta_area(flow_data)
+```
+
+## • Cluster heatmap
+
+```{r}
+library(data.table)
+library(dplyr)
+library(DescTools)
+
+flow_mini <- scrabbitr::downsampleSCE(sce = flow_data, ncells = 20000)
+
+saveRDS(flow_mini, file = '/Volumes/hqdinh2/Projects/HNC_SPORE/Mouse_Neutrophil_ICITRT/Round1/MINI_flow_clustering_singlecellexperiment_panel1.RDS')
+
+png(filename = '/Volumes/hqdinh2/Projects/HNC_SPORE/Mouse_Neutrophil_ICITRT/Round1/cluster_marker_heatmap_panel1.png', units = 'in', width = 6, height = 4, res = 300)
+plotExprHeatmap(flow_mini, k = "meta8", by = "cluster_id")
+dev.off()
+```
+
+## • UMAP
+
+### •• Run UMAP
+
+```{r}
+flow_mini <- runDR(flow_mini, "UMAP", features = rownames(flow_mini), assay = "exprs")
+```
+
+### •• Plot UMAP (all markers)
+
+```{r}
+plotDR(flow_mini, "UMAP", color_by = rownames(flow_mini), scale = TRUE, ncol = 5)
+
+png('/Volumes/hqdinh2/Projects/HNC_SPORE/Mouse_Neutrophil_ICITRT/Round1/AEG_Ultracomp_gating_Panel1/panel1_UMAP_splitbycondition.png', units = 'in', width = 5, height = 4, res = 300)
+plotDR(flow_mini, 'UMAP', color_by = 'meta8', facet = 'condition', k_pal = color_clusters)
+dev.off()
+```
+
+## • Frequency boxplots
+
+```{r}
+png('/Volumes/hqdinh2/Projects/HNC_SPORE/Mouse_Neutrophil_ICITRT/Round1/AEG_Ultracomp_gating_Panel1/panel1_boxplots_splitbycluster.png', units = 'in', width = 7, height = 5, res = 300)
+plotAbundances(flow_mini, k = "meta8", by = "cluster_id") + scale_fill_manual(values=c('Green', 'Black', 'Blue', 'Red')) + scale_color_manual(values = c('Green', 'Black', 'Blue', 'Red'))
+dev.off()
+```
+
+# _____Mouse neutrophil PANEL 2_____
+
+# Loading and prepping data
+
+```{r}
+# saving path of flow file to data
+my_flow_file <- '/Volumes/oncology/Athena_Dinh/exported CD45+ single live cells panel 2/'
+
+# starting a random seed, saving markers as variable
+set.seed(1333)
+```
+
+# Prepping data
+
+```{r}
+md <- read.csv('/Volumes/hqdinh2/Projects/HNC_SPORE/Mouse_Neutrophil_ICITRT/Mouse_ICI_TRT_flow_metadata_panel2.csv')
+
+flow_data <- prepData(x = my_flow_file, md = md, transform = TRUE, cofactor = 150, FACS = TRUE)
+```
+
+# Clustering, setting maximum k value
+
+```{r}
+flow_data <- readRDS('/Volumes/hqdinh2/Projects/HNC_SPORE/Mouse_Neutrophil_ICITRT/Round1/flow_clustering_singlecellexperiment_panel2.RDS')
+
+set.seed(1333)
+
+# below uses FlowSom clustering, k is a resolution term
+flow_data <- CATALYST::cluster(flow_data, features = rownames(flow_data), xdim = 10, ydim = 10, maxK = 30, seed = 1333)
+
+saveRDS(flow_data, '/Volumes/hqdinh2/Projects/HNC_SPORE/Mouse_Neutrophil_ICITRT/Round1/flow_clustering_singlecellexperiment_panel2.RDS')
+```
+
+# Consensus Cluster Decision
+
+```{r}
+delta_area(flow_data)
+```
+
+# Cluster heatmap
+
+```{r}
+library(data.table)
+library(dplyr)
+library(DescTools)
+
+flow_mini <- scrabbitr::downsampleSCE(sce = flow_data, ncells = 20000)
+
+flow_mini <- readRDS(file = '/Volumes/hqdinh2/Projects/HNC_SPORE/Mouse_Neutrophil_ICITRT/Round1/MINI_flow_clustering_singlecellexperiment_panel2.RDS')
+
+saveRDS(flow_mini, file = '/Volumes/hqdinh2/Projects/HNC_SPORE/Mouse_Neutrophil_ICITRT/Round1/MINI_flow_clustering_singlecellexperiment_panel2.RDS')
+
+png(filename = '/Volumes/hqdinh2/Projects/HNC_SPORE/Mouse_Neutrophil_ICITRT/Round1/cluster_marker_heatmap.png', units = 'in', width = 6, height = 4, res = 300)
+# change meta column to change resolution (meta5, meta10, meta15, ...)
+plotExprHeatmap(flow_mini, k = "meta12", by = "cluster_id")
+dev.off()
+```
+
+# UMAP
+
+## Run UMAP
+
+```{r}
+flow_mini <- runDR(flow_mini, "UMAP", features = rownames(flow_mini), assay = "exprs")
+```
+
+## Plot UMAP (all markers)
+
+```{r}
+plotDR(flow_mini, "UMAP", color_by = rownames(flow_mini), scale = TRUE, ncol = 5)
+
+png('/Volumes/hqdinh2/Projects/HNC_SPORE/Mouse_Neutrophil_ICITRT/Round1/AEG_Ultracomp_gating_Panel2/panel2_UMAP_splitbycondition.png', units = 'in', width = 5, height = 4, res = 300)
+plotDR(flow_mini, 'UMAP', color_by = 'meta12', facet = 'condition', k_pal = color_clusters)
+dev.off()
+```
+
+## Frequency boxplots
+
+```{r}
+png('/Volumes/hqdinh2/Projects/HNC_SPORE/Mouse_Neutrophil_ICITRT/Round1/AEG_Ultracomp_gating_Panel2/panel2_boxplots_splitbycluster.png', units = 'in', width = 7, height = 5, res = 300)
+plotAbundances(flow_mini, k = "meta12", by = "cluster_id") + scale_fill_manual(values=c('Green', 'Black', 'Blue', 'Red')) + scale_color_manual(values = c('Green', 'Black', 'Blue', 'Red'))
+dev.off()
+```
+
+## 

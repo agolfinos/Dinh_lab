@@ -1,0 +1,710 @@
+---
+title: "CellphoneDBheatmap"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# • Read in
+
+```{r read-in necessary cpdb documents WORKING ON A FUNCTION--NOT DONE YET}
+#pval1 <- read.delim('/Volumes/hqdinh2/Projects/HNC_SPORE/CellphoneDB/01242022_HNC_HPV+vsHPV-_PBMCvsTIL/HPV+/pvalues.txt')
+#sigmn1 <- read.delim('/Volumes/hqdinh2/Projects/HNC_SPORE/CellphoneDB/01242022_HNC_HPV+vsHPV-_PBMCvsTIL/HPV+/significant_means.txt')
+#pval2 <- read.delim('/Volumes/hqdinh2/Projects/HNC_SPORE/CellphoneDB/01242022_HNC_HPV+vsHPV-_PBMCvsTIL/HPV-/pvalues.txt')
+#sigmn2 <- read.delim('/Volumes/hqdinh2/Projects/HNC_SPORE/CellphoneDB/01242022_HNC_HPV+vsHPV-_PBMCvsTIL/HPV-/significant_means.txt')
+
+pval1 <- read.delim('/Volumes/hqdinh2/Projects/HNC_SPORE/CellphoneDB/10072021_MOC2_WangetalTFanalysis/K17KO/out_K17KO/pvalues.txt')
+sigmn1 <- read.delim('/Volumes/hqdinh2/Projects/HNC_SPORE/CellphoneDB/10072021_MOC2_WangetalTFanalysis/K17KO/out_K17KO/significant_means.txt')
+pval2 <- read.delim('/Volumes/hqdinh2/Projects/HNC_SPORE/CellphoneDB/10072021_MOC2_WangetalTFanalysis/MOC2/out_MOC2/pvalues.txt')
+sigmn2 <- read.delim('/Volumes/hqdinh2/Projects/HNC_SPORE/CellphoneDB/10072021_MOC2_WangetalTFanalysis/MOC2/out_MOC2/significant_means.txt')
+```
+
+# • Now working with the pvals file
+
+```{r filtering the pvalue dataframe to get rid of anything with pvalue > 0.05 MOC2}
+pval1[, 12:length(colnames(pval1))][pval1[, 12:length(colnames(pval1))] > 0.05] <- NA
+moc2.filtered <- pval1[rowSums(is.na(pval1)) != (ncol(pval1)-11), ]
+moc2.filtered <- moc2.filtered[colSums(is.na(moc2.filtered)) != nrow(moc2.filtered)]
+```
+
+```{r filtering the pvalue dataframe to get rid of anything with pvalue > 0.05 K17KO}
+pval2[, 12:length(colnames(pval2))][pval2[, 12:length(colnames(pval2))] > 0.05] <- NA
+k17ko.filtered <- pval2[rowSums(is.na(pval2)) != (ncol(pval2)-11), ]
+k17ko.filtered <- k17ko.filtered[colSums(is.na(k17ko.filtered)) != nrow(k17ko.filtered)]
+```
+
+```{r mapping ligands/receptors back to their correct positions MOC2}
+moc2.filtered <- moc2.filtered[!is.na(moc2.filtered$gene_a),]
+moc2.filtered <- moc2.filtered[!is.na(moc2.filtered$gene_b),]
+
+#removing all rows that have a blank value in the ligand column
+moc2.filtered <- moc2.filtered[!(moc2.filtered$gene_a==""), ]
+moc2.filtered <- moc2.filtered[!(moc2.filtered$gene_b==''),]
+
+for (i in 1:nrow(moc2.filtered)) {
+  if (moc2.filtered$receptor_a[i] == 'True') {
+    moc2.filtered$receptor[i] <- moc2.filtered$gene_a[i]
+  } 
+  if (moc2.filtered$receptor_a[i] == 'False'){
+    moc2.filtered$ligand[i] <- moc2.filtered$gene_a[i]
+  }
+  if (moc2.filtered$receptor_b[i] == 'True') {
+    moc2.filtered$receptor[i] <- moc2.filtered$gene_b[i]
+  }
+  if (moc2.filtered$receptor_b[i] == 'False') {
+    moc2.filtered$ligand[i] <- moc2.filtered$gene_b[i]
+  }
+}
+
+#getting rid of any rows with missing ligands/receptors, since some combinations have two receptors or two ligands, which doesn't seem biologically possible
+moc2.filtered <- moc2.filtered[!is.na(moc2.filtered$ligand),]
+moc2.filtered <- moc2.filtered[!is.na(moc2.filtered$receptor),]
+
+#removing all rows that have a blank value in the ligand column
+moc2.filtered <- moc2.filtered[!(moc2.filtered$ligand==""), ]
+moc2.filtered <- moc2.filtered[!(moc2.filtered$receptor==''),]
+```
+
+```{r mapping ligands/receptors back to their correct positions K17KO}
+k17ko.filtered <- k17ko.filtered[!is.na(k17ko.filtered$gene_a),]
+k17ko.filtered <- k17ko.filtered[!is.na(k17ko.filtered$gene_b),]
+
+#removing all rows that have a blank value in the ligand column
+k17ko.filtered <- k17ko.filtered[!(k17ko.filtered$gene_a==""), ]
+k17ko.filtered <- k17ko.filtered[!(k17ko.filtered$gene_b==''),]
+
+for (i in 1:nrow(k17ko.filtered)) {
+  if (k17ko.filtered$receptor_a[i] == 'True') {
+    k17ko.filtered$receptor[i] <- k17ko.filtered$gene_a[i]
+  } 
+  if (k17ko.filtered$receptor_a[i] == 'False'){
+    k17ko.filtered$ligand[i] <- k17ko.filtered$gene_a[i]
+  }
+  if (k17ko.filtered$receptor_b[i] == 'True') {
+    k17ko.filtered$receptor[i] <- k17ko.filtered$gene_b[i]
+  }
+  if (k17ko.filtered$receptor_b[i] == 'False') {
+    k17ko.filtered$ligand[i] <- k17ko.filtered$gene_b[i]
+  }
+}
+
+#getting rid of any rows with missing ligands/receptors, since some combinations have two receptors or two ligands, which doesn't seem biologically possible
+k17ko.filtered <- k17ko.filtered[!is.na(k17ko.filtered$ligand),]
+k17ko.filtered <- k17ko.filtered[!is.na(k17ko.filtered$receptor),]
+
+#removing all rows that have a blank value in the ligand column
+k17ko.filtered <- k17ko.filtered[!(k17ko.filtered$ligand==""), ]
+k17ko.filtered <- k17ko.filtered[!(k17ko.filtered$receptor==''),]
+```
+
+```{r finding all non-NA sender/receiver pairs for each ligand/receptor pair MOC2. OUT = moc2.pvalfiltered}
+library(dplyr)
+library(magrittr)
+library(tidyr)
+library(stringr)
+
+moc2.filtered$lig_rec <- paste(moc2.filtered$ligand, moc2.filtered$receptor, sep = '_')
+
+moc2.filtered$og_row <- rownames(moc2.filtered)
+
+#getting all column names with non-NA values and returning them as a list in the column 'res'
+in1 <- moc2.filtered %>%
+  tibble::rownames_to_column('row') %>%
+  rowwise() %>%
+  mutate(res = toString(colnames(moc2.filtered)[!is.na(c_across(14:(length(rownames(moc2.filtered))-2)))]))
+
+#making a subset of the dataframe that will serve as the foundation for our final dataframe with just the relevant information that we need
+in2 <- in1[c('ligand', 'receptor', 'lig_rec', 'res', 'og_row')]
+
+#now we are unnesting the dataframe based on the 'res' column, meaning a new row will be created for each value (separated by a column) within res that has the relevant ligand/receptor values
+in2_unnest <- in2 %>% 
+    mutate(res = strsplit(as.character(res), ",")) %>% 
+    unnest(res)
+
+#now replacing all instances of "_" with "" and '.' with '' because we want to split our ligand and receptor by a period so we can't have any other periods hanging around. Also the underscore seems to interfere with the separation function, so we are removing those as well
+in2_unnest$res <- in2_unnest$res %>%
+  str_replace_all('_', '')
+
+in2_unnest$res <- in2_unnest$res %>%
+  str_replace_all('NK.subset.', 'NK')
+
+#editing the names in our 'in' file so they match the sender/receiver cells in the in2_unnest data set
+colnames(moc2.filtered) <- colnames(moc2.filtered) %>%
+  str_replace_all('_', '')
+
+colnames(moc2.filtered) <- colnames(moc2.filtered) %>%
+  str_replace_all('NK.subset.', 'NK')
+
+in2_unnest$res <- str_remove_all(in2_unnest$res, ' ')
+
+library(dplyr)
+in2_unnest <- in2_unnest %>%
+  tibble::add_column(pval = NA)
+
+#now mapping the pvalues from the original input to the current dataframe using the original row number and the sender receiver pair information
+for (x in as.numeric(rownames(in2_unnest))) {
+  in2_unnest$pval[x] <- moc2.filtered[in2_unnest$og_row[x], in2_unnest$res[x],]
+}
+
+#getting rid of extra garbage
+in2_unnest <- in2_unnest[!grepl('ligand', in2_unnest$res),]
+in2_unnest <- in2_unnest[!grepl('ligrec', in2_unnest$res),]
+in2_unnest <- in2_unnest[!grepl('ogrow', in2_unnest$res),]
+in2_unnest <- in2_unnest[!grepl('receptor', in2_unnest$res),]
+
+in2_unnest <- in2_unnest %>%
+  drop_na(pval)
+
+in3_unnest <- separate(data = in2_unnest, col = res, into = c('sender', 'receiver'))
+
+in3_unnest <- in3_unnest[!is.na(in3_unnest$receiver),]
+
+moc2.pvalfiltered <- in3_unnest
+```
+
+```{r finding all non-NA sender/receiver pairs for each ligand/receptor pair K17KO. OUT = k17ko.pvalfiltered}
+IN <- k17ko.filtered
+
+IN$lig_rec <- paste(IN$ligand, IN$receptor, sep = '_')
+
+IN$og_row <- rownames(IN)
+
+#getting all column names with non-NA values and returning them as a list in the column 'res'
+in1 <- IN %>%
+  tibble::rownames_to_column('row') %>%
+  rowwise() %>%
+  mutate(res = toString(colnames(IN)[!is.na(c_across(14:(length(rownames(IN))-2)))]))
+
+#making a subset of the dataframe that will serve as the foundation for our final dataframe with just the relevant information that we need
+in2 <- in1[c('ligand', 'receptor', 'lig_rec', 'res', 'og_row')]
+
+#now we are unnesting the dataframe based on the 'res' column, meaning a new row will be created for each value (separated by a column) within res that has the relevant ligand/receptor values
+in2_unnest <- in2 %>% 
+    mutate(res = strsplit(as.character(res), ",")) %>% 
+    unnest(res)
+
+#now replacing all instances of "_" with "" and '.' with '' because we want to split our ligand and receptor by a period so we can't have any other periods hanging around. Also the underscore seems to interfere with the separation function, so we are removing those as well
+in2_unnest$res <- in2_unnest$res %>%
+  str_replace_all('_', '')
+
+in2_unnest$res <- in2_unnest$res %>%
+  str_replace_all('NK.subset.', 'NK')
+
+#editing the names in our 'in' file so they match the sender/receiver cells in the in2_unnest data set
+colnames(IN) <- colnames(IN) %>%
+  str_replace_all('_', '')
+
+colnames(IN) <- colnames(IN) %>%
+  str_replace_all('NK.subset.', 'NK')
+
+in2_unnest$res <- str_remove_all(in2_unnest$res, ' ')
+
+library(dplyr)
+in2_unnest <- in2_unnest %>%
+  tibble::add_column(pval = NA)
+
+#now mapping the pvalues from the original input to the current dataframe using the original row number and the sender receiver pair information
+for (x in as.numeric(rownames(in2_unnest))) {
+  in2_unnest$pval[x] <- IN[in2_unnest$og_row[x], in2_unnest$res[x],]
+}
+
+#getting rid of extra garbage
+in2_unnest <- in2_unnest[!grepl('ligand', in2_unnest$res),]
+in2_unnest <- in2_unnest[!grepl('ligrec', in2_unnest$res),]
+in2_unnest <- in2_unnest[!grepl('ogrow', in2_unnest$res),]
+in2_unnest <- in2_unnest[!grepl('receptor', in2_unnest$res),]
+
+in2_unnest <- in2_unnest %>%
+  drop_na(pval)
+
+in3_unnest <- separate(data = in2_unnest, col = res, into = c('sender', 'receiver'))
+
+in3_unnest <- in3_unnest[!is.na(in3_unnest$receiver),]
+
+k17ko.pvalfiltered <- in3_unnest
+```
+
+#now working with the sigmeans file
+
+```{r mapping ligands/receptors back to correct positions in sig means file MOC2. OUT = moc2sigmean.filtered}
+IN <- sigmn1
+IN$receptor <- NA
+for (i in 1:nrow(IN)) {
+  if (IN$receptor_a[i] == 'True') {
+    IN$receptor[i] <- IN$gene_a[i]
+  } else if (IN$receptor_a[i] == 'False'){
+      IN$ligand[i] <- IN$gene_a[i]
+  } else {
+      next
+  }
+  if (IN$receptor_b[i] == 'True') {
+    IN$receptor[i] <- IN$gene_b[i]
+  } else if (IN$receptor_b[i] == 'False') {
+    IN$ligand[i] <- IN$gene_b[i]
+  } else{
+    next
+  }
+}
+
+#getting rid of any rows with missing ligands/receptors, since some combinations have two receptors or two ligands, which doesn't seem biologically possible
+IN <- IN[!is.na(IN$ligand),]
+IN <- IN[!is.na(IN$receptor),]
+
+#removing all rows that have a blank value in the ligand column
+IN <- IN[!(IN$ligand==""), ]
+IN <- IN[!(IN$receptor==''),]
+
+moc2sigmean.filtered <- IN
+```
+
+```{r mapping ligands/receptors back to correct positions in sig means file K17KO. OUT = k17kosigmean.filtered}
+IN <- sigmn2
+
+IN <- IN[!(IN$gene_a==''),]
+IN <- IN[!(IN$gene_b==''),]
+
+IN$receptor <- "0"
+
+for (i in 1:nrow(IN)) {
+  if (IN$receptor_a[i] == 'True') {
+    IN$receptor[i] <- IN$gene_a[i]
+  } 
+  if (IN$receptor_a[i] == 'False'){
+    IN$ligand[i] <- IN$gene_a[i]
+  }
+  if (IN$receptor_b[i] == 'True') {
+    IN$receptor[i] <- IN$gene_b[i]
+  }
+  if (IN$receptor_b[i] == 'False') {
+    IN$ligand[i] <- IN$gene_b[i]
+  }else{
+    IN$ligand[i] <- NA
+  }
+}
+
+#getting rid of any rows with missing ligands/receptors, since some combinations have two receptors or two ligands, which doesn't seem biologically possible
+IN <- IN[!is.na(IN$ligand),]
+IN <- IN[!is.na(IN$receptor),]
+
+#removing all rows that have a blank value in the ligand column
+IN <- IN[!(IN$ligand==""), ]
+IN <- IN[!(IN$receptor==''),]
+
+IN <- IN[!(IN$ligand=="0"), ]
+IN <- IN[!(IN$receptor=='0'),]
+
+k17kosigmean.filtered <- IN
+```
+
+```{r finding all non-NA sender/receiver pairs for each ligand/receptor pair in sig means file MOC2. OUT = moc2.sigmeanfiltered1}
+IN <- moc2sigmean.filtered
+
+IN$lig_rec <- paste(IN$ligand, IN$receptor, sep = '_')
+
+IN$og_row <- rownames(IN)
+
+for (x in 1:length(rownames(IN))) {
+  IN$res[x] <- toString(colnames(IN)[!is.na(IN[x,14:(length(colnames(IN))-2)])])
+}
+
+#making a subset of the dataframe that will serve as the foundation for our final dataframe with just the relevant information that we need
+in2 <- IN[c('ligand', 'receptor', 'lig_rec', 'res', 'og_row')]
+
+#now we are unnesting the dataframe based on the 'res' column, meaning a new row will be created for each value (separated by a column) within res that has the relevant ligand/receptor values
+in2_unnest <- in2 %>% 
+    mutate(res = strsplit(as.character(res), ",")) %>% 
+    unnest(res)
+
+#now replacing all instances of "_" with "" and '.' with '' because we want to split our ligand and receptor by a period so we can't have any other periods hanging around. Also the underscore seems to interfere with the separation function, so we are removing those as well
+
+library(stringr)
+in2_unnest$res <- in2_unnest$res %>%
+  str_replace_all('_', '')
+
+in2_unnest$res <- in2_unnest$res %>%
+  str_replace_all('NK.subset.', 'NK')
+
+#editing the names in our 'in' file so they match the sender/receiver cells in the in2_unnest data set
+colnames(IN) <- colnames(IN) %>%
+  str_replace_all('_', '')
+
+colnames(IN) <- colnames(IN) %>%
+  str_replace_all('NK.subset.', 'NK')
+
+in2_unnest$res <- str_remove_all(in2_unnest$res, ' ')
+
+library(dplyr)
+in2_unnest <- in2_unnest %>%
+  tibble::add_column(sigmean = NA)
+
+#now mapping the pvalues from the original input to the current dataframe using the original row number and the sender receiver pair information
+for (x in as.numeric(rownames(in2_unnest))) {
+  in2_unnest$sigmean[x] <- IN[in2_unnest$og_row[x], in2_unnest$res[x],]
+}
+
+#getting rid of extra garbage
+in2_unnest <- in2_unnest[!grepl('ligand', in2_unnest$res),]
+in2_unnest <- in2_unnest[!grepl('ligrec', in2_unnest$res),]
+in2_unnest <- in2_unnest[!grepl('ogrow', in2_unnest$res),]
+in2_unnest <- in2_unnest[!grepl('receptor', in2_unnest$res),]
+in2_unnest <- in2_unnest[!grepl('partnera', in2_unnest$res),]
+in2_unnest <- in2_unnest[!grepl('genea', in2_unnest$res),]
+in2_unnest <- in2_unnest[!grepl('secreted', in2_unnest$res),]
+in2_unnest <- in2_unnest[!grepl('idcpinteraction', in2_unnest$res),]
+in2_unnest <- in2_unnest[!grepl('isintegrin', in2_unnest$res),]
+in2_unnest <- in2_unnest[!grepl('geneb', in2_unnest$res),]
+in2_unnest <- in2_unnest[!grepl('interactingpair', in2_unnest$res),]
+in2_unnest <- in2_unnest[!grepl('rank', in2_unnest$res),]
+in2_unnest <- in2_unnest[!grepl('res', in2_unnest$res),]
+in2_unnest <- in2_unnest[!grepl('annotationstrategy', in2_unnest$res),]
+in2_unnest <- in2_unnest[!grepl('partnerb', in2_unnest$res),]
+
+in2_unnest <- in2_unnest %>%
+  drop_na(sigmean)
+
+in3_unnest <- separate(data = in2_unnest, col = res, into = c('sender', 'receiver'))
+
+in3_unnest <- in3_unnest[!is.na(in3_unnest$receiver),]
+
+moc2.sigmeanfiltered1 <- in3_unnest
+```
+
+```{r finding all non-NA sender/receiver pairs for each ligand/receptor pair K17KO. OUT = k17ko.sigmeanfiltered1}
+IN <- k17kosigmean.filtered
+
+IN$lig_rec <- paste(IN$ligand, IN$receptor, sep = '_')
+
+IN$og_row <- rownames(IN)
+
+for (x in 1:length(rownames(IN))) {
+  IN$res[x] <- toString(colnames(IN)[!is.na(IN[x,14:(length(colnames(IN))-2)])])
+}
+
+#making a subset of the dataframe that will serve as the foundation for our final dataframe with just the relevant information that we need
+in2 <- IN[c('ligand', 'receptor', 'lig_rec', 'res', 'og_row')]
+
+#now we are unnesting the dataframe based on the 'res' column, meaning a new row will be created for each value (separated by a column) within res that has the relevant ligand/receptor values
+in2_unnest <- in2 %>% 
+    mutate(res = strsplit(as.character(res), ",")) %>% 
+    unnest(res)
+
+#now replacing all instances of "_" with "" and '.' with '' because we want to split our ligand and receptor by a period so we can't have any other periods hanging around. Also the underscore seems to interfere with the separation function, so we are removing those as well
+
+library(stringr)
+in2_unnest$res <- in2_unnest$res %>%
+  str_replace_all('_', '')
+
+in2_unnest$res <- in2_unnest$res %>%
+  str_replace_all('NK.subset.', 'NK')
+
+#editing the names in our 'in' file so they match the sender/receiver cells in the in2_unnest data set
+colnames(IN) <- colnames(IN) %>%
+  str_replace_all('_', '')
+
+colnames(IN) <- colnames(IN) %>%
+  str_replace_all('NK.subset.', 'NK')
+
+in2_unnest$res <- str_remove_all(in2_unnest$res, ' ')
+
+library(dplyr)
+in2_unnest <- in2_unnest %>%
+  tibble::add_column(sigmean = NA)
+
+#now mapping the pvalues from the original input to the current dataframe using the original row number and the sender receiver pair information
+for (x in as.numeric(rownames(in2_unnest))) {
+  in2_unnest$sigmean[x] <- IN[in2_unnest$og_row[x], in2_unnest$res[x],]
+}
+
+#getting rid of extra garbage
+in2_unnest <- in2_unnest[!grepl('ligand', in2_unnest$res),]
+in2_unnest <- in2_unnest[!grepl('ligrec', in2_unnest$res),]
+in2_unnest <- in2_unnest[!grepl('ogrow', in2_unnest$res),]
+in2_unnest <- in2_unnest[!grepl('receptor', in2_unnest$res),]
+in2_unnest <- in2_unnest[!grepl('partnera', in2_unnest$res),]
+in2_unnest <- in2_unnest[!grepl('genea', in2_unnest$res),]
+in2_unnest <- in2_unnest[!grepl('secreted', in2_unnest$res),]
+in2_unnest <- in2_unnest[!grepl('idcpinteraction', in2_unnest$res),]
+in2_unnest <- in2_unnest[!grepl('isintegrin', in2_unnest$res),]
+in2_unnest <- in2_unnest[!grepl('geneb', in2_unnest$res),]
+in2_unnest <- in2_unnest[!grepl('interactingpair', in2_unnest$res),]
+in2_unnest <- in2_unnest[!grepl('rank', in2_unnest$res),]
+in2_unnest <- in2_unnest[!grepl('res', in2_unnest$res),]
+in2_unnest <- in2_unnest[!grepl('annotationstrategy', in2_unnest$res),]
+in2_unnest <- in2_unnest[!grepl('partnerb', in2_unnest$res),]
+
+in2_unnest <- in2_unnest %>%
+  drop_na(sigmean)
+
+in3_unnest <- separate(data = in2_unnest, col = res, into = c('sender', 'receiver'))
+
+in3_unnest <- in3_unnest[!is.na(in3_unnest$receiver),]
+
+k17ko.sigmeanfiltered1 <- in3_unnest
+```
+
+#now prepping our final dataframes to be merged back together
+
+```{r filtering dataframes for the most relevant information OUT = k17ko.all, moc2.all}
+MOC2.P <- moc2.pvalfiltered
+MOC2.SM <- moc2.sigmeanfiltered1
+  
+K17KO.P <- k17ko.pvalfiltered
+K17KO.SM <-k17ko.sigmeanfiltered1
+
+#subsetting each of our dataframes so they only have the most relevant columns
+moc2.p <- MOC2.P[c('ligand', 'receptor', 'sender', 'receiver', 'pval')]
+moc2.sm <- MOC2.SM[c('ligand', 'receptor', 'sender', 'receiver', 'sigmean')]
+
+k17ko.p <- K17KO.P[c('ligand', 'receptor', 'sender', 'receiver', 'pval')]
+k17ko.sm <- K17KO.SM[c('ligand', 'receptor', 'sender', 'receiver', 'sigmean')]
+
+#now I am adding a suffix to each column name so they are specific to that dataframe
+colnames(moc2.p) <- paste(colnames(moc2.p), 'moc2', sep = "_")
+colnames(moc2.sm) <- paste(colnames(moc2.sm), 'moc2', sep = "_")
+
+colnames(k17ko.p) <- paste(colnames(k17ko.p), 'k17ko', sep = '_')
+colnames(k17ko.sm) <- paste(colnames(k17ko.sm), 'k17ko', sep = '_')
+
+moc2.p$lrsr <- NA
+
+#now I'm going to make a single column for merging
+moc2.p$lrsr <- paste(moc2.p$ligand_moc2, moc2.p$receptor_moc2, moc2.p$sender_moc2, moc2.p$receiver_moc2, sep = '_')
+
+moc2.sm$lrsr <- paste(moc2.sm$ligand_moc2, moc2.sm$receptor_moc2, moc2.sm$sender_moc2, moc2.sm$receiver_moc2, sep = '_')
+
+k17ko.p$lrsr <- paste(k17ko.p$ligand_k17ko, k17ko.p$receptor_k17ko, k17ko.p$sender_k17ko, k17ko.p$receiver_k17ko, sep = '_')
+
+k17ko.sm$lrsr <- paste(k17ko.sm$ligand_k17ko, k17ko.sm$receptor_k17ko, k17ko.sm$sender_k17ko, k17ko.sm$receiver_k17ko, sep = '_')
+
+#now merging our pvalue and significant means dataframes within each group
+k17ko.all <- merge(k17ko.p, k17ko.sm, by.x = 'lrsr', by.y = 'lrsr')
+moc2.all <- merge(moc2.p, moc2.sm, by.x = 'lrsr', by.y = 'lrsr')
+
+```
+
+#now removing excess columns, adding relevant columns, and then getting ready to plot
+
+```{r Prep and calculations for both groups}
+
+#adding a column that has ligand/receptor information only
+moc2.all$lr <- paste(moc2.all$ligand_moc2.x, moc2.all$receptor_moc2.x)
+k17ko.all$lr <- paste(k17ko.all$ligand_k17ko.x, k17ko.all$receptor_k17ko.x)
+
+#now finding the different L-R pairs between the two groups
+moc2.uniq <- setdiff(moc2.all$lr, k17ko.all$lr)
+k17ko.uniq <- setdiff(k17ko.all$lr, moc2.all$lr)
+
+test <- setdiff(moc2.all$lrsr, k17ko.all$lrsr)
+#test1 <- setdiff(moc2.all$lrsr, k17)
+
+#now getting a new dataframe that just has the unique interactions in them for each group
+moc2.unique <- moc2.all[moc2.all$lr %in% moc2.uniq,]
+k17ko.unique <- k17ko.all[k17ko.all$lr %in% k17ko.uniq,]
+
+#now organizing the dataframes based on the highest significant means
+moc2.unique <- moc2.unique[order(moc2.unique$sigmean_moc2, decreasing = TRUE),]
+k17ko.unique <- k17ko.unique[order(k17ko.unique$sigmean_k17ko, decreasing = TRUE),]
+
+#now removing excess columns that we don't need in preparation to merge the two dataframes together
+moc2.unique <- moc2.unique[c('ligand_moc2.x', 'receptor_moc2.x', 'sender_moc2.x', 'receiver_moc2.x', 'sigmean_moc2', 'pval_moc2')]
+k17ko.unique <- k17ko.unique[c('ligand_k17ko.x', 'receptor_k17ko.x', 'sender_k17ko.x', 'receiver_k17ko.x', 'sigmean_k17ko', 'pval_k17ko')]
+
+#making new columns in each dataset so we can rbind
+moc2.unique$ligand_k17ko.x <- NA
+moc2.unique$receptor_k17ko.x <- NA
+moc2.unique$sender_k17ko.x <- NA
+moc2.unique$receiver_k17ko.x <- NA
+moc2.unique$sigmean_k17ko <- NA
+moc2.unique$pval_k17ko <- NA
+
+k17ko.unique$ligand_moc2.x <- NA
+k17ko.unique$receptor_moc2.x <- NA
+k17ko.unique$sender_moc2.x <- NA
+k17ko.unique$receiver_moc2.x <- NA
+k17ko.unique$sigmean_moc2 <- NA
+k17ko.unique$pval_moc2 <- NA
+
+#merging together the top 20 interactions from the two groups
+#need to automate this so we can easily change the number of interactions (or percentage)
+#test <- rbind(moc2.unique[1:20,], k17ko.unique[1:20,])
+test <- k17ko.unique
+
+#now filling in all the NAs with the proper information
+test$ligand_k17ko.x[1:20] <- test$ligand_moc2.x[1:20]
+test$receptor_k17ko.x[1:20] <- test$receptor_moc2.x[1:20]
+test$sender_k17ko.x[1:20] <- test$sender_moc2.x[1:20]
+test$receiver_k17ko.x[1:20] <- test$receiver_moc2.x[1:20]
+test$sigmean_k17ko[1:20] <- 0
+test$pval_k17ko[1:20] <- 1
+
+test$ligand_moc2.x[21:40] <- test$ligand_k17ko.x[21:40]
+test$receptor_moc2.x[21:40] <- test$receptor_k17ko.x[21:40]
+test$sender_moc2.x[21:40] <- test$sender_k17ko.x[21:40]
+test$receiver_moc2.x[21:40] <- test$receiver_k17ko.x[21:40]
+test$sigmean_moc2[21:40] <- 0
+test$pval_moc2[21:40] <- 1
+
+#now we are calculating the relevant columns that we need for this figure
+test$neglog10pval_k17ko <- -log10(as.numeric(test$pval_k17ko))
+test$neglog10pval_k17ko[test$neglog10pval_k17ko == Inf] <- 3
+
+test$neglog10pval_moc2 <- -log10(as.numeric(test$pval_moc2))
+test$neglog10pval_moc2[test$neglog10pval_moc2 == Inf] <- 3
+
+test$pval_k17ko <- as.numeric(test$pval_k17ko)
+test$pval_moc2 <- as.numeric(test$pval_moc2)
+test <- transform(test, foldchange = pval_k17ko / pval_moc2)
+
+test$foldchange[is.na(test$foldchange)] <- 0
+test$foldchange[is.infinite(test$foldchange)] <- 1000
+
+#now adding new columns that have receptor/ligands and sender/receiver information grouped into new columns
+test$LR_moc2 <- paste(test$ligand_moc2.x, test$receptor_moc2.x, sep = '_')
+test$SR_moc2 <- paste(test$sender_moc2.x, test$receiver_moc2.x, sep = '_')
+
+test$LR_k17ko <- paste(test$ligand_k17ko.x, test$receptor_k17ko.x, sep = '_')
+test$SR_k17ko <- paste(test$sender_k17ko.x, test$receiver_k17ko.x, sep = '_')
+
+moc2 <- test[c('SR_moc2', 'LR_moc2', 'sigmean_moc2', 'neglog10pval_moc2')]
+#k17ko <- test[21:40,]
+```
+
+#now we will be plotting these in a heatmap
+
+```{r}
+LRs <- unique(paste(k17ko.unique$ligand_k17ko.x, k17ko.unique$receptor_k17ko.x, sep = ":"))
+SRs <- unique(paste(k17ko.unique$sender_k17ko.x, k17ko.unique$receiver_k17ko.x, sep = ":"))
+test <- matrix(0, nrow = length(LRs), ncol = length(SRs))
+for (k in 1:nrow(k17ko.unique)) {
+  i = which(LRs == paste(k17ko.unique$ligand_k17ko.x[k], k17ko.unique$receptor_k17ko.x[k], sep = ":"))
+  j = which(SRs == paste(k17ko.unique$sender_k17ko.x[k], k17ko.unique$receiver_k17ko.x[k], sep = ":"))
+  test[i,j] <- as.numeric(k17ko.unique$sigmean_k17ko[k])
+}
+rownames(test) <- LRs
+colnames(test) <- SRs
+test1 <- as.data.frame(test)
+cols_keep <- c('LAMP3')
+library(data.table)
+test1 <- test1[, (colnames(test1) %like% cols_keep)]
+library(dplyr)
+test2 <- filter_all(test1, any_vars(. > 0.5)) 
+pheatmap::pheatmap(as.matrix(test2))
+
+xx <- pheatmap::pheatmap(test2)
+
+save_pheatmap_pdf <- function(x, filename, width=7, height=7) {
+   stopifnot(!missing(x))
+   stopifnot(!missing(filename))
+   pdf(filename, width=width, height=height)
+   grid::grid.newpage()
+   grid::grid.draw(x$gtable)
+   dev.off()
+}
+save_pheatmap_pdf(xx, "/Volumes/hqdinh2/Projects/HNC_SPORE/CellphoneDB/01242022_HNC_HPV+vsHPV-_PBMCvsTIL/HPV-/unique_cpdbinteractions_vsHPVpos.pdf", width = 12, height = 8)
+
+write.csv(test2, '/Volumes/hqdinh2/Projects/HNC_SPORE/CellphoneDB/01242022_HNC_HPV+vsHPV-_PBMCvsTIL/HPV-/unique_cpdbinteractions_vsHPVpos.csv')
+
+k17ko.dimensions <- test
+
+#########################################################################################
+LRs <- unique(paste(moc2.unique$ligand_moc2.x, moc2.unique$receptor_moc2.x, sep = ":"))
+SRs <- unique(paste(moc2.unique$sender_moc2.x, moc2.unique$receiver_moc2.x, sep = ":"))
+test <- matrix(0, nrow = length(LRs), ncol = length(SRs))
+for (k in 1:nrow(moc2.unique)) {
+  i = which(LRs == paste(moc2.unique$ligand_moc2.x[k], moc2.unique$receptor_moc2.x[k], sep = ":"))
+  j = which(SRs == paste(moc2.unique$sender_moc2.x[k], moc2.unique$receiver_moc2.x[k], sep = ":"))
+  test[i,j] <- as.numeric(moc2.unique$sigmean_moc2[k])
+}
+rownames(test) <- LRs
+colnames(test) <- SRs
+test1 <- as.data.frame(test)
+cols_keep <- c('LAMP3')
+test1 <- test1[, (colnames(test1) %like% cols_keep)]
+test2 <- filter_all(test1, any_vars(. > 0.5))
+pheatmap::pheatmap(test2)
+
+xx <- pheatmap::pheatmap(test2)
+
+save_pheatmap_pdf <- function(x, filename, width=7, height=7) {
+   stopifnot(!missing(x))
+   stopifnot(!missing(filename))
+   pdf(filename, width=width, height=height)
+   grid::grid.newpage()
+   grid::grid.draw(x$gtable)
+   dev.off()
+}
+
+save_pheatmap_pdf(xx, "/Volumes/hqdinh2/Projects/HNC_SPORE/CellphoneDB/01242022_HNC_HPV+vsHPV-_PBMCvsTIL/HPV+/unique_cpdbinteractions_vsHPVneg.pdf", width = 12, height = 8)
+
+write.csv(test2, "/Volumes/hqdinh2/Projects/HNC_SPORE/CellphoneDB/01242022_HNC_HPV+vsHPV-_PBMCvsTIL/HPV+/unique_cpdbinteractions_vsHPVneg.csv")
+
+moc2.dimensions <- test
+```
+
+```{r calculating a simple venn diagram of cpdb interactions}
+# for k17ko group, looking at unique interactions based on the number of cells in the heatmap
+k17ko.dims <- length(rownames(k17ko.dimensions)) * length(colnames(k17ko.dimensions))
+moc2.dims <- length(rownames(moc2.dimensions)) * length(colnames(moc2.dimensions))
+
+moc2.k17ko.intersect <- intersect(k17ko.all$lrsr, moc2.all$lrsr)
+
+#now getting a new dataframe that just has the shared interactions involved
+moc2.k17.shared <- moc2.all[moc2.all$lrsr %in% moc2.k17ko.intersect,]
+
+#now creating a heatmap-like object so we can take note of how many interactions are found within the shared object
+LRs <- unique(paste(moc2.k17.shared$ligand_moc2.x, moc2.k17.shared$receptor_moc2.x, sep = ":"))
+SRs <- unique(paste(moc2.k17.shared$sender_moc2.x, moc2.k17.shared$receiver_moc2.x, sep = ":"))
+test <- matrix(0, nrow = length(LRs), ncol = length(SRs))
+for (k in 1:nrow(moc2.k17.shared)) {
+  i = which(LRs == paste(moc2.k17.shared$ligand_moc2.x[k], moc2.k17.shared$receptor_moc2.x[k], sep = ":"))
+  j = which(SRs == paste(moc2.k17.shared$sender_moc2.x[k], moc2.k17.shared$receiver_moc2.x[k], sep = ":"))
+  test[i,j] <- as.numeric(moc2.k17.shared$sigmean_moc2[k])
+}
+rownames(test) <- LRs
+colnames(test) <- SRs
+pheatmap::pheatmap(test)
+
+shared.dimensions <- test
+
+library(gplots)
+library(VennDiagram)
+
+# Prepare a palette of 3 colors with R colorbrewer:
+library(RColorBrewer)
+myCol <- brewer.pal(2, "Pastel2")
+
+k17lr <- list(unique(k17ko.all$lr))
+moc2lr <- list(unique(moc2.all$lr))
+
+venn.diagram(c(k17lr, moc2lr), 
+             category.names = c('moc2', 'k17ko'),
+             filename = '/Users/agolfinos/Desktop/cellphonedb_interaction_heatmap.png',
+             output = FALSE,
+             
+             #output features
+             imagetype = 'png',
+             height = 480, 
+             width = 480, 
+             resolution = 300,
+             compression = 'lzw',
+             
+             #circles
+             lwd = 2,
+             lty = 'blank', 
+             fill = c('darksalmon', 'cadetblue3'),
+             
+             #numbers
+             cex = .6, 
+             fontface = 'bold', 
+             fontfamily = 'sans', 
+             
+             #set names
+             cat.cex = 0.6, 
+             cat.fontface = 'bold', 
+             cat.default.pos = 'outer', 
+             cat.just = list(c(0.5, -14), c(1, -14)), 
+             cat.fontfamily = 'sans')
+
+```

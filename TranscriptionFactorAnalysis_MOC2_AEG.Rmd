@@ -1,0 +1,1425 @@
+---
+title: "TranscriptionFactorAnalysis_MOC2_AEG"
+author: "Athena Golfinos"
+date: "9/29/2021"
+output: html_document
+---
+
+#USING ONLY T CELL
+```{r Cellphone DB input}
+complexes <- read.csv('/Users/agolfinos/Desktop/HNC_vs_MOC2/MOC2/Domino_test/complexes.csv', stringsAsFactors = FALSE)
+genes <- read.csv('/Users/agolfinos/Desktop/HNC_vs_MOC2/MOC2/Domino_test/genes.csv', stringsAsFactors = FALSE)
+interactions <- read.csv('/Users/agolfinos/Desktop/HNC_vs_MOC2/MOC2/Domino_test/interactions.csv', stringsAsFactors = FALSE)
+proteins <- read.csv('/Users/agolfinos/Desktop/HNC_vs_MOC2/MOC2/Domino_test/proteins.csv', stringsAsFactors = FALSE)
+```
+```{r SCENIC input K17KO}
+auc <- read.csv('/Users/agolfinos/Desktop/TFanalysis_Wangpaper/k17ko/AUC_k17ko.csv')
+regulons <- read.csv('/Users/agolfinos/Desktop/TFanalysis_Wangpaper/k17ko/regulons_k17ko.csv')
+```
+```{r Seurat object read-in K17KO}
+load('/Users/agolfinos/Desktop/Seurat_MOC2_K17KO_2021-10-06.rda')
+DimPlot(seurat, group.by = 'global.cluster.Wangetal')
+tcells <- subset(x = seurat, subset = global.cluster.Wangetal == c('CD4', 'CD8', 'Treg'))
+```
+```{r my input K17KO}
+library(domino)
+#compiling the information we need to create the domino object
+COUNTS <- tcells@assays$RNA@counts
+Z_SCORES <- tcells@assays$RNA@scale.data
+CLUSTERS <- tcells@active.ident
+#we need to transpose the auc table compared to the SCENIC output
+features <- t(read.table('/Users/agolfinos/Desktop/TFanalysis_Wangpaper/k17ko/AUC_k17ko.csv', header = TRUE, row.names = 1, stringsAsFactors = FALSE, sep = ','))
+CPDB_DB <- '/Users/agolfinos/Desktop/HNC_vs_MOC2/MOC2/domino/cpdb/'
+REGULONS <- '/Users/agolfinos/Desktop/TFanalysis_Wangpaper/k17ko/regulons_k17ko.csv'
+```
+```{r Arguments for domino K17KO}
+#features = 
+signaling_db = CPDB_DB
+ser = NULL
+counts = COUNTS
+z_scores = Z_SCORES
+clusters = CLUSTERS
+use_clusters = TRUE
+df = REGULONS
+gene_conv = c('HGNC', 'MGI')
+verbose = TRUE
+use_complexes = FALSE
+rec_min_thresh = 0.025
+remove_rec_dropout = TRUE
+tf_selection_method = 'clusters'
+tf_variance_quantile = 0.5
+```
+```{r adding cell types to the scenic output K17KO}
+#now getting the names of all the cells we want to keep from the SCENIC results
+temp00 <- colnames(tcells)
+
+temp_features <- as.data.frame(features)
+temp_features <- temp_features[,colnames(temp_features) %in% temp00]
+temp_features <- as.matrix(temp_features)
+features <- temp_features
+
+tcells <- tcells[ ,colnames(tcells) %in% colnames(features)]
+```
+
+#create domino
+```{r Creating domino object}
+domino <- setClass(
+    Class = 'domino',
+    slots = c(
+        db_info = 'list',
+        z_scores = 'matrix',
+        counts = 'AnyMatrix',
+        clusters = 'factor',
+        features = 'matrix',
+        cor = 'matrix',
+        linkages = 'list',
+        clust_de = 'matrix',
+        misc = 'list',
+        cl_signaling_matrices = 'list',
+        signaling = 'matrix'
+    )
+)
+
+print.domino = function(dom){
+    cat('A Domino object of', length(dom@clusters), 'cells.\n')
+}
+
+##############################CREATE DOMINO###############################
+dom = domino()
+dom@misc[["tar_lr_cols"]] <- c("R.orig", "L.orig")
+
+#reading in the cellphone db files
+genes = read.csv(paste0(signaling_db, "/genes.csv"), stringsAsFactors = FALSE)
+proteins = read.csv(paste0(signaling_db, "/proteins.csv"), stringsAsFactors = FALSE)
+interactions = read.csv(paste0(signaling_db, "/interactions.csv"), stringsAsFactors = FALSE)
+complexes = read.csv(paste0(signaling_db, "/complexes.csv"), stringsAsFactors = FALSE)
+
+#adding cellphone db stuff into the object
+dom@db_info = list(genes = genes, proteins = proteins, interactions = interactions, complexes = complexes)
+rec_uniprot = proteins$uniprot[which(proteins$receptor == "True")]
+lig_uniprot = proteins$uniprot[which(proteins$receptor != "True")]
+
+#making a matrix for the receptor ligand map
+rl_map <- data.frame(R.uniprot = NA, L.uniprot= NA)
+
+for (i in 1:nrow(interactions)) {
+  a_pname = interactions$protein_name_a[i]
+  b_pname = interactions$protein_name_b[i]
+  if (!use_complexes) {
+    if (a_pname == "" | b_pname == "") {
+      next
+    }
+  }
+  aid = interactions$partner_a[i]
+  bid = interactions$partner_b[i]
+  if (length(which(rec_uniprot == aid)) != 0) {
+    recs = rec_uniprot[which(rec_uniprot == aid)]
+  }
+  else if (length(which(lig_uniprot == aid)) != 0) {
+    ligs = lig_uniprot[which(lig_uniprot == aid)]
+  }
+  else if (length(which(rec_complexes == aid)) != 0) {
+    comp = rec_complexes[which(rec_complexes == aid)]
+    recs = complexes[which(complexes[, 1] == comp), 
+      2:5]
+    recs = recs[-which(recs == "")]
+  }
+  else if (length(which(lig_complexes == aid)) != 0) {
+    comp = lig_complexes[which(lig_complexes == aid)]
+    ligs = complexes[which(complexes[, 1] == comp), 
+      2:5]
+    ligs = ligs[-which(ligs == "")]
+  }
+  else {
+    stop(paste("Partner A has no comp or prot match in row", 
+      i))
+  }
+  if (length(which(rec_uniprot == bid)) != 0) {
+    recs = rec_uniprot[which(rec_uniprot == bid)]
+  }
+  else if (length(which(lig_uniprot == bid)) != 0) {
+    ligs = lig_uniprot[which(lig_uniprot == bid)]
+  }
+  else if (length(which(rec_complexes == bid)) != 0) {
+    comp = rec_complexes[which(rec_complexes == bid)]
+    recs = complexes[which(complexes[, 1] == comp), 
+      2:5]
+    recs = recs[-which(recs == "")]
+  }
+  else if (length(which(lig_complexes == bid)) != 0) {
+    comp = lig_complexes[which(lig_complexes == bid)]
+    ligs = complexes[which(complexes[, 1] == comp), 
+      2:5]
+    ligs = ligs[-which(ligs == "")]
+  }
+  else {
+    stop(paste("Partner B has no comp or prot match in row", 
+      i))
+  }
+  for (l in ligs) {
+    for (r in recs) {
+      rl_map = rbind(rl_map, c(r, l))
+    }
+  }
+}
+
+#now mapping genes and proteins to one another from the receptor database
+rec_prots = as.character(unique(rl_map[, 1]))
+rec_orig = genes[match(rec_prots, genes[, 2]), 3]
+rl_map = data.frame(rl_map)
+temp <- as.data.frame(cbind(rec_prots, rec_orig))
+rl_map <- merge(rl_map, temp, by.x = 'R.uniprot', by.y = 'rec_prots')
+
+#now mapping genes and proteins to one another from the ligand database
+lig_prots = as.character(unique(rl_map[, 2]))
+lig_orig = genes[match(lig_prots, genes[, 2]), 3]
+temp <- as.data.frame(cbind(lig_prots, lig_orig))
+rl_map <- merge(rl_map, temp, by.x = 'L.uniprot', by.y = 'lig_prots')
+
+#now we are converting our mouse genes to human genes
+require("biomaRt")
+human = useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+mouse = useMart("ensembl", dataset = "mmusculus_gene_ensembl")
+
+#converting the receiver genes from human to mouse symbols
+genesV2 = getLDS(attributes = c("hgnc_symbol"), filters = "hgnc_symbol", values = rl_map$rec_orig , mart = human, attributesL = c("mgi_symbol"), martL = mouse, uniqueRows=T)
+rl_map <- merge(rl_map, genesV2, by.x = 'rec_orig', by.y = 'HGNC.symbol')
+
+#managing the dataframe to make it easier to understand
+rl_map$R.conv <- rl_map$MGI.symbol
+rl_map$MGI.symbol <- NULL
+
+#converting the ligand genes from human to mouse symbols
+genesV2 = getLDS(attributes = c("hgnc_symbol"), filters = "hgnc_symbol", values = rl_map$lig_orig , mart = human, attributesL = c("mgi_symbol"), martL = mouse, uniqueRows=T)
+rl_map <- merge(rl_map, genesV2, by.x = 'lig_orig', by.y = 'HGNC.symbol')
+
+#managing the dataframe to make it easier to understand
+rl_map$L.conv <- rl_map$MGI.symbol
+rl_map$MGI.symbol <- NULL
+  
+write.csv(rl_map, '/Users/agolfinos/Desktop/rl_map.csv')
+  
+dom@misc[["tar_lr_cols"]] = c("R.conv", "L.conv")
+
+rl_map = unique.data.frame(rl_map)
+rl_list = list()
+
+#making a list of our genes for both receptors and ligands
+tar_map = rl_map[, dom@misc$tar_lr_cols]
+
+#now looking through the receptor genes in the tar_map object
+for (rec in unique(tar_map[, 1])) {
+  ligs = unique(tar_map[which(tar_map[, 1] == rec), 2])
+  for (lig in ligs) {
+      rl_list[[rec]] = c(rl_list[[rec]], lig)
+    }
+  }
+
+#saving our information to the domino object  
+dom@linkages[["rec_lig"]] = rl_list
+dom@misc[["rl_map"]] = rl_map
+
+#setting our z-scores
+z_scores = tcells@assays$RNA@scale.data
+#setting our cluster identities
+clusters = tcells@active.ident
+#setting our count data
+counts = tcells@assays$RNA@counts
+  
+#setting z-scores and clusters in our domino object
+dom@z_scores = z_scores
+dom@clusters = clusters
+  
+#now reading in the features of interest from the auc matrix from scenic
+if (class(features) == "character") {
+  features = read.csv(features, row.names = 1, check.names = FALSE)
+}
+
+#adding features to the domino object with the z-scores
+#features = features[ ,colnames(dom@z_scores)]
+dom@features = as.matrix(features)
+
+if (tf_selection_method == "clusters") {
+  p_vals = matrix(1, nrow = nrow(features), ncol = length(levels(dom@clusters)))
+  rownames(p_vals) = rownames(features)
+  colnames(p_vals) = levels(dom@clusters)
+  clust_n = length(levels(dom@clusters))
+  }
+for (clust in levels(dom@clusters)) {
+  cells = which(dom@clusters == clust)
+  for (feat in rownames(dom@features)) {
+    p_vals[feat, clust] = wilcox.test(dom@features[feat, cells], dom@features[feat, -cells], alternative = "g")$p.value
+      }
+    }
+    
+#adding our p-values to our object and generating our transcription factor targets
+dom@clust_de = p_vals
+  if (tf_selection_method == "all") {
+    dom@clusters = factor()
+  }
+  if (tf_selection_method == "variable") {
+    dom@clusters = factor()
+    variances = apply(dom@features, 1, function(x) {
+      sd(x)/mean(x)
+    })
+    keep_n = length(variances) * tf_variance_quantile
+    keep_id = which(rank(variances) > keep_n)
+    dom@features = dom@features[names(keep_id), ]
+  }
+  if (class(df) == "character") {
+    df = read.csv(df, skip = 3, header = FALSE, stringsAsFactors = FALSE)
+  }
+  if (!is.null(df)) {
+    tf_targets = list()
+    for (row in 1:nrow(df)) {
+      tf = df[row, 1]
+      tf_genes = df[row, 10]
+      tf_genes = gsub("[\\(']", "", regmatches(tf_genes, 
+        gregexpr("\\('.*?'", tf_genes))[[1]])
+      tf_targets[[tf]] = unique(c(tf_targets[[tf]], tf_genes))
+    }
+    dom@linkages[["tf_targets"]] = tf_targets
+  }
+
+dom@counts = counts
+
+#getting the names of all of our unique receptors 
+all_receptors = unique(names(dom@linkages$rec_lig))
+write.csv(all_receptors, file = '/Users/agolfinos/Desktop/all_receptors.csv')
+
+#finding all of the zeroes in each of the rows to see where data is sparse
+zero_sum = Matrix::rowSums(counts == 0)
+
+#only keeping those genes where our data is robust
+keeps = which(zero_sum < 0.975 * ncol(counts))
+
+ser_receptors = intersect(names(keeps), all_receptors)
+write.csv(ser_receptors, file = '/Users/agolfinos/Desktop/ser_receptors.csv')
+
+#making an new matrix 'rho' that will store our correlations
+rho = matrix(0, nrow = length(ser_receptors), ncol = nrow(dom@features))
+rownames(rho) = ser_receptors
+colnames(rho) = rownames(dom@features)
+  
+n_tf = nrow(dom@features)
+
+module_targets <- substring(rownames(dom@features), first = 1, last = nchar(rownames(dom@features)) - 3)
+```
+```{r edits}
+temp <- dom@z_scores[, colnames(dom@z_scores) %in% rownames(dom@features) ]
+temp1 <- 
+```
+```{r Creating correlation information between receptors and TFs}
+for (module in rownames(dom@features)) {
+  tf <- substring(module, first = 1, last = nchar(module) - 3)
+  scores <- dom@features[module, ]
+  rhorow <- rep(0, length(ser_receptors))
+  names(rhorow) = ser_receptors
+  for (rec in ser_receptors) {
+    if (rec %in% rownames(dom@z_scores)) {
+      rec_z_scores = (dom@z_scores[rec, ])
+      rec_z_scores <- rec_z_scores[names(rec_z_scores) %in% names(tar_tf_scores)]
+      tar_tf_scores = scores
+    }
+      if (sum(tar_tf_scores) == 0) {
+        rhorow[rec] = 0
+        next
+      }
+      cor = cor.test(rec_z_scores, tar_tf_scores, method = "spearman", alternative = "greater", exact = FALSE)
+      rhorow[rec] = cor$estimate
+      rho[, module] = rhorow
+    colnames(rho) = rownames(dom@features)
+    dom@cor = rho
+  }
+  
+}
+```
+
+#filtering correlations object
+```{r filter for correlations > 0.7}
+library(dplyr)
+
+#making our object into a dataframe
+k17ko_corr <- as.data.frame(dom@cor)
+write.csv(k17ko_corr, file = '/Users/agolfinos/Desktop/k17ko_rec_tf_correlations.csv')
+
+library(readxl)
+k17ko <- read_excel('/Users/agolfinos/Desktop/k17ko_rec_tf_correlations.xlsx', sheet = 'k17ko_rec_tf_correlation_edits')
+
+rls <- as.data.frame(rl_map$L.conv, rl_map$R.conv)
+
+k17ko <- merge(k17ko, rls, by.x = '...1', by.y = 0)
+
+write.csv(k17ko, file = '/Users/agolfinos/Desktop/k17ko_lig_rec_tf.csv')
+```
+
+
+#build domino
+```{r Build domino arguments K17KO}
+dom = dom
+max_tf_per_clust = 10
+min_tf_pval = 0.01
+max_rec_per_tf = 5
+rec_tf_cor_threshold = 0.15
+```
+```{r Build domino K17KO}
+dom@misc[["build_vars"]] = c(max_tf_per_clust = max_tf_per_clust, min_tf_pval = min_tf_pval, max_rec_per_tf = max_rec_per_tf, rec_tf_cor_threshold = rec_tf_cor_threshold)
+
+if (length(dom@clusters)) {
+  clust_tf = list()
+  for (clust in levels(dom@clusters)) {
+    ordered = sort(dom@clust_de[, clust], decreasing = FALSE)
+    if (sum(ordered == 0) > max_tf_per_clust) {
+      zeros = names(ordered)[which(ordered == 0)]
+      fcs = c()
+      for (zero in zeros) {
+        fc = mean(dom@features[zero, which(dom@clusters == clust)]) - mean(dom@features[zero, which(dom@clusters != clust)])
+        fcs = c(fcs, fc)
+      }
+      names(fcs) = zeros
+      sorted = sort(fcs, decreasing = TRUE)[1:max_tf_per_clust]
+    }
+    else {
+      sorted = ordered[which(ordered < min_tf_pval)]
+    }
+    if (length(sorted) > max_tf_per_clust) {
+      sorted = sorted[1:max_tf_per_clust]
+    }
+    clust_tf[[clust]] = names(sorted)
+  }
+  dom@linkages[["clust_tf"]] = clust_tf
+  tf_rec = list()
+  for (tf in colnames(dom@cor)) {
+    ordered = sort(dom@cor[, tf], decreasing = TRUE)
+    filtered = ordered[which(ordered > rec_tf_cor_threshold)]
+    if (length(filtered) > max_rec_per_tf) {
+      top_receptors = names(filtered)[1:max_rec_per_tf]
+    }
+    else {
+      top_receptors = names(filtered)
+    }
+    tf_rec[[tf]] = top_receptors
+  }
+  dom@linkages[["tf_rec"]] = tf_rec
+  clust_ligs = list()
+  #for (clust in levels(dom@clusters)) {
+    #vec = lc(dom@linkages$rec_lig, lc(tf_rec, lc(clust_tf, clust)))
+    #vec = unique(vec[!is.na(vec)])
+    #clust_ligs[[clust]] = vec
+  #}
+  cl_signaling_matrices = list()
+  signaling = matrix(0, ncol = length(levels(dom@clusters)), nrow = length(levels(dom@clusters)))
+  rownames(signaling) = paste0("R_", levels(dom@clusters))
+  colnames(signaling) = paste0("L_", levels(dom@clusters))
+  for (clust in levels(dom@clusters)) {
+    inc_ligs = clust_ligs[[clust]]
+    inc_ligs = intersect(inc_ligs, rownames(dom@z_scores))
+    if (length(inc_ligs) == 1) {
+      inc_ligs = numeric(0)
+    }
+    cl_sig_mat = matrix(0, ncol = length(levels(dom@clusters)), nrow = length(inc_ligs))
+    colnames(cl_sig_mat) = colnames(signaling)
+    rownames(cl_sig_mat) = inc_ligs
+    for (c2 in levels(dom@clusters)) {
+      n_cell = length(which(dom@clusters == c2))
+      if (n_cell > 1) {
+        sig = rowMeans(dom@z_scores[inc_ligs, which(dom@clusters == c2)])
+      }
+      else if (n_cell == 1) {
+        sig = dom@z_scores[inc_ligs, which(dom@clusters == c2)]
+      }
+      else {
+        sig = rep(0, length(inc_ligs))
+        names(sig) = inc_ligs
+      }
+      sig[which(sig < 0)] = 0
+      cl_sig_mat[, paste0("L_", c2)] = sig
+    }
+    cl_signaling_matrices[[clust]] = cl_sig_mat
+    signaling[paste0("R_", clust), ] = colSums(cl_sig_mat)
+  }
+  dom@cl_signaling_matrices = cl_signaling_matrices
+  dom@signaling = signaling
+}
+```
+
+
+
+#USING ALL DATA
+```{r Cellphone DB input}
+complexes <- read.csv('/Users/agolfinos/Desktop/HNC_vs_MOC2/MOC2/Domino_test/complexes.csv', stringsAsFactors = FALSE)
+genes <- read.csv('/Users/agolfinos/Desktop/HNC_vs_MOC2/MOC2/Domino_test/genes.csv', stringsAsFactors = FALSE)
+interactions <- read.csv('/Users/agolfinos/Desktop/HNC_vs_MOC2/MOC2/Domino_test/interactions.csv', stringsAsFactors = FALSE)
+proteins <- read.csv('/Users/agolfinos/Desktop/HNC_vs_MOC2/MOC2/Domino_test/proteins.csv', stringsAsFactors = FALSE)
+```
+```{r SCENIC input K17KO}
+auc <- read.csv('/Users/agolfinos/Desktop/TFanalysis_Wangpaper/k17ko/AUC_k17ko.csv')
+regulons <- read.csv('/Users/agolfinos/Desktop/TFanalysis_Wangpaper/k17ko/regulons_k17ko.csv')
+```
+```{r Seurat object read-in K17KO}
+load('/Users/agolfinos/Desktop/TFanalysis_Wangpaper/k17ko/k17ko.rda')
+#DimPlot(seurat, group.by = 'global.cluster.Wangetal')
+#tcells <- subset(x = seurat, subset = global.cluster.Wangetal == c('CD4', 'CD8', 'Treg'))
+Idents(object = k17ko) <- k17ko@meta.data$global.cluster.Wangetal
+```
+```{r my input K17KO}
+library(domino)
+#compiling the information we need to create the domino object
+COUNTS <- k17ko@assays$RNA@counts
+Z_SCORES <- k17ko@assays$RNA@scale.data
+CLUSTERS <- k17ko@active.ident
+#we need to transpose the auc table compared to the SCENIC output
+features <- t(read.table('/Users/agolfinos/Desktop/TFanalysis_Wangpaper/k17ko/AUC_k17ko.csv', header = TRUE, row.names = 1, stringsAsFactors = FALSE, sep = ','))
+CPDB_DB <- '/Users/agolfinos/Desktop/HNC_vs_MOC2/MOC2/domino/cpdb/'
+REGULONS <- '/Users/agolfinos/Desktop/TFanalysis_Wangpaper/k17ko/regulons_k17ko.csv'
+```
+```{r Arguments for domino K17KO}
+#features = 
+signaling_db = CPDB_DB
+ser = NULL
+counts = COUNTS
+z_scores = Z_SCORES
+clusters = CLUSTERS
+use_clusters = TRUE
+df = REGULONS
+gene_conv = c('HGNC', 'MGI')
+verbose = TRUE
+use_complexes = FALSE
+rec_min_thresh = 0.025
+remove_rec_dropout = TRUE
+tf_selection_method = 'clusters'
+tf_variance_quantile = 0.5
+```
+```{r adding cell types to the scenic output K17KO DON'T NEED}
+#now getting the names of all the cells we want to keep from the SCENIC results
+#temp00 <- colnames(seurat)
+
+#temp_features <- as.data.frame(features)
+#temp_features <- temp_features[,colnames(temp_features) %in% temp00]
+#temp_features <- as.matrix(temp_features)
+#features <- temp_features
+
+#seurat <- seurat[ ,colnames(seurat) %in% colnames(features)]
+```
+
+#create domino
+```{r Creating domino object K17KO}
+domino <- setClass(
+    Class = 'domino',
+    slots = c(
+        db_info = 'list',
+        z_scores = 'matrix',
+        counts = 'AnyMatrix',
+        clusters = 'factor',
+        features = 'matrix',
+        cor = 'matrix',
+        linkages = 'list',
+        clust_de = 'matrix',
+        misc = 'list',
+        cl_signaling_matrices = 'list',
+        signaling = 'matrix'
+    )
+)
+
+print.domino = function(dom){
+    cat('A Domino object of', length(dom@clusters), 'cells.\n')
+}
+
+##############################CREATE DOMINO###############################
+dom = domino()
+dom@misc[["tar_lr_cols"]] <- c("R.orig", "L.orig")
+
+#reading in the cellphone db files
+genes = read.csv(paste0(signaling_db, "/genes.csv"), stringsAsFactors = FALSE)
+proteins = read.csv(paste0(signaling_db, "/proteins.csv"), stringsAsFactors = FALSE)
+interactions = read.csv(paste0(signaling_db, "/interactions.csv"), stringsAsFactors = FALSE)
+complexes = read.csv(paste0(signaling_db, "/complexes.csv"), stringsAsFactors = FALSE)
+
+#adding cellphone db stuff into the object
+dom@db_info = list(genes = genes, proteins = proteins, interactions = interactions, complexes = complexes)
+rec_uniprot = proteins$uniprot[which(proteins$receptor == "True")]
+lig_uniprot = proteins$uniprot[which(proteins$receptor != "True")]
+
+#making a matrix for the receptor ligand map
+rl_map <- data.frame(R.uniprot = NA, L.uniprot= NA)
+
+for (i in 1:nrow(interactions)) {
+  a_pname = interactions$protein_name_a[i]
+  b_pname = interactions$protein_name_b[i]
+  if (!use_complexes) {
+    if (a_pname == "" | b_pname == "") {
+      next
+    }
+  }
+  aid = interactions$partner_a[i]
+  bid = interactions$partner_b[i]
+  if (length(which(rec_uniprot == aid)) != 0) {
+    recs = rec_uniprot[which(rec_uniprot == aid)]
+  }
+  else if (length(which(lig_uniprot == aid)) != 0) {
+    ligs = lig_uniprot[which(lig_uniprot == aid)]
+  }
+  else if (length(which(rec_complexes == aid)) != 0) {
+    comp = rec_complexes[which(rec_complexes == aid)]
+    recs = complexes[which(complexes[, 1] == comp), 
+      2:5]
+    recs = recs[-which(recs == "")]
+  }
+  else if (length(which(lig_complexes == aid)) != 0) {
+    comp = lig_complexes[which(lig_complexes == aid)]
+    ligs = complexes[which(complexes[, 1] == comp), 
+      2:5]
+    ligs = ligs[-which(ligs == "")]
+  }
+  else {
+    stop(paste("Partner A has no comp or prot match in row", 
+      i))
+  }
+  if (length(which(rec_uniprot == bid)) != 0) {
+    recs = rec_uniprot[which(rec_uniprot == bid)]
+  }
+  else if (length(which(lig_uniprot == bid)) != 0) {
+    ligs = lig_uniprot[which(lig_uniprot == bid)]
+  }
+  else if (length(which(rec_complexes == bid)) != 0) {
+    comp = rec_complexes[which(rec_complexes == bid)]
+    recs = complexes[which(complexes[, 1] == comp), 
+      2:5]
+    recs = recs[-which(recs == "")]
+  }
+  else if (length(which(lig_complexes == bid)) != 0) {
+    comp = lig_complexes[which(lig_complexes == bid)]
+    ligs = complexes[which(complexes[, 1] == comp), 
+      2:5]
+    ligs = ligs[-which(ligs == "")]
+  }
+  else {
+    stop(paste("Partner B has no comp or prot match in row", 
+      i))
+  }
+  for (l in ligs) {
+    for (r in recs) {
+      rl_map = rbind(rl_map, c(r, l))
+    }
+  }
+}
+
+#now mapping genes and proteins to one another from the receptor database
+rec_prots = as.character(unique(rl_map[, 1]))
+rec_orig = genes[match(rec_prots, genes[, 2]), 3]
+rl_map = data.frame(rl_map)
+temp <- as.data.frame(cbind(rec_prots, rec_orig))
+rl_map <- merge(rl_map, temp, by.x = 'R.uniprot', by.y = 'rec_prots')
+
+#now mapping genes and proteins to one another from the ligand database
+lig_prots = as.character(unique(rl_map[, 2]))
+lig_orig = genes[match(lig_prots, genes[, 2]), 3]
+temp <- as.data.frame(cbind(lig_prots, lig_orig))
+rl_map <- merge(rl_map, temp, by.x = 'L.uniprot', by.y = 'lig_prots')
+
+#now we are converting our mouse genes to human genes
+require("biomaRt")
+human = useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+mouse = useMart("ensembl", dataset = "mmusculus_gene_ensembl")
+
+#converting the receiver genes from human to mouse symbols
+genesV2 = getLDS(attributes = c("hgnc_symbol"), filters = "hgnc_symbol", values = rl_map$rec_orig , mart = human, attributesL = c("mgi_symbol"), martL = mouse, uniqueRows=T)
+rl_map <- merge(rl_map, genesV2, by.x = 'rec_orig', by.y = 'HGNC.symbol')
+
+#managing the dataframe to make it easier to understand
+rl_map$R.conv <- rl_map$MGI.symbol
+rl_map$MGI.symbol <- NULL
+
+#converting the ligand genes from human to mouse symbols
+genesV2 = getLDS(attributes = c("hgnc_symbol"), filters = "hgnc_symbol", values = rl_map$lig_orig , mart = human, attributesL = c("mgi_symbol"), martL = mouse, uniqueRows=T)
+rl_map <- merge(rl_map, genesV2, by.x = 'lig_orig', by.y = 'HGNC.symbol')
+
+#managing the dataframe to make it easier to understand
+rl_map$L.conv <- rl_map$MGI.symbol
+rl_map$MGI.symbol <- NULL
+  
+write.csv(rl_map, '/Users/agolfinos/Desktop/rl_map.csv')
+  
+dom@misc[["tar_lr_cols"]] = c("R.conv", "L.conv")
+
+rl_map = unique.data.frame(rl_map)
+rl_list = list()
+
+#making a list of our genes for both receptors and ligands
+tar_map = rl_map[, dom@misc$tar_lr_cols]
+
+#now looking through the receptor genes in the tar_map object
+for (rec in unique(tar_map[, 1])) {
+  ligs = unique(tar_map[which(tar_map[, 1] == rec), 2])
+  for (lig in ligs) {
+      rl_list[[rec]] = c(rl_list[[rec]], lig)
+    }
+  }
+
+#saving our information to the domino object  
+dom@linkages[["rec_lig"]] = rl_list
+dom@misc[["rl_map"]] = rl_map
+
+#setting our z-scores
+z_scores = k17ko@assays$RNA@scale.data
+#setting our cluster identities
+clusters = k17ko@active.ident
+#setting our count data
+counts = k17ko@assays$RNA@counts
+  
+#setting z-scores and clusters in our domino object
+dom@z_scores = z_scores
+dom@clusters = clusters
+  
+#now reading in the features of interest from the auc matrix from scenic
+if (class(features) == "character") {
+  features = read.csv(features, row.names = 1, check.names = FALSE)
+}
+
+#adding features to the domino object with the z-scores
+features = features[ ,colnames(dom@z_scores)]
+dom@features = as.matrix(features)
+
+if (tf_selection_method == "clusters") {
+  p_vals = matrix(1, nrow = nrow(features), ncol = length(levels(dom@clusters)))
+  rownames(p_vals) = rownames(features)
+  colnames(p_vals) = levels(dom@clusters)
+  clust_n = length(levels(dom@clusters))
+  }
+for (clust in levels(dom@clusters)) {
+  cells = which(dom@clusters == clust)
+  for (feat in rownames(dom@features)) {
+    p_vals[feat, clust] = wilcox.test(dom@features[feat, cells], dom@features[feat, -cells], alternative = "g")$p.value
+      }
+    }
+    
+#adding our p-values to our object and generating our transcription factor targets
+dom@clust_de = p_vals
+  if (tf_selection_method == "all") {
+    dom@clusters = factor()
+  }
+  if (tf_selection_method == "variable") {
+    dom@clusters = factor()
+    variances = apply(dom@features, 1, function(x) {
+      sd(x)/mean(x)
+    })
+    keep_n = length(variances) * tf_variance_quantile
+    keep_id = which(rank(variances) > keep_n)
+    dom@features = dom@features[names(keep_id), ]
+  }
+  if (class(df) == "character") {
+    df = read.csv(df, skip = 3, header = FALSE, stringsAsFactors = FALSE)
+  }
+  if (!is.null(df)) {
+    tf_targets = list()
+    for (row in 1:nrow(df)) {
+      tf = df[row, 1]
+      tf_genes = df[row, 10]
+      tf_genes = gsub("[\\(']", "", regmatches(tf_genes, 
+        gregexpr("\\('.*?'", tf_genes))[[1]])
+      tf_targets[[tf]] = unique(c(tf_targets[[tf]], tf_genes))
+    }
+    dom@linkages[["tf_targets"]] = tf_targets
+  }
+
+dom@counts = counts
+
+#getting the names of all of our unique receptors 
+all_receptors = unique(names(dom@linkages$rec_lig))
+write.csv(all_receptors, file = '/Users/agolfinos/Desktop/all_receptors.csv')
+
+#finding all of the zeroes in each of the rows to see where data is sparse
+zero_sum = Matrix::rowSums(counts == 0)
+
+#only keeping those genes where our data is robust
+keeps = which(zero_sum < 0.975 * ncol(counts))
+
+ser_receptors = intersect(names(keeps), all_receptors)
+write.csv(ser_receptors, file = '/Users/agolfinos/Desktop/ser_receptors.csv')
+
+#making an new matrix 'rho' that will store our correlations
+rho = matrix(0, nrow = length(ser_receptors), ncol = nrow(dom@features))
+rownames(rho) = ser_receptors
+colnames(rho) = rownames(dom@features)
+  
+n_tf = nrow(dom@features)
+
+module_targets <- substring(rownames(dom@features), first = 1, last = nchar(rownames(dom@features)) - 3)
+```
+```{r Creating correlation information between receptors and TFs K17KO}
+for (module in rownames(dom@features)) {
+  tf <- substring(module, first = 1, last = nchar(module) - 3)
+  scores <- dom@features[module, ]
+  rhorow <- rep(0, length(ser_receptors))
+  names(rhorow) = ser_receptors
+  for (rec in ser_receptors) {
+    if (rec %in% rownames(dom@z_scores)) {
+      rec_z_scores = (dom@z_scores[rec, ])
+      rec_z_scores <- rec_z_scores[names(rec_z_scores) %in% names(tar_tf_scores)]
+      tar_tf_scores = scores
+    }
+      if (sum(tar_tf_scores) == 0) {
+        rhorow[rec] = 0
+        next
+      }
+      cor = cor.test(rec_z_scores, tar_tf_scores, method = "spearman", alternative = "greater", exact = FALSE)
+      rhorow[rec] = cor$estimate
+      rho[, module] = rhorow
+    colnames(rho) = rownames(dom@features)
+    dom@cor = rho
+    }
+  
+}
+```
+
+#filtering correlations object
+```{r filter for correlations > 0.7 K17KO}
+library(dplyr)
+
+#making our object into a dataframe
+k17ko_corr <- as.data.frame(dom@cor)
+k17_cor_filtered <- filter_all(k17ko_corr, any_vars(. > 0.6))
+write.csv(k17ko_corr, file = '/Users/agolfinos/Desktop/k17ko_rec_tf_correlations.csv')
+
+library(readxl)
+k17ko <- read_excel('/Users/agolfinos/Desktop/k17ko_rec_tf_correlations_AEGedits.xlsx',)
+
+rls <- as.data.frame(rl_map$L.conv, rl_map$R.conv)
+
+k17ko <- merge(k17ko, rls, by.x = '...1', by.y = 0)
+
+write.csv(k17ko, file = '/Users/agolfinos/Desktop/k17ko_lig_rec_tf.csv')
+```
+
+#now run build domino from the package
+
+####################################################################################################
+
+#create domino
+```{r Creating domino object}
+domino <- setClass(
+    Class = 'domino',
+    slots = c(
+        db_info = 'list',
+        z_scores = 'matrix',
+        counts = 'AnyMatrix',
+        clusters = 'factor',
+        features = 'matrix',
+        cor = 'matrix',
+        linkages = 'list',
+        clust_de = 'matrix',
+        misc = 'list',
+        cl_signaling_matrices = 'list',
+        signaling = 'matrix'
+    )
+)
+
+print.domino = function(dom){
+    cat('A Domino object of', length(dom@clusters), 'cells.\n')
+}
+
+##############################CREATE DOMINO###############################
+dom = domino()
+dom@misc[["tar_lr_cols"]] <- c("R.orig", "L.orig")
+
+#reading in the cellphone db files
+genes = read.csv(paste0(signaling_db, "/genes.csv"), stringsAsFactors = FALSE)
+proteins = read.csv(paste0(signaling_db, "/proteins.csv"), stringsAsFactors = FALSE)
+interactions = read.csv(paste0(signaling_db, "/interactions.csv"), stringsAsFactors = FALSE)
+complexes = read.csv(paste0(signaling_db, "/complexes.csv"), stringsAsFactors = FALSE)
+
+#adding cellphone db stuff into the object
+dom@db_info = list(genes = genes, proteins = proteins, interactions = interactions, complexes = complexes)
+rec_uniprot = proteins$uniprot[which(proteins$receptor == "True")]
+lig_uniprot = proteins$uniprot[which(proteins$receptor != "True")]
+
+#making a matrix for the receptor ligand map
+rl_map <- data.frame(R.uniprot = NA, L.uniprot= NA)
+
+for (i in 1:nrow(interactions)) {
+  a_pname = interactions$protein_name_a[i]
+  b_pname = interactions$protein_name_b[i]
+  if (!use_complexes) {
+    if (a_pname == "" | b_pname == "") {
+      next
+    }
+  }
+  aid = interactions$partner_a[i]
+  bid = interactions$partner_b[i]
+  if (length(which(rec_uniprot == aid)) != 0) {
+    recs = rec_uniprot[which(rec_uniprot == aid)]
+  }
+  else if (length(which(lig_uniprot == aid)) != 0) {
+    ligs = lig_uniprot[which(lig_uniprot == aid)]
+  }
+  else if (length(which(rec_complexes == aid)) != 0) {
+    comp = rec_complexes[which(rec_complexes == aid)]
+    recs = complexes[which(complexes[, 1] == comp), 
+      2:5]
+    recs = recs[-which(recs == "")]
+  }
+  else if (length(which(lig_complexes == aid)) != 0) {
+    comp = lig_complexes[which(lig_complexes == aid)]
+    ligs = complexes[which(complexes[, 1] == comp), 
+      2:5]
+    ligs = ligs[-which(ligs == "")]
+  }
+  else {
+    stop(paste("Partner A has no comp or prot match in row", 
+      i))
+  }
+  if (length(which(rec_uniprot == bid)) != 0) {
+    recs = rec_uniprot[which(rec_uniprot == bid)]
+  }
+  else if (length(which(lig_uniprot == bid)) != 0) {
+    ligs = lig_uniprot[which(lig_uniprot == bid)]
+  }
+  else if (length(which(rec_complexes == bid)) != 0) {
+    comp = rec_complexes[which(rec_complexes == bid)]
+    recs = complexes[which(complexes[, 1] == comp), 
+      2:5]
+    recs = recs[-which(recs == "")]
+  }
+  else if (length(which(lig_complexes == bid)) != 0) {
+    comp = lig_complexes[which(lig_complexes == bid)]
+    ligs = complexes[which(complexes[, 1] == comp), 
+      2:5]
+    ligs = ligs[-which(ligs == "")]
+  }
+  else {
+    stop(paste("Partner B has no comp or prot match in row", 
+      i))
+  }
+  for (l in ligs) {
+    for (r in recs) {
+      rl_map = rbind(rl_map, c(r, l))
+    }
+  }
+}
+
+#now mapping genes and proteins to one another from the receptor database
+rec_prots = as.character(unique(rl_map[, 1]))
+rec_orig = genes[match(rec_prots, genes[, 2]), 3]
+rl_map = data.frame(rl_map)
+temp <- as.data.frame(cbind(rec_prots, rec_orig))
+rl_map <- merge(rl_map, temp, by.x = 'R.uniprot', by.y = 'rec_prots')
+
+#now mapping genes and proteins to one another from the ligand database
+lig_prots = as.character(unique(rl_map[, 2]))
+lig_orig = genes[match(lig_prots, genes[, 2]), 3]
+temp <- as.data.frame(cbind(lig_prots, lig_orig))
+rl_map <- merge(rl_map, temp, by.x = 'L.uniprot', by.y = 'lig_prots')
+
+#now we are converting our mouse genes to human genes
+require("biomaRt")
+human = useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+mouse = useMart("ensembl", dataset = "mmusculus_gene_ensembl")
+
+#converting the receiver genes from human to mouse symbols
+genesV2 = getLDS(attributes = c("hgnc_symbol"), filters = "hgnc_symbol", values = rl_map$rec_orig , mart = human, attributesL = c("mgi_symbol"), martL = mouse, uniqueRows=T)
+rl_map <- merge(rl_map, genesV2, by.x = 'rec_orig', by.y = 'HGNC.symbol')
+
+#managing the dataframe to make it easier to understand
+rl_map$R.conv <- rl_map$MGI.symbol
+rl_map$MGI.symbol <- NULL
+
+#converting the ligand genes from human to mouse symbols
+genesV2 = getLDS(attributes = c("hgnc_symbol"), filters = "hgnc_symbol", values = rl_map$lig_orig , mart = human, attributesL = c("mgi_symbol"), martL = mouse, uniqueRows=T)
+rl_map <- merge(rl_map, genesV2, by.x = 'lig_orig', by.y = 'HGNC.symbol')
+
+#managing the dataframe to make it easier to understand
+rl_map$L.conv <- rl_map$MGI.symbol
+rl_map$MGI.symbol <- NULL
+  
+write.csv(rl_map, '/Users/agolfinos/Desktop/rl_map.csv')
+  
+dom@misc[["tar_lr_cols"]] = c("R.conv", "L.conv")
+
+rl_map = unique.data.frame(rl_map)
+rl_list = list()
+
+#making a list of our genes for both receptors and ligands
+tar_map = rl_map[, dom@misc$tar_lr_cols]
+
+#now looking through the receptor genes in the tar_map object
+for (rec in unique(tar_map[, 1])) {
+  ligs = unique(tar_map[which(tar_map[, 1] == rec), 2])
+  for (lig in ligs) {
+      rl_list[[rec]] = c(rl_list[[rec]], lig)
+    }
+  }
+
+#saving our information to the domino object  
+dom@linkages[["rec_lig"]] = rl_list
+dom@misc[["rl_map"]] = rl_map
+
+#setting our z-scores
+z_scores = tcells@assays$RNA@scale.data
+#setting our cluster identities
+clusters = tcells@active.ident
+#setting our count data
+counts = tcells@assays$RNA@counts
+  
+#setting z-scores and clusters in our domino object
+dom@z_scores = z_scores
+dom@clusters = clusters
+  
+#now reading in the features of interest from the auc matrix from scenic
+if (class(features) == "character") {
+  features = read.csv(features, row.names = 1, check.names = FALSE)
+}
+
+#adding features to the domino object with the z-scores
+#features = features[ ,colnames(dom@z_scores)]
+dom@features = as.matrix(features)
+
+if (tf_selection_method == "clusters") {
+  p_vals = matrix(1, nrow = nrow(features), ncol = length(levels(dom@clusters)))
+  rownames(p_vals) = rownames(features)
+  colnames(p_vals) = levels(dom@clusters)
+  clust_n = length(levels(dom@clusters))
+  }
+for (clust in levels(dom@clusters)) {
+  cells = which(dom@clusters == clust)
+  for (feat in rownames(dom@features)) {
+    p_vals[feat, clust] = wilcox.test(dom@features[feat, cells], dom@features[feat, -cells], alternative = "g")$p.value
+      }
+    }
+    
+#adding our p-values to our object and generating our transcription factor targets
+dom@clust_de = p_vals
+  if (tf_selection_method == "all") {
+    dom@clusters = factor()
+  }
+  if (tf_selection_method == "variable") {
+    dom@clusters = factor()
+    variances = apply(dom@features, 1, function(x) {
+      sd(x)/mean(x)
+    })
+    keep_n = length(variances) * tf_variance_quantile
+    keep_id = which(rank(variances) > keep_n)
+    dom@features = dom@features[names(keep_id), ]
+  }
+  if (class(df) == "character") {
+    df = read.csv(df, skip = 3, header = FALSE, stringsAsFactors = FALSE)
+  }
+  if (!is.null(df)) {
+    tf_targets = list()
+    for (row in 1:nrow(df)) {
+      tf = df[row, 1]
+      tf_genes = df[row, 10]
+      tf_genes = gsub("[\\(']", "", regmatches(tf_genes, 
+        gregexpr("\\('.*?'", tf_genes))[[1]])
+      tf_targets[[tf]] = unique(c(tf_targets[[tf]], tf_genes))
+    }
+    dom@linkages[["tf_targets"]] = tf_targets
+  }
+
+dom@counts = counts
+
+#getting the names of all of our unique receptors 
+all_receptors = unique(names(dom@linkages$rec_lig))
+write.csv(all_receptors, file = '/Users/agolfinos/Desktop/all_receptors.csv')
+
+#finding all of the zeroes in each of the rows to see where data is sparse
+zero_sum = Matrix::rowSums(counts == 0)
+
+#only keeping those genes where our data is robust
+keeps = which(zero_sum < 0.975 * ncol(counts))
+
+ser_receptors = intersect(names(keeps), all_receptors)
+write.csv(ser_receptors, file = '/Users/agolfinos/Desktop/ser_receptors.csv')
+
+#making an new matrix 'rho' that will store our correlations
+rho = matrix(0, nrow = length(ser_receptors), ncol = nrow(dom@features))
+rownames(rho) = ser_receptors
+colnames(rho) = rownames(dom@features)
+  
+n_tf = nrow(dom@features)
+
+module_targets <- substring(rownames(dom@features), first = 1, last = nchar(rownames(dom@features)) - 3)
+```
+```{r edits}
+temp <- dom@z_scores[, colnames(dom@z_scores) %in% rownames(dom@features) ]
+temp1 <- 
+```
+```{r Creating correlation information between receptors and TFs}
+for (module in rownames(dom@features)) {
+  tf <- substring(module, first = 1, last = nchar(module) - 3)
+  scores <- dom@features[module, ]
+  rhorow <- rep(0, length(ser_receptors))
+  names(rhorow) = ser_receptors
+  for (rec in ser_receptors) {
+    if (rec %in% rownames(dom@z_scores)) {
+      rec_z_scores = (dom@z_scores[rec, ])
+      rec_z_scores <- rec_z_scores[names(rec_z_scores) %in% names(tar_tf_scores)]
+      tar_tf_scores = scores
+    }
+      if (sum(tar_tf_scores) == 0) {
+        rhorow[rec] = 0
+        next
+      }
+      cor = cor.test(rec_z_scores, tar_tf_scores, method = "spearman", alternative = "greater", exact = FALSE)
+      rhorow[rec] = cor$estimate
+      rho[, module] = rhorow
+    colnames(rho) = rownames(dom@features)
+    dom@cor = rho
+  }
+  
+}
+```
+
+#filtering correlations object
+```{r filter for correlations > 0.7}
+library(dplyr)
+
+#making our object into a dataframe
+k17ko_corr <- as.data.frame(dom@cor)
+write.csv(k17ko_corr, file = '/Users/agolfinos/Desktop/k17ko_rec_tf_correlations.csv')
+
+library(readxl)
+k17ko <- read_excel('/Users/agolfinos/Desktop/k17ko_rec_tf_correlations.xlsx', sheet = 'k17ko_rec_tf_correlation_edits')
+
+rls <- as.data.frame(rl_map$L.conv, rl_map$R.conv)
+
+k17ko <- merge(k17ko, rls, by.x = '...1', by.y = 0)
+
+write.csv(k17ko, file = '/Users/agolfinos/Desktop/k17ko_lig_rec_tf.csv')
+```
+
+
+#USING ALL DATA
+```{r Cellphone DB input}
+complexes <- read.csv('/Users/agolfinos/Desktop/HNC_vs_MOC2/MOC2/Domino_test/complexes.csv', stringsAsFactors = FALSE)
+genes <- read.csv('/Users/agolfinos/Desktop/HNC_vs_MOC2/MOC2/Domino_test/genes.csv', stringsAsFactors = FALSE)
+interactions <- read.csv('/Users/agolfinos/Desktop/HNC_vs_MOC2/MOC2/Domino_test/interactions.csv', stringsAsFactors = FALSE)
+proteins <- read.csv('/Users/agolfinos/Desktop/HNC_vs_MOC2/MOC2/Domino_test/proteins.csv', stringsAsFactors = FALSE)
+```
+```{r SCENIC input MOC2}
+auc <- read.csv('/Users/agolfinos/Desktop/TFanalysis_Wangpaper/moc2/AUC.csv')
+regulons <- read.csv('/Users/agolfinos/Desktop/TFanalysis_Wangpaper/moc2/motifs.csv')
+```
+```{r Seurat object read-in MOC2}
+load('/Users/agolfinos/Desktop/TFanalysis_Wangpaper/moc2/moc2.rda')
+#DimPlot(seurat, group.by = 'global.cluster.Wangetal')
+Idents(object = moc2) <-moc2@meta.data$global.cluster.Wangetal
+```
+```{r my input MOC2}
+library(domino)
+#compiling the information we need to create the domino object
+COUNTS <- moc2@assays$RNA@counts
+Z_SCORES <- moc2@assays$RNA@scale.data
+CLUSTERS <- moc2@active.ident
+#we need to transpose the auc table compared to the SCENIC output
+features <- t(read.table('/Users/agolfinos/Desktop/TFanalysis_Wangpaper/moc2/AUC.csv', header = TRUE, row.names = 1, stringsAsFactors = FALSE, sep = ','))
+CPDB_DB <- '/Users/agolfinos/Desktop/HNC_vs_MOC2/MOC2/domino/cpdb/'
+REGULONS <- '/Users/agolfinos/Desktop/TFanalysis_Wangpaper/moc2/motifs.csv'
+```
+```{r Arguments for domino MOC2}
+#features = 
+signaling_db = CPDB_DB
+ser = NULL
+counts = COUNTS
+z_scores = Z_SCORES
+clusters = CLUSTERS
+use_clusters = TRUE
+df = REGULONS
+gene_conv = c('HGNC', 'MGI')
+verbose = TRUE
+use_complexes = FALSE
+rec_min_thresh = 0.025
+remove_rec_dropout = TRUE
+tf_selection_method = 'clusters'
+tf_variance_quantile = 0.5
+```
+
+#create domino
+```{r Creating domino object MOC2}
+domino <- setClass(
+    Class = 'domino',
+    slots = c(
+        db_info = 'list',
+        z_scores = 'matrix',
+        counts = 'AnyMatrix',
+        clusters = 'factor',
+        features = 'matrix',
+        cor = 'matrix',
+        linkages = 'list',
+        clust_de = 'matrix',
+        misc = 'list',
+        cl_signaling_matrices = 'list',
+        signaling = 'matrix'
+    )
+)
+
+print.domino = function(dom){
+    cat('A Domino object of', length(dom@clusters), 'cells.\n')
+}
+
+##############################CREATE DOMINO###############################
+dom = domino()
+dom@misc[["tar_lr_cols"]] <- c("R.orig", "L.orig")
+
+#reading in the cellphone db files
+genes = read.csv(paste0(signaling_db, "/genes.csv"), stringsAsFactors = FALSE)
+proteins = read.csv(paste0(signaling_db, "/proteins.csv"), stringsAsFactors = FALSE)
+interactions = read.csv(paste0(signaling_db, "/interactions.csv"), stringsAsFactors = FALSE)
+complexes = read.csv(paste0(signaling_db, "/complexes.csv"), stringsAsFactors = FALSE)
+
+#adding cellphone db stuff into the object
+dom@db_info = list(genes = genes, proteins = proteins, interactions = interactions, complexes = complexes)
+rec_uniprot = proteins$uniprot[which(proteins$receptor == "True")]
+lig_uniprot = proteins$uniprot[which(proteins$receptor != "True")]
+
+#making a matrix for the receptor ligand map
+rl_map <- data.frame(R.uniprot = NA, L.uniprot= NA)
+
+for (i in 1:nrow(interactions)) {
+  a_pname = interactions$protein_name_a[i]
+  b_pname = interactions$protein_name_b[i]
+  if (!use_complexes) {
+    if (a_pname == "" | b_pname == "") {
+      next
+    }
+  }
+  aid = interactions$partner_a[i]
+  bid = interactions$partner_b[i]
+  if (length(which(rec_uniprot == aid)) != 0) {
+    recs = rec_uniprot[which(rec_uniprot == aid)]
+  }
+  else if (length(which(lig_uniprot == aid)) != 0) {
+    ligs = lig_uniprot[which(lig_uniprot == aid)]
+  }
+  else if (length(which(rec_complexes == aid)) != 0) {
+    comp = rec_complexes[which(rec_complexes == aid)]
+    recs = complexes[which(complexes[, 1] == comp), 
+      2:5]
+    recs = recs[-which(recs == "")]
+  }
+  else if (length(which(lig_complexes == aid)) != 0) {
+    comp = lig_complexes[which(lig_complexes == aid)]
+    ligs = complexes[which(complexes[, 1] == comp), 
+      2:5]
+    ligs = ligs[-which(ligs == "")]
+  }
+  else {
+    stop(paste("Partner A has no comp or prot match in row", 
+      i))
+  }
+  if (length(which(rec_uniprot == bid)) != 0) {
+    recs = rec_uniprot[which(rec_uniprot == bid)]
+  }
+  else if (length(which(lig_uniprot == bid)) != 0) {
+    ligs = lig_uniprot[which(lig_uniprot == bid)]
+  }
+  else if (length(which(rec_complexes == bid)) != 0) {
+    comp = rec_complexes[which(rec_complexes == bid)]
+    recs = complexes[which(complexes[, 1] == comp), 
+      2:5]
+    recs = recs[-which(recs == "")]
+  }
+  else if (length(which(lig_complexes == bid)) != 0) {
+    comp = lig_complexes[which(lig_complexes == bid)]
+    ligs = complexes[which(complexes[, 1] == comp), 
+      2:5]
+    ligs = ligs[-which(ligs == "")]
+  }
+  else {
+    stop(paste("Partner B has no comp or prot match in row", 
+      i))
+  }
+  for (l in ligs) {
+    for (r in recs) {
+      rl_map = rbind(rl_map, c(r, l))
+    }
+  }
+}
+
+#now mapping genes and proteins to one another from the receptor database
+rec_prots = as.character(unique(rl_map[, 1]))
+rec_orig = genes[match(rec_prots, genes[, 2]), 3]
+rl_map = data.frame(rl_map)
+temp <- as.data.frame(cbind(rec_prots, rec_orig))
+rl_map <- merge(rl_map, temp, by.x = 'R.uniprot', by.y = 'rec_prots')
+
+#now mapping genes and proteins to one another from the ligand database
+lig_prots = as.character(unique(rl_map[, 2]))
+lig_orig = genes[match(lig_prots, genes[, 2]), 3]
+temp <- as.data.frame(cbind(lig_prots, lig_orig))
+rl_map <- merge(rl_map, temp, by.x = 'L.uniprot', by.y = 'lig_prots')
+
+#now we are converting our mouse genes to human genes
+require("biomaRt")
+human = useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+mouse = useMart("ensembl", dataset = "mmusculus_gene_ensembl")
+
+#converting the receiver genes from human to mouse symbols
+genesV2 = getLDS(attributes = c("hgnc_symbol"), filters = "hgnc_symbol", values = rl_map$rec_orig , mart = human, attributesL = c("mgi_symbol"), martL = mouse, uniqueRows=T)
+rl_map <- merge(rl_map, genesV2, by.x = 'rec_orig', by.y = 'HGNC.symbol')
+
+#managing the dataframe to make it easier to understand
+rl_map$R.conv <- rl_map$MGI.symbol
+rl_map$MGI.symbol <- NULL
+
+#converting the ligand genes from human to mouse symbols
+genesV2 = getLDS(attributes = c("hgnc_symbol"), filters = "hgnc_symbol", values = rl_map$lig_orig , mart = human, attributesL = c("mgi_symbol"), martL = mouse, uniqueRows=T)
+rl_map <- merge(rl_map, genesV2, by.x = 'lig_orig', by.y = 'HGNC.symbol')
+
+#managing the dataframe to make it easier to understand
+rl_map$L.conv <- rl_map$MGI.symbol
+rl_map$MGI.symbol <- NULL
+  
+write.csv(rl_map, '/Users/agolfinos/Desktop/rl_map.csv')
+  
+dom@misc[["tar_lr_cols"]] = c("R.conv", "L.conv")
+
+rl_map = unique.data.frame(rl_map)
+rl_list = list()
+
+#making a list of our genes for both receptors and ligands
+tar_map = rl_map[, dom@misc$tar_lr_cols]
+
+#now looking through the receptor genes in the tar_map object
+for (rec in unique(tar_map[, 1])) {
+  ligs = unique(tar_map[which(tar_map[, 1] == rec), 2])
+  for (lig in ligs) {
+      rl_list[[rec]] = c(rl_list[[rec]], lig)
+    }
+  }
+
+#saving our information to the domino object  
+dom@linkages[["rec_lig"]] = rl_list
+dom@misc[["rl_map"]] = rl_map
+
+#setting our z-scores
+z_scores = moc2@assays$RNA@scale.data
+#setting our cluster identities
+clusters = moc2@active.ident
+#setting our count data
+counts = moc2@assays$RNA@counts
+  
+#setting z-scores and clusters in our domino object
+dom@z_scores = z_scores
+dom@clusters = clusters
+  
+#now reading in the features of interest from the auc matrix from scenic
+if (class(features) == "character") {
+  features = read.csv(features, row.names = 1, check.names = FALSE)
+}
+
+#adding features to the domino object with the z-scores
+features = features[ ,colnames(dom@z_scores)]
+dom@features = as.matrix(features)
+
+if (tf_selection_method == "clusters") {
+  p_vals = matrix(1, nrow = nrow(features), ncol = length(levels(dom@clusters)))
+  rownames(p_vals) = rownames(features)
+  colnames(p_vals) = levels(dom@clusters)
+  clust_n = length(levels(dom@clusters))
+  }
+for (clust in levels(dom@clusters)) {
+  cells = which(dom@clusters == clust)
+  for (feat in rownames(dom@features)) {
+    p_vals[feat, clust] = wilcox.test(dom@features[feat, cells], dom@features[feat, -cells], alternative = "g")$p.value
+      }
+    }
+    
+#adding our p-values to our object and generating our transcription factor targets
+dom@clust_de = p_vals
+  if (tf_selection_method == "all") {
+    dom@clusters = factor()
+  }
+  if (tf_selection_method == "variable") {
+    dom@clusters = factor()
+    variances = apply(dom@features, 1, function(x) {
+      sd(x)/mean(x)
+    })
+    keep_n = length(variances) * tf_variance_quantile
+    keep_id = which(rank(variances) > keep_n)
+    dom@features = dom@features[names(keep_id), ]
+  }
+  if (class(df) == "character") {
+    df = read.csv(df, skip = 3, header = FALSE, stringsAsFactors = FALSE)
+  }
+  if (!is.null(df)) {
+    tf_targets = list()
+    for (row in 1:nrow(df)) {
+      tf = df[row, 1]
+      tf_genes = df[row, 10]
+      tf_genes = gsub("[\\(']", "", regmatches(tf_genes, 
+        gregexpr("\\('.*?'", tf_genes))[[1]])
+      tf_targets[[tf]] = unique(c(tf_targets[[tf]], tf_genes))
+    }
+    dom@linkages[["tf_targets"]] = tf_targets
+  }
+
+dom@counts = counts
+
+#getting the names of all of our unique receptors 
+all_receptors = unique(names(dom@linkages$rec_lig))
+write.csv(all_receptors, file = '/Users/agolfinos/Desktop/all_receptors.csv')
+
+#finding all of the zeroes in each of the rows to see where data is sparse
+zero_sum = Matrix::rowSums(counts == 0)
+
+#only keeping those genes where our data is robust
+keeps = which(zero_sum < 0.975 * ncol(counts))
+
+ser_receptors = intersect(names(keeps), all_receptors)
+write.csv(ser_receptors, file = '/Users/agolfinos/Desktop/ser_receptors.csv')
+
+#making an new matrix 'rho' that will store our correlations
+rho = matrix(0, nrow = length(ser_receptors), ncol = nrow(dom@features))
+rownames(rho) = ser_receptors
+colnames(rho) = rownames(dom@features)
+  
+n_tf = nrow(dom@features)
+
+module_targets <- substring(rownames(dom@features), first = 1, last = nchar(rownames(dom@features)) - 3)
+```
+```{r Creating correlation information between receptors and TFs MOC2}
+for (module in rownames(dom@features)) {
+  tf <- substring(module, first = 1, last = nchar(module) - 3)
+  scores <- dom@features[module, ]
+  rhorow <- rep(0, length(ser_receptors))
+  names(rhorow) = ser_receptors
+  for (rec in ser_receptors) {
+    if (rec %in% rownames(dom@z_scores)) {
+      rec_z_scores = (dom@z_scores[rec, ])
+      rec_z_scores <- rec_z_scores[names(rec_z_scores) %in% names(tar_tf_scores)]
+      tar_tf_scores = scores
+    }
+      if (sum(tar_tf_scores) == 0) {
+        rhorow[rec] = 0
+        next
+      }
+      cor = cor.test(rec_z_scores, tar_tf_scores, method = "spearman", alternative = "greater", exact = FALSE)
+      rhorow[rec] = cor$estimate
+      rho[, module] = rhorow
+    colnames(rho) = rownames(dom@features)
+    dom@cor = rho
+    }
+  
+}
+```
+
+#filtering correlations object
+```{r filter for correlations > 0.7 moc2}
+library(dplyr)
+
+#making our object into a dataframe
+moc2_corr <- as.data.frame(dom@cor)
+k17_cor_filtered <- filter_all(moc2_corr, any_vars(. > 0.6))
+write.csv(moc2_corr, file = '/Users/agolfinos/Desktop/moc2_rec_tf_correlations.csv')
+
+library(readxl)
+moc2 <- read.csv('/Users/agolfinos/Desktop/moc2_rec_tf_correlations.csv',)
+
+rls <- as.data.frame(rl_map$L.conv, rl_map$R.conv)
+
+moc2 <- merge(moc2, rls, by.x = 'X', by.y = 0)
+
+write.csv(moc2, file = '/Users/agolfinos/Desktop/moc2_lig_rec_tf.csv')
+```
+
+#now run build domino from the package

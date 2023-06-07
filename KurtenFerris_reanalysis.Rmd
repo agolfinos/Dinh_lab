@@ -1,0 +1,592 @@
+---
+title: "Kurten_reanalysis"
+author: "Athena Golfinos"
+date: "12/21/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r read in}
+HN01_PBL <- Read10X('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/GSM5017021_HN01_PBL/')
+HN01_CD45P <- Read10X('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/GSM5017022_HN01_CD45p/')
+HN01_CD45N <- Read10X('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/GSM5017023_HN01_CD45n/')
+
+HN02_PBL <- Read10X('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/GSM5017024_HN02_PBL/')
+HN02_CD45P <- Read10X('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/GSM5017025_HN02_CD45p/')
+
+HN03_PBL <- Read10X('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/GSM5017026_HN03_PBL/')
+HN03_CD45P <- Read10X('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/GSM5017027_HN03_CD45p/')
+
+HN04_PBL <- Read10X('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/GSM5017028_HN04_PBL/')
+HN04_CD45P <- Read10X('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/GSM5017029_HN04_CD45p/')
+
+HN05_PBL <- Read10X('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/GSM5017030_HN05_PBL/')
+HN05_CD45P <- Read10X('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/GSM5017031_HN05_CD45p/')
+HN05_CD45N <- Read10X('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/GSM5017032_HN05_CD45n/')
+
+HN06_PBL <- Read10X('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/GSM5017033_HN06_PBL/')
+HN06_CD45P <- Read10X('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/GSM5017034_HN06_CD45p/')
+HN06_CD45N <- Read10X('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/GSM5017035_HN06_CD45n/')
+
+HN07_PBL <- Read10X('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/GSM5017036_HN07_PBL/')
+HN07_CD45P <- Read10X('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/GSM5017037_HN07_CD45p/')
+HN07_CD45N <- Read10X('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/GSM5017038_HN07_CD45n/')
+
+HN08_PBL <- Read10X('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/GSM5017039_HN08_PBL/')
+HN08_CD45P <- Read10X('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/GSM5017040_HN08_CD45p/')
+HN08_CD45N <- Read10X('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/GSM5017041_HN08_CD45n/')
+
+HN09_PBL <- Read10X('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/GSM5017042_HN09_PBL/')
+HN09_CD45P <- Read10X('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/GSM5017043_HN09_CD45p/')
+HN09_CD45N <- Read10X('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/GSM5017044_HN09_CD45n/')
+
+HN10_PBL <- Read10X('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/GSM5017045_HN10_PBL/')
+HN10_CD45P <- Read10X('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/GSM5017046_HN10_CD45p/')
+HN10_CD45N <- Read10X('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/GSM5017047_HN10_CD45n/')
+
+HN11_PBL <- Read10X('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/GSM5017048_HN11_PBL/')
+HN11_CD45P <- Read10X('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/GSM5017049_HN11_CD45p/')
+HN11_CD45N <- Read10X('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/GSM5017050_HN11_CD45n/')
+
+HN12_PBL <- Read10X('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/GSM5017051_HN12_PBL/')
+HN12_CD45P <- Read10X('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/GSM5017052_HN12_CD45p/')
+HN12_CD45N <- Read10X('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/GSM5017053_HN12_CD45n/')
+
+HN13_PBL <- Read10X('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/GSM5017054_HN13_PBL/')
+HN13_CD45P <- Read10X('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/GSM5017055_HN13_CD45p/')
+HN13_CD45N <- Read10X('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/GSM5017056_HN13_CD45n/')
+
+HN14_PBL <- Read10X('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/GSM5017057_HN14_PBL/')
+HN14_CD45P <- Read10X('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/GSM5017058_HN14_CD45p/')
+HN14_CD45N <- Read10X('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/GSM5017059_HN14_CD45n/')
+
+HN15_PBL <- Read10X('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/GSM5017060_HN15_PBL/')
+HN15_CD45P <- Read10X('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/GSM5017061_HN15_CD45p/')
+HN15_CD45N <- Read10X('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/GSM5017062_HN15_CD45n/')
+
+HN16_PBL <- Read10X('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/GSM5017063_HN16_PBL/')
+HN16_CD45P <- Read10X('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/GSM5017064_HN16_CD45p/')
+HN16_CD45N <- Read10X('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/GSM5017065_HN16_CD45n/')
+
+HN17_PBL <- Read10X('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/GSM5017066_HN17_PBL/')
+HN17_CD45P <- Read10X('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/GSM5017067_HN17_CD45p/')
+HN17_CD45N <- Read10X('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/GSM5017068_HN17_CD45n/')
+
+HN18_PBL <- Read10X('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/GSM5017069_HN18_PBL/')
+HN18_CD45P <- Read10X('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/GSM5017070_HN18_CD45p/')
+HN18_CD45N <- Read10X('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/GSM5017071_HN18_CD45n/')
+
+```
+```{r create seurat objects}
+hn01_cd45n <- CreateSeuratObject(counts = HN01_CD45N)
+hn01_cd45p <- CreateSeuratObject(counts = HN01_CD45P)
+hn01_pbl <- CreateSeuratObject(counts = HN01_PBL)
+
+hn02_cd45p <- CreateSeuratObject(counts = HN02_CD45P)
+hn02_pbl <- CreateSeuratObject(counts = HN02_PBL)
+
+hn03_cd45p <- CreateSeuratObject(counts = HN03_CD45P)
+hn03_pbl <- CreateSeuratObject(counts = HN03_PBL)
+
+hn04_cd45p <- CreateSeuratObject(counts = HN04_CD45P)
+hn04_pbl <- CreateSeuratObject(counts = HN04_PBL)
+
+hn05_cd45n <- CreateSeuratObject(counts = HN05_CD45N)
+hn05_cd45p <- CreateSeuratObject(counts = HN05_CD45P)
+hn05_pbl <- CreateSeuratObject(counts = HN05_PBL)
+
+hn06_cd45n <- CreateSeuratObject(counts = HN06_CD45N)
+hn06_cd45p <- CreateSeuratObject(counts = HN06_CD45P)
+hn06_pbl <- CreateSeuratObject(counts = HN06_PBL)
+
+hn07_cd45n <- CreateSeuratObject(counts = HN07_CD45N)
+hn07_cd45p <- CreateSeuratObject(counts = HN07_CD45P)
+hn07_pbl <- CreateSeuratObject(counts = HN07_PBL)
+
+hn08_cd45n <- CreateSeuratObject(counts = HN08_CD45N)
+hn08_cd45p <- CreateSeuratObject(counts = HN08_CD45P)
+hn08_pbl <- CreateSeuratObject(counts = HN08_PBL)
+
+hn09_cd45n <- CreateSeuratObject(counts = HN09_CD45N)
+hn09_cd45p <- CreateSeuratObject(counts = HN09_CD45P)
+hn09_pbl <- CreateSeuratObject(counts = HN09_PBL)
+
+hn10_cd45n <- CreateSeuratObject(counts = HN10_CD45N)
+hn10_cd45p <- CreateSeuratObject(counts = HN10_CD45P)
+
+hn11_cd45n <- CreateSeuratObject(counts = HN11_CD45N)
+hn11_cd45p <- CreateSeuratObject(counts = HN11_CD45P)
+hn11_pbl <- CreateSeuratObject(counts = HN11_PBL)
+
+hn12_cd45n <- CreateSeuratObject(counts = HN12_CD45N)
+hn12_cd45p <- CreateSeuratObject(counts = HN12_CD45P)
+hn12_pbl <- CreateSeuratObject(counts = HN12_PBL)
+
+hn13_cd45n <- CreateSeuratObject(counts = HN13_CD45N)
+hn13_cd45p <- CreateSeuratObject(counts = HN13_CD45P)
+hn13_pbl <- CreateSeuratObject(counts = HN13_PBL)
+
+hn14_cd45n <- CreateSeuratObject(counts = HN14_CD45N)
+hn14_cd45p <- CreateSeuratObject(counts = HN14_CD45P)
+hn14_pbl <- CreateSeuratObject(counts = HN14_PBL)
+
+hn15_cd45n <- CreateSeuratObject(counts = HN15_CD45N)
+hn15_cd45p <- CreateSeuratObject(counts = HN15_CD45P)
+hn15_pbl <- CreateSeuratObject(counts = HN15_PBL)
+
+hn16_cd45n <- CreateSeuratObject(counts = HN16_CD45N)
+hn16_cd45p <- CreateSeuratObject(counts = HN16_CD45P)
+hn16_pbl <- CreateSeuratObject(counts = HN16_PBL)
+
+hn17_cd45n <- CreateSeuratObject(counts = HN17_CD45N)
+hn17_cd45p <- CreateSeuratObject(counts = HN17_CD45P)
+hn17_pbl <- CreateSeuratObject(counts = HN17_PBL)
+
+hn18_cd45n <- CreateSeuratObject(counts = HN18_CD45N)
+hn18_cd45p <- CreateSeuratObject(counts = HN18_CD45P)
+hn18_pbl <- CreateSeuratObject(counts = HN18_PBL)
+```
+```{r add metadata to our seurat objects (HPV status)}
+#hn01
+hn01_cd45n@meta.data$hpv.status <- 'HPV-'
+hn01_cd45p@meta.data$hpv.status <- 'HPV-'
+hn01_pbl@meta.data$hpv.status <- 'HPV-'
+
+#hn02
+hn02_cd45p@meta.data$hpv.status <- 'HPV-'
+hn02_pbl@meta.data$hpv.status <- 'HPV-'
+
+#hn03
+hn03_cd45p@meta.data$hpv.status <- 'HPV-'
+hn03_pbl@meta.data$hpv.status <- 'HPV-'
+
+#hn04
+hn04_cd45p@meta.data$hpv.status <- 'HPV-'
+hn04_pbl@meta.data$hpv.status <- 'HPV-'
+
+#hn05
+hn05_cd45n@meta.data$hpv.status <- 'HPV-'
+hn05_cd45p@meta.data$hpv.status <- 'HPV-'
+hn05_pbl@meta.data$hpv.status <- 'HPV-'
+
+#hn06
+hn06_cd45n@meta.data$hpv.status <- 'HPV-'
+hn06_cd45p@meta.data$hpv.status <- 'HPV-'
+hn06_pbl@meta.data$hpv.status <- 'HPV-'
+
+#hn07
+hn07_cd45n@meta.data$hpv.status <- 'HPV-'
+hn07_cd45p@meta.data$hpv.status <- 'HPV-'
+hn07_pbl@meta.data$hpv.status <- 'HPV-'
+
+#hn08
+hn08_cd45n@meta.data$hpv.status <- 'HPV-'
+hn08_cd45p@meta.data$hpv.status <- 'HPV-'
+hn08_pbl@meta.data$hpv.status <- 'HPV-'
+
+#hn09
+hn09_cd45n@meta.data$hpv.status <- 'HPV-'
+hn09_cd45p@meta.data$hpv.status <- 'HPV-'
+hn09_pbl@meta.data$hpv.status <- 'HPV-'
+
+#hn10
+hn10_cd45n@meta.data$hpv.status <- 'HPV-'
+hn10_cd45p@meta.data$hpv.status <- 'HPV-'
+
+#hn11
+hn11_cd45n@meta.data$hpv.status <- 'HPV-'
+hn11_cd45p@meta.data$hpv.status <- 'HPV-'
+hn11_pbl@meta.data$hpv.status <- 'HPV-'
+
+#hn12
+hn12_cd45n@meta.data$hpv.status <- 'HPV+'
+hn12_cd45p@meta.data$hpv.status <- 'HPV+'
+hn12_pbl@meta.data$hpv.status <- 'HPV+'
+
+#hn13
+hn13_cd45n@meta.data$hpv.status <- 'HPV+'
+hn13_cd45p@meta.data$hpv.status <- 'HPV+'
+hn13_pbl@meta.data$hpv.status <- 'HPV+'
+
+#hn14
+hn14_cd45n@meta.data$hpv.status <- 'HPV+'
+hn14_cd45p@meta.data$hpv.status <- 'HPV+'
+hn14_pbl@meta.data$hpv.status <- 'HPV+'
+
+#hn15
+hn15_cd45n@meta.data$hpv.status <- 'HPV-'
+hn15_cd45p@meta.data$hpv.status <- 'HPV-'
+hn15_pbl@meta.data$hpv.status <- 'HPV-'
+
+#hn16
+hn16_cd45n@meta.data$hpv.status <- 'HPV+'
+hn16_cd45p@meta.data$hpv.status <- 'HPV+'
+hn16_pbl@meta.data$hpv.status <- 'HPV+'
+
+#hn17
+hn17_cd45n@meta.data$hpv.status <- 'HPV+'
+hn17_cd45p@meta.data$hpv.status <- 'HPV+'
+hn17_pbl@meta.data$hpv.status <- 'HPV+'
+
+#hn18
+hn18_cd45n@meta.data$hpv.status <- 'HPV+'
+hn18_cd45p@meta.data$hpv.status <- 'HPV+'
+hn18_pbl@meta.data$hpv.status <- 'HPV+'
+```
+```{r add metadata to our seurat objects (sample ID)}
+#hn01
+hn01_cd45n@meta.data$orig.ident <- 'hn01_cd45n'
+hn01_cd45p@meta.data$orig.ident <- 'hn01_cd45p'
+hn01_pbl@meta.data$orig.ident <- 'hn01_pbl'
+
+#hn02
+hn02_cd45p@meta.data$orig.ident <- 'hn02_cd45p'
+hn02_pbl@meta.data$orig.ident <- 'hn02_pbl'
+
+#hn03
+hn03_cd45p@meta.data$orig.ident <- 'hn03_cd45p'
+hn03_pbl@meta.data$orig.ident <- 'hn03_pbl'
+
+#hn04
+hn04_cd45p@meta.data$orig.ident <- 'hn04_cd45p'
+hn04_pbl@meta.data$orig.ident <- 'hn04_pbl'
+
+#hn05
+hn05_cd45n@meta.data$orig.ident <- 'hn05_cd45n'
+hn05_cd45p@meta.data$orig.ident <- 'hn05_cd45p'
+hn05_pbl@meta.data$orig.ident <- 'hn05_pbl'
+
+#hn06
+hn06_cd45n@meta.data$orig.ident <- 'hn06_cd45n'
+hn06_cd45p@meta.data$orig.ident <- 'hn06_cd45p'
+hn06_pbl@meta.data$orig.ident <- 'hn06_pbl'
+
+#hn07
+hn07_cd45n@meta.data$orig.ident <- 'hn07_cd45n'
+hn07_cd45p@meta.data$orig.ident <- 'hn07_cd45p'
+hn07_pbl@meta.data$orig.ident <- 'hn07_pbl'
+
+#hn08
+hn08_cd45n@meta.data$orig.ident <- 'hn08_cd45n'
+hn08_cd45p@meta.data$orig.ident <- 'hn08_cd45p'
+hn08_pbl@meta.data$orig.ident <- 'hn08_pbl'
+
+#hn09
+hn09_cd45n@meta.data$orig.ident <- 'hn09_cd45n'
+hn09_cd45p@meta.data$orig.ident <- 'hn09_cd45p'
+hn09_pbl@meta.data$orig.ident <- 'hn09_pbl'
+
+#hn10
+hn10_cd45n@meta.data$orig.ident <- 'hn10_cd45n'
+hn10_cd45p@meta.data$orig.ident <- 'hn10_cd45p'
+
+#hn11
+hn11_cd45n@meta.data$orig.ident <- 'hn11_cd45n'
+hn11_cd45p@meta.data$orig.ident <- 'hn11_CD45p'
+hn11_pbl@meta.data$orig.ident <- 'hn11_pbl'
+
+#hn12
+hn12_cd45n@meta.data$orig.ident <- 'hn12_cd45n'
+hn12_cd45p@meta.data$orig.ident <- 'hn12_cd45p'
+hn12_pbl@meta.data$orig.ident <- 'hn12_pbl'
+
+#hn13
+hn13_cd45n@meta.data$orig.ident <- 'hn12_cd45n'
+hn13_cd45p@meta.data$orig.ident <- 'hn13_cd45p'
+hn13_pbl@meta.data$orig.ident <- 'hn13_pbl'
+
+#hn14
+hn14_cd45n@meta.data$orig.ident <- 'hn14_cd45n'
+hn14_cd45p@meta.data$orig.ident <- 'hn14_cd45p'
+hn14_pbl@meta.data$orig.ident <- 'hn14_pbl'
+
+#hn15
+hn15_cd45n@meta.data$orig.ident <- 'hn15_cd45n'
+hn15_cd45p@meta.data$orig.ident <- 'hn15_cd45p'
+hn15_pbl@meta.data$orig.ident <- 'hn15_pbl'
+
+#hn16
+hn16_cd45n@meta.data$orig.ident <- 'hn16_cd45n'
+hn16_cd45p@meta.data$orig.ident <- 'hn16_cd45p'
+hn16_pbl@meta.data$orig.ident <- 'hn16_pbl'
+
+#hn17
+hn17_cd45n@meta.data$orig.ident <- 'hn17_cd45n'
+hn17_cd45p@meta.data$orig.ident <- 'hn14_cd45p'
+hn17_pbl@meta.data$orig.ident <- 'hn17_pbl'
+
+#hn18
+hn18_cd45n@meta.data$orig.ident <- 'hn18_cd45n'
+hn18_cd45p@meta.data$orig.ident <- 'hn18_cd45p'
+hn18_pbl@meta.data$orig.ident <- 'hn18_pbl'
+```
+```{r add metadata cell origin}
+#hn01
+hn01_cd45n@meta.data$orig.ident <- 'hn01_cd45n'
+hn01_cd45p@meta.data$orig.ident <- 'hn01_cd45p'
+hn01_pbl@meta.data$orig.ident <- 'hn01_pbl'
+
+#hn02
+hn02_cd45p@meta.data$orig.ident <- 'hn02_cd45p'
+hn02_pbl@meta.data$orig.ident <- 'hn02_pbl'
+
+#hn03
+hn03_cd45p@meta.data$orig.ident <- 'hn03_cd45p'
+hn03_pbl@meta.data$orig.ident <- 'hn03_pbl'
+
+#hn04
+hn04_cd45p@meta.data$orig.ident <- 'hn04_cd45p'
+hn04_pbl@meta.data$orig.ident <- 'hn04_pbl'
+
+#hn05
+hn05_cd45n@meta.data$orig.ident <- 'hn05_cd45n'
+hn05_cd45p@meta.data$orig.ident <- 'hn05_cd45p'
+hn05_pbl@meta.data$orig.ident <- 'hn05_pbl'
+
+#hn06
+hn06_cd45n@meta.data$orig.ident <- 'hn06_cd45n'
+hn06_cd45p@meta.data$orig.ident <- 'hn06_cd45p'
+hn06_pbl@meta.data$orig.ident <- 'hn06_pbl'
+
+#hn07
+hn07_cd45n@meta.data$orig.ident <- 'hn07_cd45n'
+hn07_cd45p@meta.data$orig.ident <- 'hn07_cd45p'
+hn07_pbl@meta.data$orig.ident <- 'hn07_pbl'
+
+#hn08
+hn08_cd45n@meta.data$orig.ident <- 'hn08_cd45n'
+hn08_cd45p@meta.data$orig.ident <- 'hn08_cd45p'
+hn08_pbl@meta.data$orig.ident <- 'hn08_pbl'
+
+#hn09
+hn09_cd45n@meta.data$orig.ident <- 'hn09_cd45n'
+hn09_cd45p@meta.data$orig.ident <- 'hn09_cd45p'
+hn09_pbl@meta.data$orig.ident <- 'hn09_pbl'
+
+#hn10
+hn10_cd45n@meta.data$orig.ident <- 'hn10_cd45n'
+hn10_cd45p@meta.data$orig.ident <- 'hn10_cd45p'
+
+#hn11
+hn11_cd45n@meta.data$orig.ident <- 'hn11_cd45n'
+hn11_cd45p@meta.data$orig.ident <- 'hn11_CD45p'
+hn11_pbl@meta.data$orig.ident <- 'hn11_pbl'
+
+#hn12
+hn12_cd45n@meta.data$orig.ident <- 'hn12_cd45n'
+hn12_cd45p@meta.data$orig.ident <- 'hn12_cd45p'
+hn12_pbl@meta.data$orig.ident <- 'hn12_pbl'
+
+#hn13
+hn13_cd45n@meta.data$orig.ident <- 'hn12_cd45n'
+hn13_cd45p@meta.data$orig.ident <- 'hn13_cd45p'
+hn13_pbl@meta.data$orig.ident <- 'hn13_pbl'
+
+#hn14
+hn14_cd45n@meta.data$orig.ident <- 'hn14_cd45n'
+hn14_cd45p@meta.data$orig.ident <- 'hn14_cd45p'
+hn14_pbl@meta.data$orig.ident <- 'hn14_pbl'
+
+#hn15
+hn15_cd45n@meta.data$orig.ident <- 'hn15_cd45n'
+hn15_cd45p@meta.data$orig.ident <- 'hn15_cd45p'
+hn15_pbl@meta.data$orig.ident <- 'hn15_pbl'
+
+#hn16
+hn16_cd45n@meta.data$orig.ident <- 'hn16_cd45n'
+hn16_cd45p@meta.data$orig.ident <- 'hn16_cd45p'
+hn16_pbl@meta.data$orig.ident <- 'hn16_pbl'
+
+#hn17
+hn17_cd45n@meta.data$orig.ident <- 'hn17_cd45n'
+hn17_cd45p@meta.data$orig.ident <- 'hn14_cd45p'
+hn17_pbl@meta.data$orig.ident <- 'hn17_pbl'
+
+#hn18
+hn18_cd45n@meta.data$orig.ident <- 'hn18_cd45n'
+hn18_cd45p@meta.data$orig.ident <- 'hn18_cd45p'
+hn18_pbl@meta.data$orig.ident <- 'hn18_pbl'
+```
+
+```{r preprocessing individual seurat objects and removing doublets}
+SEU <- hn18_pbl
+
+SEU[["percent.mt"]] <- PercentageFeatureSet(SEU, pattern = "^MT-")
+SEU <- NormalizeData(SEU, normalization.method = "LogNormalize", scale.factor = 10000)
+SEU = FindVariableFeatures(SEU, verbose = F, nfeatures = 2000)
+SEU = ScaleData(SEU, vars.to.regress = c("nFeature_RNA", "percent.mt"), verbose = F)
+SEU = RunPCA(SEU, verbose = F, npcs = 100)
+ElbowPlot(SEU, ndims = 100)
+
+DIMS <- 30
+  
+SEU = RunUMAP(SEU, dims = 1:DIMS, verbose = F)
+sweep.res <- DoubletFinder::paramSweep_v3(SEU) 
+sweep.stats <-DoubletFinder::summarizeSweep(sweep.res, GT = FALSE) 
+bcmvn <- DoubletFinder::find.pK(sweep.stats)
+barplot(bcmvn$BCmetric, names.arg = bcmvn$pK, las=2)
+PCT_DOUBLETS <- as.numeric(as.character(bcmvn$pK[bcmvn$BCmetric == max(bcmvn$BCmetric)])[1])
+nExp <- round(ncol(SEU) * PCT_DOUBLETS)  # expect __% doublets
+SEU <- DoubletFinder::doubletFinder_v3(SEU, pN = 0.25, pK = PCT_DOUBLETS, nExp = nExp, PCs = 1:DIMS)
+SEU@meta.data$doublet <- (SEU@meta.data[,colnames(SEU@meta.data) %like% "DF.classifications"])
+SEU <- subset(SEU, subset = doublet == 'Singlet')
+
+hn18_pbl <- SEU
+
+save(hn01_cd45n, hn01_cd45p, hn01_pbl, hn02_cd45p, hn02_pbl, hn03_cd45p, hn03_pbl, hn04_cd45p, hn04_pbl, hn05_cd45n, hn05_cd45p, hn05_pbl, hn06_cd45n, hn06_cd45p, hn06_pbl, hn07_cd45n, hn07_cd45p, hn07_pbl, hn08_cd45n, hn08_cd45p, hn09_cd45n, hn09_cd45p, hn09_pbl, hn10_cd45n, hn10_cd45p, hn11_cd45n, hn11_cd45p, hn12_cd45n, hn12_cd45p, hn12_pbl, hn13_cd45n, hn13_cd45p, hn13_pbl, hn14_cd45n, hn14_cd45p, hn14_pbl, hn15_cd45n, hn15_cd45p, hn15_pbl, hn16_cd45n, hn16_cd45p, hn16_pbl, hn17_cd45n, hn17_cd45p, hn18_cd45n, hn17_pbl, hn18_cd45p, hn18_pbl, file = '/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/R_objects/all_individual_seurat_objs_plusmetadata_singletsonly.RData')
+```
+
+```{r ALL merge seu objects into one}
+load('/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/R_objects/all_individual_seurat_objs_plusmetadata_singletsonly.RData')
+
+kurten <- SEU
+
+SEU <- merge(hn01_cd45n, y = c(hn01_cd45n, hn01_cd45p, hn01_pbl, hn02_cd45p, hn02_pbl, hn03_cd45p, hn03_pbl, hn04_cd45p, hn04_pbl, hn05_cd45n, hn05_cd45p, hn05_pbl, hn06_cd45n, hn06_cd45p, hn06_pbl, hn07_cd45n, hn07_cd45p, hn07_pbl, hn08_cd45n, hn08_cd45p, hn09_cd45n, hn09_cd45p, hn09_pbl, hn10_cd45n, hn10_cd45p, hn11_cd45n, hn11_cd45p, hn12_cd45n, hn12_cd45p, hn12_pbl, hn13_cd45n, hn13_cd45p, hn13_pbl, hn14_cd45n, hn14_cd45p, hn14_pbl, hn15_cd45n, hn15_cd45p, hn15_pbl, hn16_cd45n, hn16_cd45p, hn16_pbl, hn17_cd45n, hn17_cd45p, hn18_cd45n, hn17_pbl, hn18_cd45p, hn18_pbl))
+
+save(kurten, file = '/Volumes/hdlab/Projects/HNC_SPORE/Kurten_reanalysis/R_objects/kurten_seuratobject.RData')
+```
+
+```{r preprocessing combined seurat object}
+library(Seurat)
+kurten[["percent.mt"]] <- PercentageFeatureSet(kurten, pattern = "^MT-")
+
+VlnPlot(kurten, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+
+plot1 <- FeatureScatter(kurten, feature1 = "nCount_RNA", feature2 = "percent.mt")
+plot2 <- FeatureScatter(kurten, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+plot1 + plot2
+
+kurten <- subset(kurten, subset = nFeature_RNA > 200 & nFeature_RNA < 7000 & percent.mt < 20)
+
+kurten <- NormalizeData(kurten, normalization.method = "LogNormalize", scale.factor = 10000)
+
+kurten <- FindVariableFeatures(kurten, selection.method = "vst", nfeatures = 2000)
+
+# Identify the 10 most highly variable genes
+top10 <- head(VariableFeatures(kurten), 10)
+
+kurten <- ScaleData(kurten, features = VariableFeatures(kurten), vars.to.regress = c('percent.mt', 'nFeature_RNA'))
+
+kurten <- RunPCA(kurten, features = VariableFeatures(object = kurten), npcs = 100)
+
+ElbowPlot(kurten, ndims = 100)
+
+kurten <- FindNeighbors(kurten, dims = 1:50)
+kurten <- FindClusters(kurten, resolution = 1)
+kurten <- RunUMAP(kurten, dims = 1:50)
+DimPlot(kurten, reduction = "umap", group.by = 'orig.ident')
+
+kurten <- harmony::RunHarmony(kurten, "orig.ident")
+kurten <- RunUMAP(kurten, reduction = "harmony", dims = 1:50)
+DimPlot(kurten, reduction = 'umap', group.by = 'orig.ident')
+DimPlot(kurten, label = TRUE, label.box = TRUE)
+```
+```{r cluster identification}
+#identifying T/NK cells
+VlnPlot(kurten, features = c('CD4', 'CD8B', 'CD3D', 'KLRD1', 'PRF1', 'NKG7'), pt.size = 0)
+
+kurten@meta.data$global.cluster <- kurten@active.ident
+kurten@meta.data$global.cluster <- as.character(kurten@meta.data$global.cluster)
+
+kurten@meta.data$global.cluster[kurten@meta.data$global.cluster == '1'] <- 'T/NK cells'
+kurten@meta.data$global.cluster[kurten@meta.data$global.cluster == '2'] <- 'T/NK cells'
+kurten@meta.data$global.cluster[kurten@meta.data$global.cluster == '3'] <- 'T/NK cells'
+kurten@meta.data$global.cluster[kurten@meta.data$global.cluster == '5'] <- 'T/NK cells'
+kurten@meta.data$global.cluster[kurten@meta.data$global.cluster == '6'] <- 'T/NK cells'
+kurten@meta.data$global.cluster[kurten@meta.data$global.cluster == '7'] <- 'T/NK cells'
+kurten@meta.data$global.cluster[kurten@meta.data$global.cluster == '8'] <- 'T/NK cells'
+kurten@meta.data$global.cluster[kurten@meta.data$global.cluster == '9'] <- 'T/NK cells'
+kurten@meta.data$global.cluster[kurten@meta.data$global.cluster == '17'] <- 'T/NK cells'
+kurten@meta.data$global.cluster[kurten@meta.data$global.cluster == '23'] <- 'T/NK cells'
+kurten@meta.data$global.cluster[kurten@meta.data$global.cluster == '21'] <- 'T/NK cells'
+kurten@meta.data$global.cluster[kurten@meta.data$global.cluster == '25'] <- 'T/NK cells'
+kurten@meta.data$global.cluster[kurten@meta.data$global.cluster == '26'] <- 'T/NK cells'
+
+
+#identifying B cells
+VlnPlot(kurten, features = c('CD79A', 'CD79B'), pt.size = 0)
+
+kurten@meta.data$global.cluster[kurten@meta.data$global.cluster == '4'] <- 'B cells'
+kurten@meta.data$global.cluster[kurten@meta.data$global.cluster == '22'] <- 'B cells'
+kurten@meta.data$global.cluster[kurten@meta.data$global.cluster == '24'] <- 'B cells'
+
+#identifying endothelial cell clusters
+VlnPlot(kurten, features = c('CLDN5', 'CDH5', 'RAMP2'), pt.size = 0)
+
+kurten@meta.data$global.cluster[kurten@meta.data$global.cluster == '12'] <- 'Endothelial cells'
+kurten@meta.data$global.cluster[kurten@meta.data$global.cluster == '14'] <- 'Endothelial cells'
+
+#identifying epithelial cell markers
+VlnPlot(kurten, features = c('KRT14', 'KRT17', 'EPCAM', 'CD68'), pt.size = 0)
+
+kurten@meta.data$global.cluster[kurten@meta.data$global.cluster == '11'] <- 'Epithelial cells'
+kurten@meta.data$global.cluster[kurten@meta.data$global.cluster == '16'] <- 'Epithelial cells'
+kurten@meta.data$global.cluster[kurten@meta.data$global.cluster == '20'] <- 'Epithelial cells'
+kurten@meta.data$global.cluster[kurten@meta.data$global.cluster == '30'] <- 'Epithelial cells'
+kurten@meta.data$global.cluster[kurten@meta.data$global.cluster == '31'] <- 'Epithelial cells'
+kurten@meta.data$global.cluster[kurten@meta.data$global.cluster == '35'] <- 'Epithelial cells'
+kurten@meta.data$global.cluster[kurten@meta.data$global.cluster == '15'] <- 'Epithelial cells'
+kurten@meta.data$global.cluster[kurten@meta.data$global.cluster == '18'] <- 'Epithelial cells'
+kurten@meta.data$global.cluster[kurten@meta.data$global.cluster == '29'] <- 'Epithelial cells'
+kurten@meta.data$global.cluster[kurten@meta.data$global.cluster == '28'] <- 'Epithelial cells'
+
+
+#identifying fibroblasts
+VlnPlot(kurten, features = c('COL1A1', 'DCN', 'COL1A2'), pt.size = 0)
+kurten@meta.data$global.cluster[kurten@meta.data$global.cluster == '10'] <- 'Fibroblasts'
+
+#identifying pericytes
+VlnPlot(kurten, features = c('RGS5'), pt.size = 0)
+kurten@meta.data$global.cluster[kurten@meta.data$global.cluster == '32'] <- 'Pericytes'
+
+#identifying monocyte/macrophage markers
+VlnPlot(kurten, features = c('MS4A7', 'CD68', 'CD14', 'LYZ'), pt.size = 0)
+
+kurten@meta.data$global.cluster[kurten@meta.data$global.cluster == '0'] <- 'Mon/Mac/DC'
+kurten@meta.data$global.cluster[kurten@meta.data$global.cluster == '13'] <- 'Mon/Mac/DC'
+kurten@meta.data$global.cluster[kurten@meta.data$global.cluster == '19'] <- 'Mon/Mac/DC'
+kurten@meta.data$global.cluster[kurten@meta.data$global.cluster == '27'] <- 'Mon/Mac/DC'
+kurten@meta.data$global.cluster[kurten@meta.data$global.cluster == '33'] <- 'Mon/Mac/DC'
+
+#identifying dendritic cell populations
+VlnPlot(kurten, features = c('CD83', 'CD86', 'ITGAM', 'ENPP3', 'LY75'), pt.size = 0)
+
+kurten@meta.data$global.cluster[kurten@meta.data$global.cluster == '37'] <- 'Mon/Mac/DC'
+
+#identifying mast cell populations
+VlnPlot(kurten, features = c('TPSB2', 'TPSAB1'), pt.size = 0)
+kurten@meta.data$global.cluster[kurten@meta.data$global.cluster == '36'] <- 'Mast cells'
+
+DimPlot(kurten, group.by = 'global.cluster', label = TRUE, label.box = TRUE)
+
+#de_genes <- FindMarkers(kurten, group.by = 'global.cluster', ident.1 = "16", ident.2 = c('25', 'Epithelial cells', 'T/NK cells'), only.pos = TRUE, min.pct = 0.75)
+#de_genes_list <- as.character(rownames(de_genes))
+
+#DotPlot(kurten, features = de_genes_list, col.min = 0, group.by = 'global.cluster')
+
+#identifying pDC populations
+VlnPlot(kurten, features = c('IL3RA', 'CD4', 'CD68', 'LYZ'), pt.size = 0)
+
+kurten@meta.data$global.cluster[kurten@meta.data$global.cluster == '34'] <- 'pDC'
+```
+
+```{r extracting myeloid cells for transfer to cillo object}
+#loading in the Cillo data
+load('/Volumes/hdlab/Projects/HNC_SPORE/Seurat_Objs/HNC_human/hnc_all_annot_2021-09-20.rda')
+
+kurten_mini_myeloid <- subset(kurten, subset = global.cluster == c('Mon/Mac/DC', 'pDC'))
+DimPlot(kurten_mini_myeloid)
+```
+```{r seurat transfer learning of myeloid cells from the kurten to cillo object}
+library(SeuratData)
+anchors <- FindTransferAnchors(reference = hnc, query = kurten_mini_myeloid)
+
+predictions <- TransferData(anchorset = anchors, refdata = hnc@meta.data$global.cluster4)
+kurten_mini_myeloid <- AddMetaData(object = kurten_mini_myeloid, metadata = predictions)
+DimPlot(kurten_mini_myeloid, group.by = 'predicted.id')
+```
+
+

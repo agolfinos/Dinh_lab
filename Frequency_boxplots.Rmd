@@ -1,0 +1,513 @@
+---
+title: "Frequency_boxplots"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Import
+
+```{r}
+library(DescTools)
+library(ggplot2)
+library(Seurat)
+```
+
+# Functions
+
+```{r FUNCTIONS (get_freqs, freq_boxplot)}
+#############################################################################################################################
+get_freqs <- function(immune.combined, cluster_res) {
+  
+  Idents(immune.combined) <- cluster_res
+  new.ident <- sort(unique(Idents(immune.combined)))
+  samples <- unique(immune.combined@meta.data$orig.ident)
+  tmp <- match(immune.combined$orig.ident, samples)
+  sample_ind <- unique(tmp)
+  ids <- Idents(immune.combined)
+  tmp_v <- matrix(0, nrow = length(samples), ncol = length(new.ident))
+  rownames(tmp_v) <- samples
+  total_in_sample <- rep(0, length(samples))
+  tmp <- immune.combined$orig.ident
+  tmp <- plyr::count(tmp)
+  total_in_sample = tmp$freq
+  names(total_in_sample) <- tmp$x
+  total_in_sample <- total_in_sample[match(samples, names(total_in_sample))]
+  for (i in 1:length(new.ident)) {
+    tmp <- ids[which(ids == new.ident[i])]
+    tmp <- immune.combined$orig.ident[match(names(tmp), rownames(immune.combined@meta.data))]
+    tmp <- plyr::count(tmp)
+    for (j in 1:nrow(tmp)) {
+      ind <- which(rownames(tmp_v) == tmp$x[j])
+      tmp_v[ind,i] <- tmp$freq[j]#/total_in_sample[which(names(total_in_sample) == samples[ind])]
+    }
+  }
+  colnames(tmp_v) <- new.ident
+  ind <- order(colnames(tmp_v))
+  tmp_v
+}
+##################################################################
+freq_boxplot <- function(SEU, celltype, cellstoremove, metadata){
+
+  cellid <- paste('%', celltype, '%', sep = '')
+  
+  myeloid_id <- as.character(unique(Idents(SEU))[unique(Idents(SEU)) %like any% c(cellid)])
+  
+  if (cellstoremove != 'None'){
+    myeloid_id <- myeloid_id[!myeloid_id %like% cellstoremove]
+  }
+
+  t <- get_freqs(subset(SEU, ident = myeloid_id), metadata)
+  t2 <- t
+  for (i in 1:nrow(t2)) {
+    t2[i,] = t2[i,]/sum(t2[i,])
+  }
+  
+  t2 <- as.matrix(t2)
+
+  meta <- SEU@meta.data[,c('meta', 'Stage')]
+  rownames(meta) <- NULL
+  meta <- unique(meta)
+  df <- NULL
+  for (i in 1:nrow(t2)) {
+    for (j in 1:ncol(t2)) {
+      df <- rbind(df, c(rownames(t2)[i], meta$Stage[which(meta$orig.ident == rownames(t2)[i])], colnames(t2)[j], as.numeric(t2[i,j])))
+    }
+  }
+  colnames(df) <- c('Sample', 'Group', 'Cluster', 'Freqs')
+  df <- as.data.frame(df)
+  df$Group <- as.character(df$Group)
+  df$Freqs <- as.numeric(as.character(df$Freqs))
+  #library(ggplot2)
+  #ggplot(df) +
+    #geom_boxplot(aes(x = Group, y = Freqs, color = Group, fill = Group), position = position_dodge(), alpha = 0.5, outlier.color = NA) + geom_point(aes(x = Group, y = Freqs, color = Group), alpha = 0.8, position = position_jitterdodge()) + facet_wrap(~ Cluster, scales = 'free', nrow = 2) + theme_bw() + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(), strip.text = element_text(size = 12)) + scale_shape_manual(values = 1:5) #needs to be equal to the number of samples that you have
+  
+  return(df)
+
+}
+############################################################################
+```
+
+# Luoma
+## Stage_Path Response
+```{r}
+SEU <- luoma[,luoma$predicted.id %like% c('%Mac%', '%Mon%', '%DC%')]
+SEU$orig.ident <- paste(SEU$Patient_ID, SEU$Stage)
+SEU$meta <- paste(SEU$Patient_ID, SEU$Stage)
+SEU$treatment_path_response <- paste(SEU$Stage, SEU$Path_response)
+metadata <- 'predicted.id'
+
+get_freqs <- function(immune.combined, cluster_res) {
+  Idents(immune.combined) <- cluster_res
+  new.ident <- sort(unique(Idents(immune.combined)))
+  samples <- unique(immune.combined@meta.data$orig.ident)
+  tmp <- match(immune.combined$orig.ident, samples)
+  sample_ind <- unique(tmp)
+  ids <- Idents(immune.combined)
+  tmp_v <- matrix(0, nrow = length(samples), ncol = length(new.ident))
+  rownames(tmp_v) <- samples
+  total_in_sample <- rep(0, length(samples))
+  tmp <- immune.combined$orig.ident
+  tmp <- plyr::count(tmp)
+  total_in_sample = tmp$freq
+  names(total_in_sample) <- tmp$x
+  total_in_sample <- total_in_sample[match(samples, names(total_in_sample))]
+  for (i in 1:length(new.ident)) {
+    tmp <- ids[which(ids == new.ident[i])]
+    tmp <- immune.combined$orig.ident[match(names(tmp), rownames(immune.combined@meta.data))]
+    tmp <- plyr::count(tmp)
+    for (j in 1:nrow(tmp)) {
+      ind <- which(rownames(tmp_v) == tmp$x[j])
+      tmp_v[ind,i] <- tmp$freq[j]
+    }
+  }
+  colnames(tmp_v) <- new.ident
+  ind <- order(colnames(tmp_v))
+  tmp_v
+}
+
+t <- get_freqs(SEU, metadata)
+t2 <- t
+for (i in 1:nrow(t2)) {
+  t2[i,] = t2[i,]/sum(t2[i,])
+}
+t2 <- as.matrix(t2)
+
+meta <- SEU@meta.data[,c('meta', 'treatment_path_response')]
+rownames(meta) <- NULL
+meta <- unique(meta)
+df <- NULL
+for (i in 1:nrow(t2)) {
+  for (j in 1:ncol(t2)) {
+    df <- rbind(df, c(rownames(t2)[i], meta$treatment_path_response[which(meta$meta == rownames(t2)[i])], colnames(t2)[j], as.numeric(t2[i,j])))
+  }
+}
+colnames(df) <- c('Sample', 'Group', 'Cluster', 'Freqs')
+df <- as.data.frame(df)
+df$paired <- sapply(strsplit(df$Sample," "), `[`, 1)
+
+df$Group <- as.character(df$Group)
+df$Freqs <- as.numeric(as.character(df$Freqs))
+df$Group <- factor(df$Group, levels = c('Pre-Tx Low', 'Post-Tx Low', 'Pre-Tx Medium', 'Post-Tx Medium', 'Pre-Tx High','Post-Tx High'))
+
+ggplot(df) + geom_boxplot(aes(x = Group, y = Freqs, color = Group, fill = Group), position = position_dodge(), alpha = 0.5, outlier.color = NA) + geom_point(aes(x = Group, y = Freqs, color = Group), alpha = 0.8, position = position_jitterdodge()) + geom_line(aes(x = Group, y = Freqs, group = paired), alpha = 0.3) + facet_wrap(~ Cluster, scales = 'free', nrow = 2) + theme_bw() + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(), strip.text = element_text(size = 12)) + scale_shape_manual(values = 1:63) 
+ggsave('/Volumes/hqdinh2/Projects/Public_Data/Luoma_HNC/Luoma_boxplot_myeloid_stage_pathresponse.png', width = 14, height = 8)
+```
+
+## Path response
+```{r}
+SEU <- luoma[,luoma$predicted.id %like% c('%Mac%', '%Mon%', '%DC%')]
+SEU$orig.ident <- paste(SEU$Patient_ID, SEU$Stage)
+SEU$meta <- paste(SEU$Patient_ID, SEU$Stage)
+#SEU$treatment_path_response <- paste(SEU$Stage, SEU$Path_response)
+metadata <- 'predicted.id'
+
+get_freqs <- function(immune.combined, cluster_res) {
+  Idents(immune.combined) <- cluster_res
+  new.ident <- sort(unique(Idents(immune.combined)))
+  samples <- unique(immune.combined@meta.data$orig.ident)
+  tmp <- match(immune.combined$orig.ident, samples)
+  sample_ind <- unique(tmp)
+  ids <- Idents(immune.combined)
+  tmp_v <- matrix(0, nrow = length(samples), ncol = length(new.ident))
+  rownames(tmp_v) <- samples
+  total_in_sample <- rep(0, length(samples))
+  tmp <- immune.combined$orig.ident
+  tmp <- plyr::count(tmp)
+  total_in_sample = tmp$freq
+  names(total_in_sample) <- tmp$x
+  total_in_sample <- total_in_sample[match(samples, names(total_in_sample))]
+  for (i in 1:length(new.ident)) {
+    tmp <- ids[which(ids == new.ident[i])]
+    tmp <- immune.combined$orig.ident[match(names(tmp), rownames(immune.combined@meta.data))]
+    tmp <- plyr::count(tmp)
+    for (j in 1:nrow(tmp)) {
+      ind <- which(rownames(tmp_v) == tmp$x[j])
+      tmp_v[ind,i] <- tmp$freq[j]
+    }
+  }
+  colnames(tmp_v) <- new.ident
+  ind <- order(colnames(tmp_v))
+  tmp_v
+}
+
+t <- get_freqs(SEU, metadata)
+t2 <- t
+for (i in 1:nrow(t2)) {
+  t2[i,] = t2[i,]/sum(t2[i,])
+}
+t2 <- as.matrix(t2)
+
+meta <- SEU@meta.data[,c('meta', 'Path_response')]
+rownames(meta) <- NULL
+meta <- unique(meta)
+df <- NULL
+for (i in 1:nrow(t2)) {
+  for (j in 1:ncol(t2)) {
+    df <- rbind(df, c(rownames(t2)[i], meta$Path_response[which(meta$meta == rownames(t2)[i])], colnames(t2)[j], as.numeric(t2[i,j])))
+  }
+}
+colnames(df) <- c('Sample', 'Group', 'Cluster', 'Freqs')
+df <- as.data.frame(df)
+df$paired <- sapply(strsplit(df$Sample," "), `[`, 1)
+
+df$Group <- as.character(df$Group)
+df$Group[df$Group %like% 'Medium'] <- 'Medium/High'
+df$Group[df$Group %like% 'High'] <- 'Medium/High'
+df$Freqs <- as.numeric(as.character(df$Freqs))
+df$Group <- factor(df$Group, levels = c('Low', 'Medium/High'))
+
+ggplot(df) + geom_boxplot(aes(x = Group, y = Freqs, color = Group, fill = Group), position = position_dodge(), alpha = 0.5, outlier.color = NA) + geom_point(aes(x = Group, y = Freqs, color = Group), alpha = 0.8, position = position_jitterdodge()) + facet_wrap(~ Cluster, scales = 'free', nrow = 2) + theme_bw() + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(), strip.text = element_text(size = 12)) + scale_shape_manual(values = 1:63) 
+ggsave('/Volumes/hqdinh2/Projects/Public_Data/Luoma_HNC/Luoma_boxplot_myeloid_pathresponse.png', width = 14, height = 8)
+```
+### Wilcox test
+```{r}
+wilcox <- data.frame(Cluster=character(), pval = numeric())
+for (x in unique(df$Cluster)){
+  df2 <- df[df$Cluster == x,]
+  l <- df2[df2$Group == 'Low', 'Freqs']
+  h <- df2[df2$Group %like% c('%High%'), 'Freqs']
+  wc <- wilcox.test(l, h)
+  p <- wc$p.value
+  row <- c(x, p)
+  wilcox <- rbind(wilcox, row)
+}
+write.csv(wilcox, file = '/Volumes/hqdinh2/Projects/Public_Data/Luoma_HNC/Luoma_boxplot_myeloid_pathresponse.csv')
+```
+
+## Stage
+
+```{r}
+SEU <- luoma[,luoma$predicted.id %like% c('%Mac%', '%Mon%', '%DC%')]
+SEU$orig.ident <- paste(SEU$Patient_ID, SEU$Stage)
+SEU$meta <- paste(SEU$Patient_ID, SEU$Stage)
+metadata <- 'predicted.id'
+
+get_freqs <- function(immune.combined, cluster_res) {
+  Idents(immune.combined) <- cluster_res
+  new.ident <- sort(unique(Idents(immune.combined)))
+  samples <- unique(immune.combined@meta.data$orig.ident)
+  tmp <- match(immune.combined$orig.ident, samples)
+  sample_ind <- unique(tmp)
+  ids <- Idents(immune.combined)
+  tmp_v <- matrix(0, nrow = length(samples), ncol = length(new.ident))
+  rownames(tmp_v) <- samples
+  total_in_sample <- rep(0, length(samples))
+  tmp <- immune.combined$orig.ident
+  tmp <- plyr::count(tmp)
+  total_in_sample = tmp$freq
+  names(total_in_sample) <- tmp$x
+  total_in_sample <- total_in_sample[match(samples, names(total_in_sample))]
+  for (i in 1:length(new.ident)) {
+    tmp <- ids[which(ids == new.ident[i])]
+    tmp <- immune.combined$orig.ident[match(names(tmp), rownames(immune.combined@meta.data))]
+    tmp <- plyr::count(tmp)
+    for (j in 1:nrow(tmp)) {
+      ind <- which(rownames(tmp_v) == tmp$x[j])
+      tmp_v[ind,i] <- tmp$freq[j]
+    }
+  }
+  colnames(tmp_v) <- new.ident
+  ind <- order(colnames(tmp_v))
+  tmp_v
+}
+
+t <- get_freqs(SEU, metadata)
+t2 <- t
+for (i in 1:nrow(t2)) {
+  t2[i,] = t2[i,]/sum(t2[i,])
+}
+t2 <- as.matrix(t2)
+
+meta <- SEU@meta.data[,c('meta', 'Stage')]
+rownames(meta) <- NULL
+meta <- unique(meta)
+df <- NULL
+for (i in 1:nrow(t2)) {
+  for (j in 1:ncol(t2)) {
+    df <- rbind(df, c(rownames(t2)[i], meta$Stage[which(meta$meta == rownames(t2)[i])], colnames(t2)[j], as.numeric(t2[i,j])))
+  }
+}
+colnames(df) <- c('Sample', 'Group', 'Cluster', 'Freqs')
+df <- as.data.frame(df)
+df$paired <- sapply(strsplit(df$Sample," "), `[`, 1)
+
+df$Group <- as.character(df$Group)
+df$Freqs <- as.numeric(as.character(df$Freqs))
+df$Group <- factor(df$Group, levels = c('Pre-Tx', 'Post-Tx'))
+
+ggplot(df) + geom_boxplot(aes(x = Group, y = Freqs, color = Group, fill = Group), position = position_dodge(), alpha = 0.5, outlier.color = NA) + geom_point(aes(x = Group, y = Freqs, color = Group), alpha = 0.8, position = position_jitterdodge()) + facet_wrap(~ Cluster, scales = 'free', nrow = 2) + theme_bw() + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(), strip.text = element_text(size = 12)) + scale_shape_manual(values = 1:63) 
+ggsave('/Volumes/hqdinh2/Projects/Public_Data/Luoma_HNC/Luoma_boxplot_myeloid_pathresponse.png', width = 14, height = 8)
+```
+
+### Wilcox test
+```{r}
+wilcox <- data.frame(Cluster=character(), pval = numeric())
+for (x in unique(df$Cluster)){
+  df2 <- df[df$Cluster == x,]
+  l <- df2[df2$Group == 'Pre-Tx', 'Freqs']
+  h <- df2[df2$Group %like% c('%Post-Tx%'), 'Freqs']
+  wc <- wilcox.test(l, h)
+  p <- wc$p.value
+  row <- c(x, p)
+  wilcox <- rbind(wilcox, row)
+}
+write.csv(wilcox, file = '/Volumes/hqdinh2/Projects/Public_Data/Luoma_HNC/Luoma_boxplot_myeloid_stage.csv')
+```
+
+# Freq barplots (human)
+
+```{r compute frequencies INDIVIDUAL VALUES}
+myeloid_id <- as.character(unique(Idents(seurat))[unique(Idents(seurat)) %like any% c('%Mon%', '%Mac%', '%DC%')])
+myeloid_id <- as.character(unique(Idents(seurat))[unique(Idents(seurat)) %like any% c('%N0%', '%N1%', '%N2%', '%N3%')])
+myeloid_ids <- as.character(unique(Idents(SEU))[unique(Idents(SEU)) %like any% c('%Mac')])
+
+t <- get_freqs(SEU, 'global.cluster4')
+t2 <- t
+for (i in 1:nrow(t2)) {
+  t2[i,] = t2[i,]/sum(t2[i,])
+}
+  
+t2 <- as.matrix(t2)
+barplot(t(t2))
+meta <- hnc@meta.data[,c('orig.ident', 'hpv_status', 'global.cluster4')]
+rownames(meta) <- NULL
+meta <- unique(meta)
+df <- NULL
+for (i in 1:nrow(t2)) {
+  for (j in 1:ncol(t2)) {
+    df <- rbind(df, c(rownames(t2)[i], meta$tissue[which(meta$orig.ident == rownames(t2)[i])], colnames(t2)[j], as.numeric(t2[i,j])))
+  }
+}
+colnames(df) <- c('Sample', 'Group', 'Cluster', 'Freqs')
+df <- as.data.frame(df)
+df$Group <- as.character(df$Group)
+df$Freqs <- as.numeric(as.character(df$Freqs))
+ggplot(df) +
+  geom_boxplot(aes(x = Group, y = Freqs, color = Group, fill = Group), position = position_dodge(), alpha = 0.5, outlier.color = NA) + geom_point(aes(x = Group, y = Freqs, color = Group), alpha = 0.8, position = position_jitterdodge()) + facet_wrap(~ Cluster, scales = 'free', nrow = 2) + theme_bw() + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(), strip.text = element_text(size = 12)) + scale_shape_manual(values = 1:63) #needs to be equal to the number of samples that you have
+
+ggsave('/Volumes/hdlab/Projects/HNC_SPORE/Wangetal2021/moc2_monmacdc_boxplot.png', width = 14, height = 7)
+
+##################this is for human data########################################################################'
+
+SEU <- luoma
+
+df <- freq_boxplot(SEU, 'Mac', cellstoremove = 'None', metadata ='predicted.id')
+df <- as.data.frame(df)
+ggplot(df) +
+    geom_boxplot(aes(x = Group, y = Freqs, color = Group, fill = Group), position = position_dodge(), alpha = 0.5, outlier.color = NA) + geom_point(aes(x = Group, y = Freqs, color = Group), alpha = 0.8, position = position_jitterdodge()) + facet_wrap(~ Cluster, scales = 'free', nrow = 2) + theme_bw() + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(), strip.text = element_text(size = 12)) + scale_shape_manual(values = 1:5) #needs to be equal to the number of samples that you have
+ggsave('/Volumes/hdlab/Projects/HNC_SPORE/Golfinosetal2022/split_mregdcs_cillo_hnc_myeloidcellboxplot_allTILmyeloid_OUTOFALLCD45+.png', width = 8, height = 12)
+```
+
+
+
+# Freq barplots (human)
+
+```{r compute frequencies INDIVIDUAL VALUES}
+myeloid_id <- as.character(unique(Idents(seurat))[unique(Idents(seurat)) %like any% c('%Mon%', '%Mac%', '%DC%')])
+myeloid_id <- as.character(unique(Idents(seurat))[unique(Idents(seurat)) %like any% c('%N0%', '%N1%', '%N2%', '%N3%')])
+myeloid_ids <- as.character(unique(Idents(SEU))[unique(Idents(SEU)) %like any% c('%Mac')])
+
+t <- get_freqs(SEU, 'global.cluster4')
+t2 <- t
+for (i in 1:nrow(t2)) {
+  t2[i,] = t2[i,]/sum(t2[i,])
+}
+  
+t2 <- as.matrix(t2)
+barplot(t(t2))
+meta <- hnc@meta.data[,c('orig.ident', 'hpv_status', 'global.cluster4')]
+rownames(meta) <- NULL
+meta <- unique(meta)
+df <- NULL
+for (i in 1:nrow(t2)) {
+  for (j in 1:ncol(t2)) {
+    df <- rbind(df, c(rownames(t2)[i], meta$tissue[which(meta$orig.ident == rownames(t2)[i])], colnames(t2)[j], as.numeric(t2[i,j])))
+  }
+}
+colnames(df) <- c('Sample', 'Group', 'Cluster', 'Freqs')
+df <- as.data.frame(df)
+df$Group <- as.character(df$Group)
+df$Freqs <- as.numeric(as.character(df$Freqs))
+ggplot(df) +
+  geom_boxplot(aes(x = Group, y = Freqs, color = Group, fill = Group), position = position_dodge(), alpha = 0.5, outlier.color = NA) + geom_point(aes(x = Group, y = Freqs, color = Group), alpha = 0.8, position = position_jitterdodge()) + facet_wrap(~ Cluster, scales = 'free', nrow = 2) + theme_bw() + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(), strip.text = element_text(size = 12)) + scale_shape_manual(values = 1:63) #needs to be equal to the number of samples that you have
+
+ggsave('/Volumes/hdlab/Projects/HNC_SPORE/Wangetal2021/moc2_monmacdc_boxplot.png', width = 14, height = 7)
+
+##################this is for human data########################################################################'
+
+SEU <- luoma
+
+df <- freq_boxplot(SEU, 'Mac', cellstoremove = 'None', metadata ='predicted.id')
+df <- as.data.frame(df)
+ggplot(df) +
+    geom_boxplot(aes(x = Group, y = Freqs, color = Group, fill = Group), position = position_dodge(), alpha = 0.5, outlier.color = NA) + geom_point(aes(x = Group, y = Freqs, color = Group), alpha = 0.8, position = position_jitterdodge()) + facet_wrap(~ Cluster, scales = 'free', nrow = 2) + theme_bw() + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(), strip.text = element_text(size = 12)) + scale_shape_manual(values = 1:5) #needs to be equal to the number of samples that you have
+ggsave('/Volumes/hdlab/Projects/HNC_SPORE/Golfinosetal2022/split_mregdcs_cillo_hnc_myeloidcellboxplot_allTILmyeloid_OUTOFALLCD45+.png', width = 8, height = 12)
+  
+```
+
+# Freq barplots (mouse)
+
+```{r}
+#t <- get_freqs(subset(seurat, ident = myeloid_id), 'global.cluster2')
+t <- get_freqs(seurat, 'global.cluster2')
+t2 <- t
+for (i in 1:nrow(t2)) {
+  t2[i,] = t2[i,]/sum(t2[i,])
+}
+  
+t2 <- as.matrix(t2)
+barplot(t(t2))
+meta <- seurat@meta.data[,c('orig.ident', 'tissue')]
+rownames(meta) <- NULL
+meta <- unique(meta)
+df <- NULL
+for (i in 1:nrow(t2)) {
+  for (j in 1:ncol(t2)) {
+    df <- rbind(df, c(rownames(t2)[i], meta$tissue[which(meta$orig.ident == rownames(t2)[i])], colnames(t2)[j], as.numeric(t2[i,j])))
+  }
+}
+colnames(df) <- c('Sample', 'Group', 'Cluster', 'Freqs')
+df <- as.data.frame(df)
+df$Group <- as.character(df$Group)
+df$Freqs <- as.numeric(as.character(df$Freqs))
+
+#uncomment this if you want to do it out of all CD45+ cells
+df <- df[df$Cluster %in% myeloid_id,]
+
+
+ggplot(df) + geom_boxplot(aes(x = Group, y = Freqs, color = Group, fill = Group), position = position_dodge(), alpha = 0.5, outlier.color = NA) + geom_point(aes(x = Group, y = Freqs, color = Group), alpha = 0.8, position = position_jitterdodge()) + facet_wrap(~ Cluster, scales = 'free', nrow = 2) + theme_bw() + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(), strip.text = element_text(size = 12)) + scale_shape_manual(values = 1:63) #needs to be equal to the number of samples that you have
+
+ggsave('/Volumes/hdlab/Projects/HNC_SPORE/Wangetal2021/moc2_monmacdc_boxplot.png', width = 14, height = 7)
+#ggsave('/Users/agolfinos/Desktop/moc2_neutrophil_boxplot.png', width = 5, height = 7)
+```
+
+# Mon to Mac ratio
+
+```{r mon to mac ratio}
+SEU <- subset(hnc, subset = tissue == 'TIL')
+hnc$patient_hpvstatus <- paste(hnc$orig.ident, hnc$hpv_status, sep = '_')
+
+test <- table(SEU$patient_hpvstatus, SEU$global.cluster4)
+test <- as.data.frame.matrix(test)
+
+mons <- test[,stringr::str_detect(colnames(test), "Mon")]
+macs <- test[,stringr::str_detect(colnames(test), 'Mac')]
+mons$mon_sum <- rowSums(mons)
+macs$mac_sum <- rowSums(macs)
+summary <- as.data.frame(mons$mon_sum/macs$mac_sum)
+summary$id <- rownames(mons)
+summary <- tidyr::separate(data = summary, col = id, into = c("orig.ident", "hpv_status"), sep = "_")
+summary$freqs <- summary$`mons$mon_sum/macs$mac_sum`
+summary$`mons$mon_sum/macs$mac_sum` <- NULL
+ggplot(summary) +
+    geom_boxplot(aes(x = hpv_status, y = freqs, color = hpv_status, fill = hpv_status), position = position_dodge(), alpha = 0.5, outlier.color = NA) + geom_point(aes(x = hpv_status, y = freqs, color = hpv_status), alpha = 0.8, position = position_jitterdodge()) + theme_bw() + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(), strip.text = element_text(size = 12)) + scale_shape_manual(values = 1:63) #needs to be equal to the number of samples that you have
+ggsave('/Users/agolfinos/Desktop/hnc_montomacratio_boxplot.png', width = 6, height = 12)
+
+df <- summary
+df1 <- df[df$hpv_status %in% 'HPV+', ]
+df2 <- df[df$hpv_status %in% 'HPV-',]
+temp1 <- df1[['freqs']]
+temp2 <- df2[['freqs']]
+test <- wilcox.test(temp1, temp2, alternative = "two.sided", exact = TRUE)
+pval <- test$p.value
+
+write.csv(comparison, file = '/Users/agolfinos/Desktop/hnctil_mac_comparison_pvals.csv')
+```
+
+```{r Wilcoxan test of each cluster mouse}
+df_moc2 <- df[df$Group %in% 'MOC2', ]
+df_k17ko <- df[df$Group %in% 'K17KOMOC2',]
+
+comparison <- list()
+for (x in unique(df$Cluster)) {
+  temp_moc2 <- df_moc2[df_moc2[,3]==x,4]
+  temp_k17ko <- df_k17ko[df_k17ko[,3]==x,4]
+  test <- wilcox.test(temp_moc2, temp_k17ko, alternative = "two.sided", exact = TRUE)
+  pval <- test$p.value
+  comparison[[x]] = pval
+}
+
+```
+
+```{r Wilcoxan test of each cluster human}
+#df <- as.data.frame(df$data)
+df1 <- df[df$Group %in% 'HNSCC:PBMC:HPV-', ]
+df2 <- df[df$Group %in% 'HNSCC:TIL:HPV-',]
+df3 <- df[df$Group %in% 'HNSCC:PBMC:HPV+',]
+df4 <- df[df$Group %in% "HNSCC:TIL:HPV+", ]
+
+comparison <- list()
+for (x in unique(df$Cluster)) {
+  temp1 <- df1[df1[,3]==x,4]
+  temp2 <- df2[df2[,3]==x,4]
+  temp3 <- df3[df3[,3]==x,4]
+  temp4 <- df4[df4[,3]==x,4]
+  test <- wilcox.test(temp2, temp4, alternative = "two.sided", exact = TRUE)
+  pval <- test$p.value
+  comparison[[x]] = pval
+}
+write.csv(comparison, file = '/Users/agolfinos/Desktop/hnctil_mac_comparison_pvals.csv')
+```

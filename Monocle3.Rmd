@@ -1,0 +1,67 @@
+---
+title: "Monocle3"
+author: "Athena Golfinos"
+date: "3/3/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r import packages}
+library(monocle3)
+```
+
+
+```{r random preprocessing}
+unique(hnc$global.cluster4)
+
+hnc_alldcs <- subset(hnc, idents = c('cDC2_CD33', 'cDC1_CLEC9A', 'DC3_LAMP3', 'cDC2_CD1C'))
+
+#now taking out the tumor CD33+ cDC2s 
+hnc_alldcs$tissue_cluster <- paste(hnc_alldcs$tissue, hnc_alldcs$global.cluster4, sep = '_')
+hnc_notumor <- subset(hnc_alldcs, subset = tissue_cluster == 'TIL_cDC2_CD33', invert = TRUE)
+
+hnc_noblood <- subset(hnc_alldcs, subset = tissue_cluster == 'PBMC_cDC2_CD33', invert = TRUE)
+```
+
+
+```{r monocle3 all dcs}
+SEU <- hnc_alldcs
+ROOT <- 'cDC1_CLEC9A'
+
+
+
+cds <- SeuratWrappers::as.cell_data_set(SEU)
+cds <- cluster_cells(cds = cds, reduction_method = "UMAP")
+cds <- learn_graph(cds, use_partition = TRUE)
+
+#subsetting so to get our root
+root <- subset(SEU, subset = global.cluster4 == ROOT)
+root_cells <- colnames(root)
+
+#computing and plotting the pseudotime graph
+cds <- order_cells(cds, reduction_method = "UMAP", root_cells = root_cells)
+plot_cells(cds = cds, color_cells_by = 'pseudotime', show_trajectory_graph = TRUE)
+
+```
+
+```{r ordering cells}
+#subsetting so we can use the classical monocytes as our root
+mon_classical_moc2 <- subset(moc2, subset = global.cluster2 == 'Mon_Classical')
+mon_classical_cells_moc2 <- colnames(mon_classical_moc2)
+
+#computing and plotting the pseudotime graph
+moc2.cds <- order_cells(moc2.cds, reduction_method = "UMAP", root_cells = mon_classical_cells_moc2)
+plot_cells(cds = moc2.cds, color_cells_by = 'pseudotime', show_trajectory_graph = TRUE)
+
+#subsetting so we can use the classical monocytes as our root
+mon_classical_k17ko <- subset(k17ko, subset = global.cluster2 == 'Mon_Classical')
+mon_classical_cells_k17ko <- colnames(mon_classical_k17ko)
+
+#computing and plotting the pseudotime graph
+k17ko.cds <- order_cells(k17ko.cds, reduction_method = 'UMAP', root_cells = mon_classical_cells_k17ko)
+plot_cells(cds = k17ko.cds, color_cells_by = 'pseudotime', show_trajectory_graph = TRUE)
+```
+

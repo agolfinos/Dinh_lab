@@ -1,0 +1,243 @@
+---
+title: "MOC2K17_MonoMacro_redo"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r import packages}
+library(Seurat)
+library(patchwork)
+library(dplyr)
+library(ggplot2)
+library(clustree)
+library(topGO)
+library(biomaRt)
+library(SeuratWrappers)
+library(monocle)
+```
+```{r read in}
+load(file = "/Users/agolfinos/Desktop/HNC_vs_MOC2/MOC2/Seurat_MOC2_K17KO_MonMacDC_2021-09-02.rda")
+DimPlot(hnc2, group.by = "global.cluster", label = TRUE, label.box = TRUE)
+mmd <- hnc2
+load(file = '/Users/agolfinos/Desktop/HNC_vs_MOC2/MOC2/Seurat_MOC2_K17KO_2021-07-16.rda')
+hnc2 <- NULL
+```
+```{r clustree}
+clustree(hnc2)
+```
+```{r DimPlot and merging}
+#uncomment to merge clusters together
+#hnc2@meta.data$AEG_res2_annotations[hnc2@meta.data$AEG_res2_annotations == 'Max_Cxcl9'] <- 'Mac_Cxcl9'
+
+DimPlot(hnc2, group.by = 'AEG_res2_annotations', cols = c("#DC050C", "#FB8072", "#1965B0", "#7BAFDE", "#882E72",
+                    "#B17BA6", "#FF7F00", "#FDB462", "#E7298A", "#E78AC3",
+                    "#33A02C", "#B2DF8A", "#55A1B1", "#8DD3C7", "#A6761D",
+                    "#E6AB02", "#7570B3", "#BEAED4", "#666666", "#999999",
+                    "#AA8282", "#D4B7B7", "#8600BF", "#BA5CE3", "#808000",
+                    "#AEAE5C", "#1E90FF", "#00BFFF", "#56FF0D", "#FFFF00"), split.by = 'tissue')
+
+```
+
+```{r DE analysis of potential macrophage clusters}
+obj <- 'MOC2_K17KO_MonMacDCs'
+test_res <- 'AEG_RNA_snn_res.2'
+res_loc <- hnc2@meta.data$AEG_RNA_snn_res.2
+
+#if you want to use all clusters uncomment this line
+#mon_clust <- unique(res_loc)
+#mon_clust <- sort(mon_clust)
+
+#input select clusters here in vector form if you want to subset
+mon_clust <- c('1', '3', '5', '19')
+
+degenes <- data.frame(Res= character(), Cluster= numeric(), DEgenes= character(), stringsAsFactors=FALSE)
+for (x in mon_clust) {
+  rest <- mon_clust[mon_clust != x]
+  res <- c(test_res, test_res, test_res, test_res, test_res, test_res, test_res, test_res, test_res, test_res)
+  clust <- c(x, x, x, x, x, x, x, x, x, x)
+  marks <- FindMarkers(hnc2, ident.1 = x, ident.2 = rest, group.by = test_res, min.pct = 0.25, only.pos = TRUE)
+  marks1 <- marks[order(-marks$avg_log2FC, -marks$p_val_adj),]
+  marks2 <- row.names(marks1[1:10,])
+  dat <- data.frame(res, clust, marks2)
+  degenes <- rbind(degenes, dat)
+}
+out <- paste(obj, test_res, '.csv', sep='_')
+write.csv(degenes, out)
+```
+```{r Dotplot of DE genes}
+de_uniq <- unique(degenes[,3])
+DotPlot(hnc2, features = de_uniq, idents = mon_clust) + theme(axis.text.x = element_text(angle = 90)) 
+```
+
+```{r VlnPlot of monocyte/macrophage markers}
+#clusters to plot
+clusts <- c('1', '3', '5', '19', '22')
+
+VlnPlot(hnc2, features = c('Cxcl9'), pt.size = 0.1, group.by = 'AEG_RNA_snn_res.2', idents = clusts)
+
+#monocyte markers
+#VlnPlot(hnc2, features = c('Hp', 'Gsr', 'Mgst1', 'Chil3', 'Ifitm6', 'Cxcl10', 'Gbp2', 'Ifi47', 'Ifi205', 'Ifit3', 'H2-Ab1', 'H2-Eb1', 'H2-Aa', 'H2-DMb1', 'Cd74', 'Hspa1a', 'Arg1', 'Spp1', 'Hilpda', 'Hmox1'), pt.size = 0, group.by = 'RNA_snn_res.2', idents = clusts)
+
+#macrophage markers
+#VlnPlot(hnc2, features = c('Ccl8', 'Ms4a7', 'C1qa', 'C1qc', 'C1qb', 'Cxcl9', 'Cxcl10'), pt.size = 0, group.by = 'AEG_RNA_snn_res.2', idents = clusts)
+
+#classical/nonclassical monocyte markers 
+#VlnPlot(hnc2, features = c('Cd14', 'Fcgr3', 'Spn', 'Ly6c2', 'Cd209a', 'Ace', 'Ear2', 'Itgal', 'Ceacam1', 'Cxcl10', 'Gbp2', 'Ifit1', 'Ifit2', 'Hmox1', 'Hspa1a', 'Hilpda', 'Bnip3', 'Ero1l', 'Ndrg1', 'Plac8', 'Hp', 'Chil3', 'Treml2', 'Treml4'), pt.size = 0, group.by = 'AEG_RNA_snn_res.2', idents = clusts)
+
+#DC markers
+#VlnPlot(hnc2, features = c('Btla', 'Itgam', 'Itgax', 'Cd24a', 'Csf1r', 'Kit', 'Flt3', 'H2-Ab1'), pt.size = 0, group.by = 'AEG_RNA_snn_res.2', idents = clusts)
+
+#DC subset markers
+#VlnPlot(hnc2, features = c('C1orf54', 'Cadm1', 'Naaa', 'Ppt1', 'Rab7b', 'Snx3', 'Wdfy4', 'Xcr1', 'AA467197', 'Birc3', 'Ccr7', 'Cd40', 'Cflar', 'Fscn1', 'Lad1', 'Lsp1', 'Marcks', 'Nub1', 'Marcksl1', 'Poglut1', 'Rab8b', 'Tmem176a', 'Traf1', 'Vopp1', 'Bcl11a', 'Hsp90b1', 'Mpeg1', 'Plac8', 'Pld4', 'Ppp1r14b', 'Sell', 'Slc15a4', 'Spcs2', 'Spib', 'Tcf4', 'Tspan13'), pt.size = 0, group.by = 'AEG_RNA_snn_res.2', idents = clusts)
+```
+```{r testing higher resolution with DE genes}
+
+obj <- 'MOC2_K17KO_MonMacDCs'
+test_res <- 'RNA_snn_res.0.2'
+res_loc <- hnc2@meta.data$RNA_snn_res.0.2
+df <- hnc2
+
+
+degenes <- data.frame(Res= character(), Cluster= numeric(), DEgenes= character(), stringsAsFactors=FALSE)
+for (x in unique(res_loc)) {
+  
+  res <- c(test_res, test_res, test_res, test_res, test_res, test_res, test_res, test_res, test_res, test_res)
+  clust <- c(x, x, x, x, x, x, x, x, x, x)
+  marks <- FindMarkers(hnc2, ident.1 = x, group.by = test_res, min.pct = 0.25, only.pos = TRUE)
+  marks <- row.names(marks[1:10,])
+  dat <- data.frame(res, clust, marks)
+  degenes <- rbind(degenes, dat)
+}
+out <- paste(obj, test_res, '.csv', sep='_')
+write.csv(degenes, out)
+```
+```{r Feature plot}
+#early monocyte markers (Rizzo et al 2020)
+FeaturePlot(hnc2, features = c('Ly6c1', 'Plac8', 'Hp', 'Chil3'))
+
+#late monocyte markers (Rizzo et al 2020)
+FeaturePlot(hnc2, features = c('Ace', 'Ear2', 'Itgal', 'Ceacam1'))
+
+#Ifn-responsive monocyte markers (Krummel preprint)
+FeaturePlot(hnc2, features = c('Cxcl10', 'Gbp2'))
+
+#Stress-responsive monocyte markers (Krummel preprint)
+FeaturePlot(hnc2, features = c('Hmox1', 'Hspa1a', 'Hilpda', 'Bnip3', 'Ero1l', 'Ndrg1'))
+```
+
+```{r Monocle3 08/18/21 3pm DO NOT USE}
+
+diet_cds <- DietSeurat(hnc2, graphs = 'RNA_snn', dimreducs = c('harmony', 'umap'))
+cds <- as.cell_data_set(diet_cds)
+cds <- cluster_cells(cds)
+cds <- estimateSizeFactors(cds)
+
+#use this step to determine how many pcs to use--rerun with proper amount below
+
+#cds <- preprocess_cds(cds, num_dim = 100)
+#plot_pc_variance_explained(cds)
+
+#run this with the proper amount of PCs based on the previous two lines
+
+cds <- preprocess_cds(cds, num_dim = 15)
+cds <- reduce_dimension(cds)
+
+cds <- align_cds(cds, num_dim = 15, alignment_group = 'tissue')
+cds <- reduce_dimension(cds)
+
+plot_cells(cds, color_cells_by = 'tissue', label_cell_group = FALSE)
+
+cds = cluster_cells(cds, resolution=1.7e-4)
+
+plot_cells(cds, color_cells_by='global.cluster')
+plot_cells(cds, color_cells_by='partition')
+
+#troubleshooting this line--everything above works! 
+marker_test_res <- top_markers(cds, group_cells_by="partition", reference_cells=1000, cores=8)
+
+top_specific_markers <- marker_test_res %>%
+                            filter(fraction_expressing >= 0.10) %>%
+                            group_by(cell_group) %>%
+                            top_n(1, pseudo_R2)
+
+top_specific_marker_ids <- unique(top_specific_markers %>% pull(gene_id))
+
+rowData(cds)$gene_short_name <- row.names(rowData(cds))
+plot_genes_by_group(cds,
+                    top_specific_marker_ids,
+                    group_cells_by="partition",
+                    ordering_type="maximal_on_diag",
+                    max.size=3)
+
+plot_cells(cds, genes = c('Ly6c1', 'Plac8', 'Hp', 'Chil3'))
+```
+```{r Trajectory analysis DO NOT USE}
+cds <- preprocess_cds(cds, num_dim = 15)
+cds <- align_cds (cds, alignment_group = 'tissue')
+cds <- reduce_dimension(cds)
+cds <- cluster_cells(cds)
+cds <- learn_graph (cds)
+#plot_cells(cds, color_cells_by = "pseudotime", label_groups_by_cluster=FALSE, label_leaves=FALSE, label_branch_points=FALSE)
+```
+
+```{r Monocle2 08/30/21 CDS creation}
+data <- as(as.matrix(hnc2@assays$RNA@data), 'sparseMatrix')
+
+pd <- new('AnnotatedDataFrame', data = hnc2@meta.data)
+
+fData <- data.frame(gene_short_name = row.names(data), row.names = row.names(data))
+fd <- new('AnnotatedDataFrame', data = fData)
+
+cds <- newCellDataSet(data, phenoData = pd, featureData = fd, lowerDetectionLimit = 0.5, expressionFamily = negbinomial.size())
+```
+```{r Monocle2 08/30/21 Calculations}
+cds <- estimateSizeFactors(cds)
+cds <- estimateDispersions(cds)
+
+#finding our genes for the ordering function
+cds <- detectGenes(cds, min_expr = 0.1)
+expressed_genes <- row.names(subset(fData(cds), num_cells_expressed >= 10))
+disp_table <- dispersionTable(cds)
+
+#assessing the proportion of genes expressed over a certain value and setting a threshold
+table(disp_table$mean_expression>=0.25)
+unsup_clustering_genes <- subset(disp_table, mean_expression >= 0.25)
+
+#now setting the ordered genes for our next couple steps
+cds <- setOrderingFilter(cds, unsup_clustering_genes$gene_id)
+plot_ordering_genes(cds)
+
+#plotting pc variance and choosing number of dimensions
+#plot_pc_variance_explained(cds, return_all = FALSE)
+
+#reduce data dimensionality
+cds <- reduceDimension(cds, max_components = 2, num_dim = 5, method = 'umap')
+
+#order cells along the trajectory
+cds <- orderCells(cds, root_state ='Mon_Classical')
+plot_cell_trajectory(cds, color_by = 'AEG_res2_annotations')
+plot_cell_trajectory(cds, color_by = "Pseudotime")
+
+```
+
+```{r counts table}
+counts <- table(hnc2@meta.data$AEG_RNA_snn_res.2, hnc2@meta.data$orig.ident)
+counts
+```
+
+```{r merging annotations with global group}
+temp_meta <- ifelse(colnames(seurat) %in% colnames(mmd),
+                     as.character(mmd@meta.data$AEG_res2_annotations),
+                     as.character(seurat@meta.data$global.cluster2))
+table(temp_meta)
+
+seurat@meta.data$global.cluster2 <- temp_meta
+Idents(seurat) <- temp_meta
+
+DimPlot(seurat, group.by = 'global.cluster2')
+```
+
+
+
