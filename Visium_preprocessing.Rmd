@@ -12,6 +12,7 @@ library(Seurat)
 library(hdf5r)
 library(ggplot2)
 library(patchwork)
+library(SeuratDisk)
 ```
 
 # Visium pre-processing
@@ -95,21 +96,199 @@ visium_pp <- function(in_dir, h5_name = "filtered_feature_bc_matrix.h5", out_dir
 }
 ```
 
-# SCDC load in
+# Global  scRNA-seq prep
+## Load and save objects
 ```{r}
-library(anndata)
-library(reticulate)
-anndata <- import("anndata")
+seu <- readRDS("Z:/Computational_Toxicology/Athena/Mouse_scRNAseq/Kimmel_et_al_2019/Spleen/kimmel_seurat.RDS")
 
-# Path to the h5ad file
-h5ad_file <- "Z:\\Computational_Toxicology\\Athena\\Mouse_scRNAseq\\Mouse_cell_atlas\\MCA2.0\\MCA2.0_Fig1_adata.h5ad"
-
-# Load the h5ad file
-adata <- anndata$read_h5ad(h5ad_file)
+#saveRDS(seu, "Z:/Computational_Toxicology/Athena/Mouse_scRNAseq/Kimmel_et_al_2019/Spleen/kimmel_seurat.RDS")
 ```
 
 
-# SCDC prep
+## Generate seurat object from Kimmel spleen data
+```{r}
+# List of h5 files
+h5_files <- list.files("Z:/Computational_Toxicology/Athena/Mouse_scRNAseq/Kimmel_et_al_2019/Spleen/", pattern = "\\.h5$")
+
+
+# generate one large seurat object that puts the ID into the name
+
+seurat_obj <- NULL
+count = 1
+# Loop through h5 files
+for (h5_file in h5_files) {
+  
+  print(paste("Starting file ", as.character(h5_file)))
+  
+  # Read h5 file into a matrix
+  seu_temp <- Seurat::Read10X_h5(paste("Z:/Computational_Toxicology/Athena/Mouse_scRNAseq/Kimmel_et_al_2019/Spleen/", h5_file, sep = ''))
+  
+  if (count == 1){
+    seurat_obj <- CreateSeuratObject(seu_temp)
+    seurat_obj$orig.ident <- sapply(strsplit(h5_file, "_"), `[`, 2)
+  }
+  
+  if (count > 1){
+    seu_temp <- CreateSeuratObject(seu_temp)
+    
+    seu_temp$orig.ident <- sapply(strsplit(h5_file, "_"), `[`, 2)
+    
+    # Add the cells from the temp Seurat object to the main Seurat object
+    seurat_obj <- merge(seurat_obj, seu_temp)
+  }
+  
+  count = count + 1
+
+}
+
+saveRDS(seu, "Z:/Computational_Toxicology/Athena/Mouse_scRNAseq/Kimmel_et_al_2019/Spleen/kimmel_seurat.RDS")
+
+```
+
+## Processing scRNA-seq data
+```{r}
+# run this in the console!
+seu <- seu_pp1(seu, out="Z:/Computational_Toxicology/Athena/Mouse_scRNAseq/Kimmel_et_al_2019/Spleen/kimmel_seurat.RDS", remove_doublets = F, feature_subset = F, batch_id = 'orig.ident', reduction = 'pca', harmony = F, seurat_integration = F, normalize = T, test_npcs = 100, assay = 'RNA')
+```
+
+## Identify clusters
+```{r}
+# identifying B cell clusters
+FeaturePlot(seu, features = c('Cd19', 'Ms4a1')) # clusters 0, 3, 6, 12
+
+# identifying T cell clusters
+FeaturePlot(seu, features = c('Cd3e', 'Cd4', 'Cd8a', 'Foxp3'))
+
+# identifying myeloid cell clusters
+FeaturePlot(seu, features = c('Cd86', 'Cd68', 'Cxcl9', 'Spp1'))
+
+# identifying dendritic cell clusters
+FeaturePlot(seu, features = c('Clec9a','Clec10a', 'Cd1c', 'Lamp3'))
+
+# identifying NK cell cluster
+FeaturePlot(seu, features = c('Nkg7', 'Cd3e'))
+
+# identifying cap endo markers
+VlnPlot(seu, group.by = 'RNA_snn_res.0.5', features= c('Podxl', 'Pecam1'))
+
+DimPlot(seu, group.by = 'global.cluster', label = T, label.box = T)
+
+#seu$global.cluster <- as.character(seu$RNA_snn_res.0.1)
+
+seu$global.cluster[seu$global.cluster %in% c('0', '3', '6', '12')] <- 'B cells'
+seu$global.cluster[seu$global.cluster %in% c('1', '2', '9', '7')] <- 'T/NK cells'
+seu$global.cluster[seu$global.cluster %in% c('4')] <- 'Myeloid cells'
+seu$global.cluster[seu$RNA_snn_res.0.5 %in% c('13')] <- 'NK cells'
+seu$global.cluster[seu$global.cluster %in% c('8')] <- 'Neutrophils'
+seu$global.cluster[seu$global.cluster %in% c('5')] <- 'Plasma cells'
+seu <- seu[,!seu$global.cluster %in% c('10', '11')]
+
+#removed <- seu[,seu$global.cluster %in% c('10', '11')]
+#saveRDS(removed, file = 'Z:/Computational_Toxicology/Athena/Mouse_scRNAseq/Kimmel_et_al_2019/Spleen/kimmel_removed_populations.RDS')
+
+
+
+de_dotplot(seu = seu, metadata = 'global.cluster', out = 'Z:/Computational_Toxicology/Athena/Mouse_scRNAseq/Kimmel_et_al_2019/Spleen/kimmel_seurat.RDS', n_marks = 10, min_pct = 0.1)
+
+```
+
+# T cell scRNA-seq prep
+
+## Load and save objects
+```{r}
+tcells <- readRDS("Z:/Computational_Toxicology/Athena/Mouse_scRNAseq/Kimmel_et_al_2019/Spleen/kimmel_tcells.RDS")
+
+#saveRDS(tcells, "Z:/Computational_Toxicology/Athena/Mouse_scRNAseq/Kimmel_et_al_2019/Spleen/kimmel_tcells.RDS")
+```
+
+
+## Object generation
+```{r}
+tcells <- seu[,seu$global.cluster == 'T/NK cells']
+```
+
+## Processing scRNA-seq data
+```{r}
+# run this in the console!
+tcells <- seu_pp1(tcells, out="Z:/Computational_Toxicology/Athena/Mouse_scRNAseq/Kimmel_et_al_2019/Spleen/kimmel_tcells.RDS", remove_doublets = F, feature_subset = F, batch_id = 'orig.ident', reduction = 'pca', harmony = F, seurat_integration = F, normalize = T, test_npcs = 100, assay = 'RNA')
+```
+
+## Identify clusters
+```{r}
+DimPlot(tcells, group.by = 'RNA_snn_res.0.2')
+
+# identifying Tregs
+marker_plotting(tcells, features = c('Foxp3', 'Il2ra', 'Nt5e', 'Nrp1', 'Cd4'), group.by = 'RNA_snn_res.0.4') # cluster 1
+
+# identifying Tfh cells
+marker_plotting(tcells, features = c('Cxcr5', 'Pdcd1', 'Bcl6', 'Icos', 'Sh2d1a', 'Cd40lg'), group.by = 'RNA_snn_res.0.4') # cluster 2
+
+# identifying CD4 T cells
+marker_plotting(tcells, features = c('Cd4'), group.by = 'RNA_snn_res.0.4') # cluster 1, 2, 4
+
+# identifying CD8 T cells
+marker_plotting(tcells, features = c('Cd8a'), group.by = 'RNA_snn_res.0.4') # cluster 0, 3, 5, 8, 10
+
+# identifying T cells in general
+marker_plotting(tcells, features = 'Cd3e', group.by = 'RNA_snn_res.0.4')
+
+# identifying memory T cells
+marker_plotting(tcells, features = c('Cd44', 'Sell', 'Il7r', 'Il2rb', 'Klrg1', 'Cd69'), group.by = 'RNA_snn_res.0.4') # no clear population
+
+# identifying Th17 T cells
+marker_plotting(tcells, group.by = 'RNA_snn_res.0.4', features = c('Rorc', 'Il17a', 'Il17f', 'Il23r', 'Il22', 'Batf', 'Ccr6', 'Il1r1'))
+
+tcells$global.cluster2 <- as.character(tcells$RNA_snn_res.0.4)
+
+
+DimPlot(tcells, group.by = 'global.cluster2')
+
+tcells$global.cluster2[tcells$global.cluster2 %in% c('0', '3', '5', '8', '10')] <- 'CD8 T cells'
+tcells$global.cluster2[tcells$global.cluster2 %in% c('2', '4')] <- 'CD4 T cells'
+tcells$global.cluster2[tcells$global.cluster2 %in% c('1')] <- 'Tregs'
+tcells$global.cluster2[tcells$global.cluster2 == c('6')] <- 'Unassigned T:6'
+tcells$global.cluster2[tcells$global.cluster2 == c('7')] <- 'Unassigned T:7'
+tcells$global.cluster2[tcells$global.cluster2 == c('9')] <- 'Unassigned T:9'
+
+
+
+
+tcell_marks <- de_dotplot(seu = tcells, metadata = 'global.cluster2', out = 'Z:/Computational_Toxicology/Athena/Mouse_scRNAseq/Kimmel_et_al_2019/Spleen/kimmel_tcells')
+```
+
+
+# B cell scRNA-seq prep
+
+## Identify clusters
+```{r}
+
+# identifying follicular B cells
+marker_plotting(tcells, features = c('Cd45ra', 'Cd19', 'Ighd', 'Cd38', 'Cr2', 'Fcer2a', 'Cd22', 'Pax5'), group.by = 'RNA_snn_res.0.2') # cluster 7
+
+# identifying marginal zone B cells
+marker_plotting(tcells, features = c('Cd1d1', 'Ighm', 'Cd9', 'Cd22', 'Ebf1', 'E2A', 'Slc22a2'), group.by = 'RNA_snn_res.0.2') # cluster 7
+
+# identifying B1 B cells
+marker_plotting(tcells, features = c('Cd5', 'Spn', 'Itgam', 'Sdc1'), group.by = 'RNA_snn_res.0.2') # cluster 4
+
+# identifying transitional/immature B cells
+marker_plotting(tcells, features = c('Cd93', 'Cd24a', 'BR2', 'Tnfrsf13b'), group.by = 'RNA_snn_res.0.2') #cluster 7
+
+# germinal center b cells
+marker_plotting(tcells, features = c('Fas', 'PNA', 'Tnfrsf13c', 'Bcl6', 'Ebf1'), group.by = 'RNA_snn_res.0.2')
+
+# memory B cells
+marker_plotting(tcells, features = c('Cd80', 'Nt5e', 'Pdcd1lg2', 'Cd38', 'Cd84', 'Cd86', 'Pbx1', 'Spib'), group.by = 'RNA_snn_res.0.2')
+```
+
+
+# SCDC load in
+```{r}
+
+```
+
+
+# SCDC
 
 sc_ref: This is your single cell RNA-sequencing dataset that you want to use as a reference in the form of a Seurat object. Assumes the count matrix you would like to use is located in the "RNA" assay. 
 
