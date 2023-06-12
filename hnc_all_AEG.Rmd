@@ -1,0 +1,49 @@
+---
+title: "hnc_AEG"
+author: "Athena Golfinos"
+date: "8/23/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r import packages}
+library(Seurat)
+library(patchwork)
+library(dplyr)
+library(ggplot2)
+library(clustree)
+library(topGO)
+library(biomaRt)
+library(SeuratWrappers)
+```
+```{r read in}
+load(file = "/Users/agolfinos/Desktop/hnc_all_annot2021.rda")
+DimPlot(hnc, group.by = "global.cluster", label = TRUE, label.box = TRUE)
+```
+
+```{r T/NK cell subset}
+tnk <- subset(x = hnc, subset = global.cluster == c('Treg', 'CD4', 'CD8', 'NKs'))
+```
+```{r TNK PCA and # PC selection}
+tnk <- RunPCA(tnk)
+#ElbowPlot(tnk)
+```
+```{r TNK clustering}
+tnk <- FindNeighbors(tnk, dims = 1:15)
+tnk <- FindClusters(tnk, resolution = 0.5)
+tnk <- RunUMAP(tnk, dims = 1:15)
+```
+```{r TNK Dimension plot}
+DimPlot(tnk, reduction = 'umap', group.by = 'global.cluster', label = TRUE, label.box = TRUE)
+
+FeaturePlot(tnk, features = c('CD3E', 'CD4', 'CD8A', 'SELL', 'CD27', 'PRF1', 'GNLY', 'FOXP3', 'TOX', 'SLAMF6'))
+```
+
+```{r subsetting}
+cd4 <- subset(x = hnc, subset = global.cluster == c('Treg', 'CD4'))
+cd8 <- subset(x = hnc, subset = global.cluster == c('CD8'))
+nk <- subset(x = hnc, subset = global.cluster == c('NKs'))
+```
+

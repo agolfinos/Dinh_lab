@@ -1,0 +1,303 @@
+---
+title: "HNC_CD4T_AEG"
+output: html_document
+---
+
+```{r INPUT VARIABLES}
+#resolution
+r <- 1
+rs <- toString(r)
+
+#please provide the full dataframe path to your resolution
+res_loc <- cd4@meta.data$AEG_CD4_RNA_snn_res.1
+
+#this should be a nice descriptive name (in string form) for your object
+obj <- 'HNC_CD4_AEG'
+
+#string of the metadata column where your resolution is found
+res <- paste('AEG_CD4_RNA_snn_res.', rs, sep='')
+
+#number of principal components to use--please provide a range from 1:X
+PCs <- 1:30
+
+#DE genes clusters--see below
+
+#if you want to use all clusters uncomment this line
+#clusts <- unique(res_loc)
+#clusts <- sort(clusts)
+
+#input select clusters here in vector form if you want to subset
+clusts <- c('0', '2', '3', '4', '6', '7', '8', '9', '10', '11')
+
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r import packages}
+library(Seurat)
+library(patchwork)
+library(dplyr)
+library(ggplot2)
+library(clustree)
+library(topGO)
+library(biomaRt)
+library(SeuratWrappers)
+```
+```{r read in}
+load(file = "/Users/agolfinos/Desktop/HNC_vs_MOC2/HNC/Seurat_objects/Seurat_HNC_CD4_2021-09-20.rda")
+DimPlot(cd4, group.by = 'AEG_CD4_RNA_snn_res.1', split.by = 'group')
+```
+```{r Clustree}
+clustree(cd4, prefix = 'AEG_CD4_RNA_snn_res.')
+```
+```{r QC calculations}
+#cd4[['percent.mt']] <- PercentageFeatureSet(cd4, pattern = '^MT-')
+
+#VlnPlot(cd4, features = c('nFeature_RNA', 'nCount_RNA', 'percent.mt'), ncol = 3)
+
+#plot1 <- FeatureScatter(cd4, feature1 = 'nCount_RNA', feature2 = 'percent.mt')
+#plot2 <- FeatureScatter(cd4, feature1 = 'nCount_RNA', feature2 = 'nFeature_RNA')
+#plot1 + plot2
+
+#cd4 <- subset(cd4, subset = nFeature_RNA > 200 & nFeature_RNA < 4000)
+
+#cd4 <- NormalizeData(cd4, normalization.method = 'LogNormalize', scale.factor = 10000)
+
+#all.genes <- rownames(cd4)
+cd4 <- ScaleData(cd4, features = all.genes, vars.to.regress = c('percent.mt'))
+```
+
+```{r PCA}
+#cd4 <- RunPCA(cd4, npcs = 100)
+#ElbowPlot(cd4, ndims = 100)
+
+cd4 <- RunPCA(cd4, npcs = 30)
+```
+```{r neighbors and clustering}
+#cd4 <- FindNeighbors(cd4, dims = PCs)
+cd4 <- FindClusters(cd4, resolution = 2)
+
+#uncomment this to add the active identity UMAP to the metadata
+cd4@meta.data$AEG_CD4_RNA_snn_res.2<- cd4@active.ident
+```
+```{r merging clusters}
+cd4@meta.data$AEG_CD4_RNA_snn_res.1[cd4@meta.data$AEG_CD4_RNA_snn_res.1 == '5'] <- '9'
+
+DimPlot(cd4, group.by = res, label = TRUE, label.box = TRUE)
+```
+```{r Adding disease state to a new metadata column}
+cd4@meta.data$group <- paste(cd4@meta.data$tissue, cd4@meta.data$is_HD, cd4@meta.data$hpv_status, sep = '_')
+```
+
+```{r UMAP}
+#cd4 <- RunUMAP(cd4, dims = PCs)
+DimPlot(cd4, group.by = res, split.by = 'group')
+```
+
+```{r DE genes}
+degenes <- data.frame(Res= character(), Cluster= numeric(), DEgenes= character(), stringsAsFactors=FALSE)
+for (x in clusts) {
+  rest <- clusts[clusts != x]
+  res1 <- c(res, res, res, res, res, res, res, res, res, res)
+  clust <- c(x, x, x, x, x, x, x, x, x, x)
+  marks <- FindMarkers(cd4, ident.1 = x, ident.2 = rest, group.by = res, min.pct = 0.25, only.pos = TRUE)
+  marks1 <- marks[order(-marks$avg_log2FC, -marks$p_val_adj),]
+  marks2 <- row.names(marks1[1:10,])
+  dat <- data.frame(res1, clust, marks2)
+  degenes <- rbind(degenes, dat)
+}
+#out <- paste(obj, res, '.csv', sep='_')
+#write.csv(degenes, out)
+
+de_uniq <- unique(degenes[,3])
+#DotPlot(cd4, features = de_uniq, idents = clusts, group.by = res) + theme(axis.text.x = element_text(angle = 90))
+
+cd4_temp <- subset(cd4, subset = AEG_CD4_RNA_snn_res.1 == c(clusts))
+
+DotPlot(cd4_temp, features = de_uniq, group.by = res, col.min = 0) + theme(axis.text.x = element_text(angle = 90))
+```
+
+```{r Feature plots}
+FeaturePlot(cd4, features = c('CD4', 'SELL', 'CD27', 'PRF1', 'GNLY', 'FOXP3'))
+```
+```{r Violin plots MISC MARKERS}
+#TFH MARKERS
+VlnPlot(cd4, features = c('PDCD1', 'CXCL13', 'TIGIT', 'MAF', 'TOX', 'CXCR5', 'CD40LG'), group.by=res, pt.size = 0)
+
+#TREG MARKERS
+VlnPlot(cd4, features = c('FOXP3', 'CTLA4', 'MTNFRSF4', 'IRF4', 'BATF', 'TNFRSF18', 'TOX2', 'PRDMI'), group.by=res, pt.size = 0)
+
+#proliferation CD4 markers
+VlnPlot(cd4, features = c('LIF', 'IL2', 'CENPV', 'NME1', 'FABP5', 'ORC6', 'G0S2', 'GCK'), group.by=res, pt.size=0)
+
+#interferon responsive CD4 markers
+VlnPlot(cd4, features = c('IFIT3', 'IFIT2', 'STAT1', 'MX1', 'IRF7', 'ISG15', 'IFITM3', 'OAS2', 'JAK2', 'SOCS1', 'TRIM21'), group.by=res, pt.size=0)
+
+#resting CD4
+VlnPlot(cd4, features = c('IL7R', 'CD52', 'S100A4', 'TGFB3', 'AQP3', 'NLRP3', 'KLF2', 'ITGB7'), group.by=res, pt.size=0)
+
+#effector memory CD4
+VlnPlot(cd4, features = c('CD27', 'PRF1', 'GNLY', 'KLF2', 'CCL5', 'IL7R', 'NFKBIA', 'IRF1', 'FOS', 'CD69', 'SOCS3', 'IFI6', 'ISG15'), group.by=res, pt.size=0)
+
+#naive/central memory CD4
+VlnPlot(cd4, features = c('SELL', 'CD27', 'LEF1', 'ATM', 'KLF2', 'ITGA6'), group.by=res, pt.size=0)
+```
+
+```{r CD4 T cell markers from Cillo paper}
+library(readxl)
+cillo_tconv <- read_excel('/Users/agolfinos/Desktop/HNC_vs_MOC2/HNC/mmc4.xlsx', sheet = 'CD4+ Tconv Clusters - DEGs')
+#colnames(cillo_tconv) <- cillo_tconv[1,]
+#cillo_tconv <- cillo_tconv[-1,]
+
+cillo_tconv <- cillo_tconv[ which(cillo_tconv$Log_fold_change > .25),]
+cillo_tconv <- cillo_tconv[ which(cillo_tconv$`%_positive_in_cluster` > 0.25),]
+
+cd4_marks <- cillo_tconv[c('Gene', 'Cluster')]
+cd4_marks <- setNames(as.character(cd4_marks$Cluster), cd4_marks$Gene)
+
+x <- '2'
+genes <- names(cd4_marks)[cd4_marks == x]
+VlnPlot(cd4, features = c(genes), pt.size = 0, group.by = 'AEG_CD4_RNA_snn_res.1')
+```
+
+```{r Tables of samples}
+options(max.print=100000)
+
+INPUT_1 <- cd4@meta.data$hpv_status
+INPUT_2 <- cd4@meta.data$AEG_CD4_RNA_snn_res.1
+
+r1 <-table(INPUT_1, INPUT_2)
+col_sums_r1 <- colSums(r1)
+col_sums_r1
+
+```
+
+```{r Transferring B cell/plasma cell contamination back to the global plot}
+#load('/Users/agolfinos/Desktop/hnc_all_annot2021.rda')
+#DimPlot(hnc, label = TRUE, label.box = TRUE)
+
+#mapping the cells from cluster 12 (now named B cells) to the global population of all cells
+bc_contam <- subset(cd4, subset = AEG_CD4_RNA_snn_res.1 == '12')
+
+bc_contam@meta.data$AEG_CD4_RNA_snn_res.1[bc_contam@meta.data$AEG_CD4_RNA_snn_res.1 == 'B cells'] <- '12'
+DimPlot(bc_contam, group.by = 'AEG_CD4_RNA_snn_res.1')
+
+Idents(object = bc_contam) <- 'Bcells' 
+
+temp_meta <- ifelse(colnames(hnc) %in% colnames(bc_contam),
+                     as.character(bc_contam@active.ident),
+                     as.character(hnc@active.ident))
+table(temp_meta)
+
+hnc@meta.data$AEG_global.cluster <- temp_meta
+Idents(hnc) <- temp_meta
+
+#now I'll get rid of cluster 12 from the current analysis
+cd4 <- subset(cd4, subset = AEG_CD4_RNA_snn_res.1 == '12', invert=TRUE)
+DimPlot(cd4, group.by = 'AEG_CD4_RNA_snn_res.1')
+```
+
+```{r Frequency plots WORKS!}
+LOC <- cd4@meta.data$AEG_CD4_RNA_snn_res.1
+COUNTS <- table(cd4@meta.data$group, LOC)
+
+
+
+count_dict <- list()
+
+for (x in unique(LOC)) {
+  c <- x
+  v1 <- COUNTS[1,c]/sum(COUNTS[1,])
+  v2 <-COUNTS[2,c]/sum(COUNTS[2,])
+  v3 <-COUNTS[3,c]/sum(COUNTS[3,])
+  v4 <-COUNTS[4,c]/sum(COUNTS[4,])
+  v5 <-COUNTS[5,c]/sum(COUNTS[5,])
+  v6 <-COUNTS[6,c]/sum(COUNTS[6,])
+  
+  count_dict[paste(c, rownames(COUNTS)[1])] <- v1
+  count_dict[paste(c, rownames(COUNTS)[2])] <- v2
+  count_dict[paste(c, rownames(COUNTS)[3])] <- v3
+  count_dict[paste(c, rownames(COUNTS)[4])] <- v4
+  count_dict[paste(c, rownames(COUNTS)[5])] <- v5
+  count_dict[paste(c, rownames(COUNTS)[6])] <- v6
+}
+
+count_ordered <- count_dict[order(names(count_dict))]
+
+#counter = 1
+for (x in unique(LOC)) {
+  counter = 1
+  
+  #calling from the list of frequencies
+  g1 <- counter
+  g1 <- names(count_dict)[g1]
+  f1 <- count_dict[[g1]]
+  
+  counter <- counter + 1
+  
+  g2 <- counter
+  g2 <- names(count_dict)[g2]
+  f2 <- count_dict[[g2]]
+  
+  counter <- counter + 1
+  
+  g3 <- counter
+  g3 <- names(count_dict)[g3]
+  f3 <- count_dict[[g3]]
+  
+  counter <- counter + 1
+  
+  g4 <- counter
+  g4 <- names(count_dict)[g4]
+  f4 <- count_dict[[g4]]
+  
+  counter <- counter + 1
+  
+  g5 <- counter
+  g5 <- names(count_dict)[g5]
+  f5 <- count_dict[[g5]]
+  
+  counter <- counter + 1
+  
+  g6 <- counter
+  g6 <- names(count_dict)[g6]
+  f6 <- count_dict[[g6]]
+  
+  counter <- counter + 1
+  
+  groups <- c(g1, g2, g3, g4, g5, g6)
+  #freqs <- 
+  #df.groups <- data.frame(groups, ) 
+}
+```
+```{r Boxplots of Frequency WORKS!!}
+CLUST <- '0'
+
+cluster <- paste(CLUST, '_HNC_CD4', sep = '')
+
+freq1 <- count_dict[[paste(CLUST, 'PBMC_HD_HPV-', sep = ' ')]]
+freq2 <- count_dict[[paste(CLUST, 'PBMC_HNSCC_HPV-', sep = ' ')]]
+freq3 <- count_dict[[paste(CLUST, 'PBMC_HNSCC_HPV+', sep = ' ')]]
+freq4 <- count_dict[[paste(CLUST, 'TIL_HNSCC_HPV-', sep = ' ')]]
+freq5 <- count_dict[[paste(CLUST, 'TIL_HNSCC_HPV+', sep = ' ')]]
+freq6 <- count_dict[[paste(CLUST, 'Tonsil_HD_HPV-', sep = ' ')]]
+
+clust <- paste(cluster, '.png', sep = '')
+tiff(clust, units= 'in', 'width' = 10, height = 25, res = 250)
+
+groups <- c(paste(CLUST, 'PBMC_HD_HPV-', sep = ' '), paste(CLUST, 'PBMC_HNSCC_HPV-', sep = ' '), paste(CLUST, 'PBMC_HNSCC_HPV+', sep = ' '), paste(CLUST, 'TIL_HNSCC_HPV-', sep = ' '), paste(CLUST, 'TIL_HNSCC_HPV+', sep = ' '), paste(CLUST, 'Tonsil_HD_HPV-', sep = ' '))
+freqs <- c(freq1, freq2, freq3, freq4, freq5, freq6)
+df1 <- data.frame(groups, freqs)
+
+ggplot(df1) +
+  geom_boxplot(aes(x = groups, y = freqs, color = groups, fill = groups), position = position_dodge(), alpha = 0.5, outlier.color = NA) + geom_point(aes(x = groups, y = freqs, color = groups), size = 6, alpha = 0.8, position = position_jitterdodge()) + theme_bw() + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(), strip.text = element_text(size =35, face = "bold" ), axis.title.y = element_blank(), axis.title = element_text( size = 55, face = "bold" )) + scale_shape_manual(values = rep(1, 4)) +  theme(axis.text.y = element_text(size = 40))   
+
+#facet_wrap(~ cluster, scales = "free", nrow = 1)  
+#dev.off()
+```
+```{r}
+DimPlot(hnc, group.by = 'orig.ident')
+```
+
+

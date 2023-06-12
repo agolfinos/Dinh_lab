@@ -1,0 +1,358 @@
+---
+title: "HNC_CD8T_AEG"
+author: "Athena Golfinos"
+date: "9/1/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r INPUT VARIABLES}
+#resolution
+r <- 0.4
+rs <- toString(r)
+
+#please provide the full dataframe path to your resolution
+res_loc <- cd8@meta.data$AEG_CD8_RNA_snn_res.0.4
+
+#this should be a nice descriptive name (in string form) for your object
+obj <- 'HNC_CD8_AEG'
+
+#string of the metadata column where your resolution is found
+res <- paste('AEG_CD8_RNA_snn_res.', rs, sep='')
+
+#number of principal components to use--please provide a range from 1:X
+PCs <- 1:30
+
+#DE genes clusters--see below
+
+#if you want to use all clusters uncomment this line
+#clusts <- unique(res_loc)
+#clusts <- sort(clusts)
+
+#input select clusters here in vector form if you want to subset
+clusts <- c('0', '1', '2', '3', '4', '5', '6', '7')
+
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r import packages}
+library(Seurat)
+library(patchwork)
+library(dplyr)
+library(ggplot2)
+library(clustree)
+library(topGO)
+library(biomaRt)
+library(SeuratWrappers)
+```
+```{r read in}
+load(file = "/Users/agolfinos/Desktop/HNC_vs_MOC2/HNC/Seurat_objects/Seurat_HNC_CD8_2021-09-20.rda")
+DimPlot(cd8, label = TRUE, label.box = TRUE)
+```
+```{r Clustree}
+clustree(cd8, prefix = 'AEG_CD8_RNA_snn_res.')
+```
+```{r QC calculations}
+cd8[['percent.mt']] <- PercentageFeatureSet(cd8, pattern = '^MT-')
+
+VlnPlot(cd8, features = c('nFeature_RNA', 'nCount_RNA', 'percent.mt'), ncol = 3)
+
+plot1 <- FeatureScatter(cd8, feature1 = 'nCount_RNA', feature2 = 'percent.mt')
+plot2 <- FeatureScatter(cd8, feature1 = 'nCount_RNA', feature2 = 'nFeature_RNA')
+plot1 + plot2
+
+cd8 <- subset(cd8, subset = nFeature_RNA > 200 & nFeature_RNA < 6000)
+
+cd8 <- NormalizeData(cd8, normalization.method = 'LogNormalize', scale.factor = 10000)
+
+all.genes <- rownames(cd8)
+cd8 <- ScaleData(cd8, features = all.genes, vars.to.regress = c('percent.mt'))
+```
+
+```{r PCA}
+#cd8 <- RunPCA(cd8, npcs = 100)
+#ElbowPlot(cd8, ndims = 100)
+
+cd8 <- RunPCA(cd8, npcs = 30)
+```
+```{r neighbors and clustering}
+#cd8 <- FindNeighbors(cd8, dims = PCs)
+cd8 <- FindClusters(cd8, resolution = 1.4)
+
+#uncomment this to add the active identity UMAP to the metadata
+cd8@meta.data$AEG_CD8_RNA_snn_res.1.4<- cd8@active.ident
+```
+```{r UMAP}
+#cd8 <- RunUMAP(cd8, dims = PCs)
+DimPlot(cd8, split.by = c('group'))
+```
+
+```{r Merging clusters}
+#RES/METADATA LOCATION
+RES <- cd8@meta.data$AEG_CD8_RNA_snn_res.0.4
+
+RES[RES == '8'] <- '3'
+
+RES[RES == '12'] <- '3'
+
+RES[RES == '11'] <- '9'
+
+RES[RES == '9'] <- '1'
+
+RES[RES == '10'] <- '8'
+
+Idents(cd8) <- RES
+
+cd8 <- subset(cd8, subset = AEG_CD8_RNA_snn_res.0.4 == '8', invert = TRUE)
+DimPlot(cd8, label = TRUE, label.box = TRUE)
+```
+```{r Transferring B cell contamination back to global clustering}
+load('/Users/agolfinos/Desktop/hnc_all_annot_2021-09-14.rda')
+DimPlot(hnc, label = TRUE, label.box = TRUE)
+
+#mapping the cells from cluster 12 (B cell contamination) to their own file
+bc_contam <- subset(cd8, idents = '8')
+
+bc_contam@active.ident[bc_contam@active.ident == 'B cells'] <- '8'
+DimPlot(bc_contam)
+
+Idents(object = bc_contam) <- 'Bcells' 
+
+temp_meta <- ifelse(colnames(hnc) %in% colnames(bc_contam),
+                     as.character(bc_contam@active.ident),
+                     as.character(hnc@active.ident))
+table(temp_meta)
+
+hnc@meta.data$AEG_global.cluster <- temp_meta
+Idents(hnc) <- temp_meta
+
+#now I'll get rid of cluster 8 from the current analysis
+cd8 <- subset(cd8, idents = '8', invert=TRUE)
+DimPlot(cd8, split.by = 'group')
+```
+```{r Adding disease state to new metadata column}
+cd8@meta.data$group <- paste(cd8@meta.data$tissue, cd8@meta.data$is_HD, cd8@meta.data$hpv_status, sep = '_')
+```
+
+```{r DE genes}
+degenes <- data.frame(Res= character(), Cluster= numeric(), DEgenes= character(), stringsAsFactors=FALSE)
+for (x in clusts) {
+  rest <- clusts[clusts != x]
+  #res1 <- c(res, res, res, res, res, res, res, res, res, res)
+  clust <- c(x, x, x, x, x, x, x, x, x, x)
+  marks <- FindMarkers(cd8, ident.1 = x, ident.2 = rest, min.pct = 0.25, only.pos = TRUE)
+  marks1 <- marks[order(-marks$avg_log2FC, -marks$p_val_adj),]
+  marks2 <- row.names(marks1[1:10,])
+  dat <- data.frame(clust, marks2)
+  degenes <- rbind(degenes, dat)
+}
+#out <- paste(obj, res, '.csv', sep='_')
+#write.csv(degenes, out)
+
+cd8_temp <- subset(cd8, idents = c(clusts))
+
+de_uniq <- unique(degenes[,2])
+DotPlot(cd8_temp, features = de_uniq, col.min = 0) + theme(axis.text.x = element_text(angle = 90))
+```
+
+```{r Violin plots of Cillo sigs}
+library(readxl)
+cillo_cd8 <- read_excel('/Users/agolfinos/Desktop/mmc4.xlsx', sheet = 'CD8+ Clusters - DEGs')
+#colnames(cillo_cd8) <- cillo_cd8[1,]
+#cillo_cd8 <- cillo_cd8[-1,]
+
+cillo_cd8 <- cillo_cd8[ which(cillo_cd8$Log_fold_change > 1),]
+cillo_cd8 <- cillo_cd8[ which(cillo_cd8$`%_positive_in_cluster` > 0.25),]
+cd8_marks <- cillo_cd8[c('Gene', 'Cluster')]
+cd8_marks <- setNames(as.character(cd8_marks$Cluster), cd8_marks$Gene)
+
+x <- '8'
+genes <- names(cd8_marks)[cd8_marks == x]
+VlnPlot(cd8, features = c(genes), pt.size = 0)
+
+```
+```{r Violin plots of Rafi Ahmed sigs}
+#DimPlot(cd8, group.by = 'AEG_CD8_RNA_snn_res.0.2')
+#Stem-like CD8 markers (Eberhardt et al 2021)
+VlnPlot(cd8, features = c('TCF7', 'XCL1', 'LEF1', 'GPR183', 'IL7R', 'CCR7'), pt.size = 0)
+
+#Transitory CD8 markers (Eberhardt et al 2021)
+VlnPlot(cd8, features = c('NR4A1', 'PRDM1', 'ID2', 'IFNG', 'FOS', 'JUN'), pt.size = 0)
+
+#Terminally exhausted/differentiated CD8 markers (Eberhardt et al 2021)
+VlnPlot(cd8, features = c('GZMB', 'GZMA', 'PRF1', 'GNLY', 'HAVCR2', 'ENTPD1'), pt.size = 0)
+```
+```{r Tables of samples}
+options(max.print=100000)
+#not all clusters at this resolution consist of more than 5 samples at >2%
+#table(cd8@meta.data$orig.ident, cd8@meta.data$AEG_CD8_RNA_snn_res.2)
+
+#not all clusters at this resolution consist of more than 5 samples at >2%
+#table(cd8@meta.data$orig.ident, cd8@meta.data$AEG_CD8_RNA_snn_res.1.9)
+
+#not all clusters at this resolution consist of more than 5 samples at >2%
+#table(cd8@meta.data$orig.ident, cd8@meta.data$AEG_CD8_RNA_snn_res.1.8)
+
+#not all clusters at this resolution consist of more than 5 samples at >2%
+#table(cd8@meta.data$orig.ident, cd8@meta.data$AEG_CD8_RNA_snn_res.1.7)
+
+#not all clusters at this resolution consist of more than 5 samples at >2%
+#r16 <- table(cd8@meta.data$orig.ident, cd8@meta.data$AEG_CD8_RNA_snn_res.1.6)
+
+#not all clusters at this resolution consist of more than 5 samples at >2%
+#table(cd8@meta.data$orig.ident, cd8@meta.data$AEG_CD8_RNA_snn_res.1.5)
+
+#not all clusters at this resolution consist of more than 5 samples at >2%
+#r14 <- table(cd8@meta.data$orig.ident, cd8@meta.data$AEG_CD8_RNA_snn_res.1.4)
+
+#not all clusters at this resolution consist of more than 5 samples at >2%
+#table(cd8@meta.data$orig.ident, cd8@meta.data$AEG_CD8_RNA_snn_res.1.3)
+
+#not all clusters at this resolution consist of more than 5 samples at >2%
+#table(cd8@meta.data$orig.ident, cd8@meta.data$AEG_CD8_RNA_snn_res.1.2)
+
+#not all clusters at this resolution consist of more than 5 samples at >2%
+#table(cd8@meta.data$orig.ident, cd8@meta.data$AEG_CD8_RNA_snn_res.1.1)
+
+#not all clusters at this resolution consist of more than 5 samples at >2%
+#r1 <- table(cd8@meta.data$orig.ident, cd8@meta.data$AEG_CD8_RNA_snn_res.1)
+#col_sums_r1 <- colSums(r1)
+#col_sums_r1
+
+#not all clusters at this resolution consist of more than 5 samples at >2%
+#r1 <- table(cd8@meta.data$orig.ident, cd8@meta.data$AEG_CD8_RNA_snn_res.1)
+#col_sums_r1 <- colSums(r1)
+#col_sums_r1
+```
+```{r Transferring B cell/plasma cell contamination back to the global plot}
+load('/Users/agolfinos/Desktop/hnc_all_annot_2021-09-13.rda')
+DimPlot(hnc, label = TRUE, label.box = TRUE)
+
+#mapping the cells from cluster 12 (now named B cells) to the global population of all cells
+bc_contam <- subset(cd8, subset = AEG_CD8_RNA_snn_res.0.6 == '10')
+
+bc_contam@meta.data$AEG_CD8_RNA_snn_res.0.6[bc_contam@meta.data$AEG_CD8_RNA_snn_res.0.6 == 'B cells'] <- '10'
+DimPlot(bc_contam, group.by = 'AEG_CD8_RNA_snn_res.0.6')
+
+Idents(object = bc_contam) <- 'Bcells' 
+
+temp_meta <- ifelse(colnames(hnc) %in% colnames(bc_contam),
+                     as.character(bc_contam@active.ident),
+                     as.character(hnc@active.ident))
+table(temp_meta)
+
+hnc@meta.data$AEG_global.cluster <- temp_meta
+Idents(hnc) <- temp_meta
+
+#now I'll get rid of cluster 12 from the current analysis
+cd8 <- subset(cd8, subset = AEG_CD8_RNA_snn_res.0.6 == '10', invert=TRUE)
+DimPlot(cd8, group.by = 'AEG_CD8_RNA_snn_res.0.6')
+Idents(cd8) <- cd8@meta.data$AEG_CD8_RNA_snn_res.0.6
+DimPlot(cd8)
+```
+
+```{r Frequency plots WORKS!}
+LOC <- cd8@active.ident
+COUNTS <- table(cd8@meta.data$group, LOC)
+
+
+
+count_dict <- list()
+
+for (x in unique(LOC)) {
+  c <- x
+  v1 <- COUNTS[1,c]/sum(COUNTS[1,])
+  v2 <-COUNTS[2,c]/sum(COUNTS[2,])
+  v3 <-COUNTS[3,c]/sum(COUNTS[3,])
+  v4 <-COUNTS[4,c]/sum(COUNTS[4,])
+  v5 <-COUNTS[5,c]/sum(COUNTS[5,])
+  v6 <-COUNTS[6,c]/sum(COUNTS[6,])
+  
+  count_dict[paste(c, rownames(COUNTS)[1])] <- v1
+  count_dict[paste(c, rownames(COUNTS)[2])] <- v2
+  count_dict[paste(c, rownames(COUNTS)[3])] <- v3
+  count_dict[paste(c, rownames(COUNTS)[4])] <- v4
+  count_dict[paste(c, rownames(COUNTS)[5])] <- v5
+  count_dict[paste(c, rownames(COUNTS)[6])] <- v6
+}
+
+count_ordered <- count_dict[order(names(count_dict))]
+
+#counter = 1
+for (x in unique(LOC)) {
+  counter = 1
+  
+  #calling from the list of frequencies
+  g1 <- counter
+  g1 <- names(count_dict)[g1]
+  f1 <- count_dict[[g1]]
+  
+  counter <- counter + 1
+  
+  g2 <- counter
+  g2 <- names(count_dict)[g2]
+  f2 <- count_dict[[g2]]
+  
+  counter <- counter + 1
+  
+  g3 <- counter
+  g3 <- names(count_dict)[g3]
+  f3 <- count_dict[[g3]]
+  
+  counter <- counter + 1
+  
+  g4 <- counter
+  g4 <- names(count_dict)[g4]
+  f4 <- count_dict[[g4]]
+  
+  counter <- counter + 1
+  
+  g5 <- counter
+  g5 <- names(count_dict)[g5]
+  f5 <- count_dict[[g5]]
+  
+  counter <- counter + 1
+  
+  g6 <- counter
+  g6 <- names(count_dict)[g6]
+  f6 <- count_dict[[g6]]
+  
+  counter <- counter + 1
+  
+  groups <- c(g1, g2, g3, g4, g5, g6)
+  #freqs <- 
+  #df.groups <- data.frame(groups, ) 
+}
+```
+```{r Boxplots of Frequency WORKS!!}
+CLUST <- '7'
+
+cluster <- paste(CLUST, '_HNC_CD8', sep = '')
+
+freq1 <- count_dict[[paste(CLUST, 'PBMC_HD_HPV-', sep = ' ')]]
+freq2 <- count_dict[[paste(CLUST, 'PBMC_HNSCC_HPV-', sep = ' ')]]
+freq3 <- count_dict[[paste(CLUST, 'PBMC_HNSCC_HPV+', sep = ' ')]]
+freq4 <- count_dict[[paste(CLUST, 'TIL_HNSCC_HPV-', sep = ' ')]]
+freq5 <- count_dict[[paste(CLUST, 'TIL_HNSCC_HPV+', sep = ' ')]]
+freq6 <- count_dict[[paste(CLUST, 'Tonsil_HD_HPV-', sep = ' ')]]
+
+clust <- paste(cluster, '.png', sep = '')
+tiff(clust, units= 'in', 'width' = 10, height = 25, res = 250)
+
+groups <- c(paste(CLUST, 'PBMC_HD_HPV-', sep = ' '), paste(CLUST, 'PBMC_HNSCC_HPV-', sep = ' '), paste(CLUST, 'PBMC_HNSCC_HPV+', sep = ' '), paste(CLUST, 'TIL_HNSCC_HPV-', sep = ' '), paste(CLUST, 'TIL_HNSCC_HPV+', sep = ' '), paste(CLUST, 'Tonsil_HD_HPV-', sep = ' '))
+freqs <- c(freq1, freq2, freq3, freq4, freq5, freq6)
+df1 <- data.frame(groups, freqs)
+
+ggplot(df1) +
+  geom_boxplot(aes(x = groups, y = freqs, color = groups, fill = groups), position = position_dodge(), alpha = 0.5, outlier.color = NA) + geom_point(aes(x = groups, y = freqs, color = groups), size = 6, alpha = 0.8, position = position_jitterdodge()) + theme_bw() + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(), strip.text = element_text(size =35, face = "bold" ), axis.title.y = element_blank(), axis.title = element_text( size = 55, face = "bold" )) + scale_shape_manual(values = rep(1, 4)) +  theme(axis.text.y = element_text(size = 40))   
+
+#facet_wrap(~ cluster, scales = "free", nrow = 1)  
+#dev.off()
+```
+
+

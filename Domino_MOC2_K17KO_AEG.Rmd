@@ -1,0 +1,66 @@
+---
+title: "Domino_test"
+author: "Athena Golfinos"
+date: "9/2/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r import packages}
+library(Seurat)
+library(patchwork)
+library(dplyr)
+library(ggplot2)
+library(clustree)
+library(topGO)
+library(biomaRt)
+library(SeuratWrappers)
+```
+
+```{r load in objects}
+load('/Users/agolfinos/Desktop/TFanalysis_Wangpaper/k17ko/k17ko.rda')
+DimPlot(seurat, group.by= 'global.cluster2')
+DimPlot(seurat)
+```
+
+```{r Domino analysis}
+library(domino)
+
+#compiling the information we need to create the domino object
+COUNTS <- k17ko@assays$RNA@counts
+Z_SCORES <- k17ko@assays$RNA@scale.data
+CLUSTERS <- k17ko@active.ident
+#we need to transpose the auc table compared to the SCENIC output
+AUC <- t(read.table('/Users/agolfinos/Desktop/TFanalysis_Wangpaper/k17ko/AUC_k17ko.csv', header = TRUE, row.names = 1, stringsAsFactors = FALSE, sep = ','))
+CPDB_DB <- '/Users/agolfinos/Desktop/HNC_vs_MOC2/MOC2/domino/cpdb/'
+#apparently this file is optional--it should be a csv but our output was a pickle file so we are going to try without it
+REGULONS <- '/Users/agolfinos/Desktop/HNC_vs_MOC2/MOC2/domino/regulons.csv'
+
+#generating the domino object
+pbmc_dom = create_domino(signaling_db = CPDB_DB, features = AUC, counts = COUNTS, z_scores = Z_SCORES, clusters = CLUSTERS)
+
+pbmc_dom = build_domino(dom, max_tf_per_clust = 10, min_tf_pval = .001, max_rec_per_tf = 10, rec_tf_cor_threshold = .25)
+
+signaling_network(pbmc_dom, edge_weight = .25, min_thresh = 1, max_thresh = 2.5)
+
+gene_network(pbmc_dom, clust = 'CD8', layout = 'fr')
+gene_network(pbmc_dom, clust = 'CD4', layout = 'fr')
+gene_network(pbmc_dom, clust = 'Treg', layout = 'fr')
+gene_network(pbmc_dom, clust = 'Mac_Trem2', layout = 'fr')
+gene_network(pbmc_dom, clust = 'Mac_Cx3cr1', layout = 'fr')
+gene_network(pbmc_dom, clust = 'Mac_Cxcl9', layout = 'fr')
+gene_network(pbmc_dom, clust = 'Mac_Lyve1', layout = 'fr')
+gene_network(pbmc_dom, clust = 'Mac_Fn1', layout = 'fr')
+
+incoming_signaling_heatmap(pbmc_dom, rec_clust = 'CD8', max_thresh = 2.5)
+incoming_signaling_heatmap(pbmc_dom, rec_clust = 'CD4', max_thresh = 2.5)
+incoming_signaling_heatmap(pbmc_dom, rec_clust = 'Treg', max_thresh = 2.5)
+
+feat_heatmap(pbmc_dom, norm = TRUE, bool = FALSE)
+cor_heatmap(pbmc_dom, bool = FALSE, mark_connections = TRUE, fontsize = 14, cexRow = 0.05, cexCol = .1)
+```
+
+

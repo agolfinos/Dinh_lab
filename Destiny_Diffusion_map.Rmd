@@ -1,0 +1,150 @@
+---
+title: "Destiny"
+author: "Athena Golfinos"
+date: "2/18/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r functions}
+destiny.dpt <- function(immune.combined2, anno, out, analysis.name){
+  color_clusters <- c("#DC050C", "#FB8072", "#1965B0", "#7BAFDE", "#882E72", "#B17BA6", 
+                      "#FF7F00", "#FDB462", "#E7298A", "#E78AC3","#33A02C", "#B2DF8A", 
+                      "#55A1B1", "#8DD3C7", "#A6761D", "#E6AB02", "#7570B3", "#BEAED4", 
+                      "#666666", "#999999", "#AA8282", "#D4B7B7", "#8600BF", "#BA5CE3", 
+                      "#808000","#AEAE5C", "#1E90FF", "#00BFFF", "#56FF0D", "#FFFF00")
+  # this is my metadata column
+  Idents(immune.combined2) <- anno
+  gene_ind <- VariableFeatures(immune.combined2)
+  test <- as.matrix(immune.combined2@assays$RNA[gene_ind,])
+  rownames(test) = gene_ind
+  colnames(test) = colnames(immune.combined2@assays$RNA)
+  cluster_ids <- Idents(immune.combined2)
+  ind <- 1:length(cluster_ids)
+  set.seed(450)
+  dif <- destiny::DiffusionMap(t(test), )
+  cluster_ids <- Idents(immune.combined2)
+  ind = 1:length(cluster_ids)
+  #plot.new()
+  #par(mfrow = c(1,1))
+  #plot(dif@eigenvectors[,1], -1*dif@eigenvectors[,2], xlab = "Diffusion-1", ylab = "Diffusion-2", col = color_clusters[cluster_ids], cex = 0.7, pch = 16)
+  #legend("bottomleft", legend = unique(Idents(immune.combined2)[ind]), pch = 15, col = color_clusters[unique(cluster_ids[ind])], ncol = 1)
+  
+  #ggsave('/Volumes/hdlab/Projects/HNC_SPORE/Destiny/02182022_HNC_cdc1cdc2_lamp3/cdc1cdc2lamp3_diffusionmap.png')
+  
+  dpt <- DPT(dif)
+  
+  #seeing if there's any differences between the two objects here for the sake of coloring the pseudotime plot
+  setdiff(rownames(dpt@dm@eigenvectors), names(cluster_ids))
+  setdiff(names(cluster_ids), rownames(dpt@dm@eigenvectors)) #there are differences here!
+  
+  test <- cluster_ids[names(cluster_ids) %in% rownames(dpt@dm@eigenvectors)]
+  
+  setdiff(names(test), rownames(dpt@dm@eigenvectors))
+  
+  #plotting the diffusion pseudotime object by cluster
+  plot.DPT(dpt, col = test, pal = color_clusters, col_tip = 'black') + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+  dpt.out <- paste(out, analysis.name, 'destiny_dpt.png', sep = '')
+  ggsave(dpt.out, width = 14, height = 7)
+  
+  return(dpt)
+  
+}
+```
+
+
+```{r random prep}
+hnc$global.cluster0[hnc$global.cluster0 == 'pDC'] <- 'DCs'
+hnc$global.cluster0[hnc$global.cluster0 == 'DC3_LAMP3'] <- 'DCs'
+hnc$global.cluster0[hnc$global.cluster0 == 'cDC2_CD1C'] <- 'DCs'
+hnc$global.cluster0[hnc$global.cluster0 == 'cDC2_CD33'] <- 'DCs'
+hnc$global.cluster0[hnc$global.cluster0 == 'cDC1_CLEC9A'] <- 'DCs'
+hnc$global.cluster0[hnc$global.cluster0 == 'DC_pDC'] <- 'DCs'
+hnc$global.cluster0[hnc$global.cluster0 == 'Mono_CD14'] <- 'Monocytes'
+hnc$global.cluster0[hnc$global.cluster0 == 'Mono_CD14_IL1B'] <- 'Monocytes'
+hnc$global.cluster0[hnc$global.cluster0 == 'Mono_CD14_THBS1'] <- 'Monocytes'
+hnc$global.cluster0[hnc$global.cluster0 == 'Mono_Int'] <- 'Monocytes'
+hnc$global.cluster0[hnc$global.cluster0 == 'Mono_CD14_ID1'] <- 'Monocytes'
+hnc$global.cluster0[hnc$global.cluster0 == 'CD16_Monocytes'] <- 'Monocytes'
+hnc$global.cluster0[hnc$global.cluster0 == 'Mono_CD16'] <- 'Monocytes'
+hnc$global.cluster0[hnc$global.cluster0 == 'Mono_TIL'] <- 'Monocytes'
+hnc$global.cluster0[hnc$global.cluster0 == 'Mac_C1QA'] <- 'Macrophages'
+hnc$global.cluster0[hnc$global.cluster0 == 'Mac_SPP1'] <- 'Macrophages'
+hnc$global.cluster0[hnc$global.cluster0 == 'Mac_IL1B'] <- 'Macrophages'
+hnc$global.cluster0[hnc$global.cluster0 == 'Mac_SPP1_PLTP'] <- 'Macrophages'
+
+unique(hnc$global.cluster4)
+
+hnc_alldcs <- subset(hnc, idents = c('cDC2_CD33', 'cDC1_CLEC9A', 'DC3_LAMP3', 'cDC2_CD1C'))
+
+#now taking out the tumor CD33+ cDC2s 
+hnc_alldcs$tissue_cluster <- paste(hnc_alldcs$tissue, hnc_alldcs$global.cluster4, sep = '_')
+hnc_notumor <- subset(hnc_alldcs, subset = tissue_cluster == 'TIL_cDC2_CD33', invert = TRUE)
+
+#now taking out the blood CD33+ cDC2s
+hnc_noblood <- subset(hnc_alldcs, subset = tissue_cluster == 'PBMC_cDC2_CD33', invert = TRUE)
+
+
+#now splitting by HPV status
+hnc_hpvposdcs <- subset(hnc_alldcs, subset = hpv_status == 'HPV+')
+hnc_hpvnegdcs <- subset(hnc_alldcs, subset = hpv_status == 'HPV-')
+
+
+#creating objects with all four DC subsets, except either keeping in TIL or PBMC cDC2 CD33
+hpvposhnc_notumor <- subset(hnc_hpvposdcs, subset = tissue_cluster == 'TIL_cDC2_CD33', invert = TRUE)
+hpvposhnc_noblood <- subset(hnc_hpvposdcs, subset = tissue_cluster == 'PBMC_cDC2_CD33', invert = TRUE)
+
+hpvneghnc_notumor <- subset(hnc_hpvnegdcs, subset = tissue_cluster == 'TIL_cDC2_CD33', invert = TRUE)
+hpvneghnc_noblood <- subset(hnc_hpvnegdcs, subset = tissue_cluster == 'PBMC_cDC2_CD33', invert = TRUE)
+
+
+Idents(hpvneghnc_notumor) <- hpvneghnc_notumor$global.cluster4
+Idents(hpvneghnc_noblood) <- hpvneghnc_noblood$global.cluster4
+
+Idents(hpvposhnc_notumor) <- hpvposhnc_notumor$global.cluster4
+Idents(hpvposhnc_noblood) <- hpvposhnc_noblood$global.cluster4
+
+#making new versions of these subsets, just with fewer cells
+hpvneghnc_notumor_mini <- subset(hpvneghnc_notumor, idents = c('DC3_LAMP3', 'cDC2_CD33'))
+hpvneghnc_noblood_mini <- subset(hpvneghnc_noblood, idents = c('DC3_LAMP3', 'cDC2_CD33'))
+
+hpvposhnc_notumor_mini <- subset(hpvposhnc_notumor, idents = c('DC3_LAMP3', 'cDC2_CD33'))
+hpvposhnc_noblood_mini <- subset(hpvposhnc_noblood, idents = c('DC3_LAMP3', 'cDC2_CD33'))
+```
+
+
+```{r destiny}
+library(destiny)
+#testing
+immune.combined2 = hnc_alldcs
+anno <- 'global.cluster4'
+out <- '/Volumes/hdlab/Projects/HNC_SPORE/Destiny/'
+analysis.name <- 'hnc_alldcs_TILandPBMC_HPV+andHPV-'
+
+#from 03/4/2022 analysis (including all DC subsets, and just a subset of the CD33 cDC2s)
+destiny.dpt(immune.combined2 = hpvposhnc_notumor, anno = 'global.cluster4', out = '/Volumes/hdlab/Projects/HNC_SPORE/Destiny/03042022_HNC_dcs_cd33_hpvstatus/', analysis.name = 'hpvposhnc_notumorCD33cDC2')
+
+destiny.dpt(immune.combined2 = hpvposhnc_noblood, anno = 'global.cluster4', out = '/Volumes/hdlab/Projects/HNC_SPORE/Destiny/03042022_HNC_dcs_cd33_hpvstatus/', analysis.name = 'hpvposhnc_nobloodCD33cDC2')
+
+destiny.dpt(immune.combined2 = hpvneghnc_notumor, anno = 'global.cluster4', out = '/Volumes/hdlab/Projects/HNC_SPORE/Destiny/03042022_HNC_dcs_cd33_hpvstatus/', analysis.name = 'hpvneghnc_notumorCD33cDC2')
+
+destiny.dpt(immune.combined2 = hpvneghnc_noblood, anno = 'global.cluster4', out = '/Volumes/hdlab/Projects/HNC_SPORE/Destiny/03042022_HNC_dcs_cd33_hpvstatus/', analysis.name = 'hpvneghnc_nobloodCD33cDC2')
+
+
+#from 03/09/2022 analysis (just including LAMP3-DC3s and CD33 DCs)
+destiny.dpt(immune.combined2 = hpvposhnc_notumor_mini, anno = 'global.cluster4', out = '/Volumes/hdlab/Projects/HNC_SPORE/Destiny/03092022_HNC_LAMP3_CD33_maturation/', analysis.name = 'hpvposhnc_notumorCD33cDC2_mini')
+
+destiny.dpt(immune.combined2 = hpvposhnc_noblood_mini, anno = 'global.cluster4', out = '/Volumes/hdlab/Projects/HNC_SPORE/Destiny/03092022_HNC_LAMP3_CD33_maturation/', analysis.name = 'hpvposhnc_nobloodCD33cDC2_mini')
+
+destiny.dpt(immune.combined2 = hpvneghnc_notumor_mini, anno = 'global.cluster4', out = '/Volumes/hdlab/Projects/HNC_SPORE/Destiny/03092022_HNC_LAMP3_CD33_maturation/', analysis.name = 'hpvneghnc_notumorCD33cDC2_mini')
+
+destiny.dpt(immune.combined2 = hpvneghnc_noblood_mini, anno = 'global.cluster4', out = '/Volumes/hdlab/Projects/HNC_SPORE/Destiny/03092022_HNC_LAMP3_CD33_maturation/', analysis.name = 'hpvneghnc_nobloodCD33cDC2_mini')
+
+dpt <- destiny.dpt(immune.combined2 = hnc_alldcs, anno = 'global.cluster4', out = '/Volumes/hdlab/Projects/HNC_SPORE/Destiny/', analysis.name = 'hnc_alldcs')
+
+```
+
+

@@ -1,0 +1,2022 @@
+title: "LAMP3_DC_proportions" author: "Athena Golfinos" date: "2/7/2022" output: html_document ---
+
+```{r import}
+library(data.table)
+library(dplyr)
+library(ggplot2)
+library(ggpubr)
+library(EnhancedVolcano)
+#library(qusage)
+#library(GSVA)
+#library(cerebroApp)
+library(RColorBrewer)
+library(Seurat)
+library(DescTools)
+library(cowplot)
+```
+
+# 05/30/2022 Volcano plot of mregDCCXCL9hi vs. mregDCCXCL9lo
+
+```{r}
+mregs <- hnc[,hnc$mreg_cxcl9_globalcluster4 %in% c("mregDC_CXCL9hi", "mregDC_CXCL9lo")]
+
+mreg_volcplot <- volcPlot(mregs, "mregDChivslo", meta = 'mreg_cxcl9_globalcluster4', cell1 = "mregDC_CXCL9hi", cell2 = "mregDC_CXCL9lo", out = '/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/', fccutoff = 0.1, pval_adj = 0.05, pcutoff = 0.05)
+
+mreg_de <- mreg_volcplot
+
+mreg_de <- mreg_de[mreg_de$pct.1 -mreg_de$pct.2 > 0.1 & mreg_de$p_val_adj < 0.01,]
+
+DoHeatmap(mregs, features = rownames(mreg_de), group.by = 'mreg_cxcl9_globalcluster4')
+
+DotPlot(mregs, features = rownames(mreg_de), group.by = 'mreg_cxcl9_globalcluster4', col.min = 0) + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + coord_flip()
+
+VlnPlot(hnc, group.by = 'mreg_cxcl9_globalcluster4', features = 'CXCR3', idents = c('CD4_1', 'CD4_2', 'CD4_3', 'CD4_4', 'CD8_1', 'CD8_2', 'CD8_3', 'CD8_4', 'CD8_5', 'Treg_1', 'Treg_2', 'cDC2_CD33', 'cDC2_CD1C', 'cDC1_CLEC9A', "mregDC_CXCL9hi", "mregDC_CXCL9lo"))
+ggsave('/Volumes/hdlab/Projects/HNC_SPORE/Golfinosetal2022/mregDC_CXCL9hivslo_DEgenes_dotplot.png', units = 'in', width = 5, height = 10, dpi = 1200)
+```
+
+```{r making count table cDC2_CD1C}
+SEU <- hnc
+subset <- 'cDC2_CD1C'
+
+tst <- subset(SEU, idents =  subset)
+test <- table(tst$orig.ident, tst$hpv_status)
+test <- as.data.frame(tst$hpv_status)
+test1 <- as.data.frame(tst$orig.ident)
+test2 <- merge(test, test1, by = 0)
+rownames(test2) <- NULL
+test2$Row.names <- NULL
+test2 <- dplyr::distinct(test2)
+test2$orig.ident <- test2$`tst$orig.ident`
+test2$`tst$orig.ident` <- NULL
+test2$hpv_status <- test2$`tst$hpv_status`
+test2$`tst$hpv_status` <- NULL
+rownames(test2) <- test2$orig.ident
+
+#getting a dataframe of the number of lamp3 dendritic cells for each patient
+hpvpos_lamp3 <- subset(tst, subset = tissue_hpv == 'HNSCC:TIL:HPV+')
+hpvneg_lamp3 <- subset(tst, subset = tissue_hpv == 'HNSCC:TIL:HPV-')
+tmp <- hpvpos_lamp3$orig.ident
+tmp <- plyr::count(tmp)
+tmp2 <- hpvneg_lamp3$orig.ident
+tmp2 <- plyr::count(tmp2)
+tmp3 <- rbind(tmp, tmp2)
+rownames(tmp3) <- tmp3$x
+
+#now merging the number of lamp3 dendritic cells by each patient with test2
+tmp4 <- NULL
+tmp4 <- merge(test2, tmp3, on.x = 'orig.ident', on.y = 'x')
+tmp5 <- tmp4[tmp4$orig.ident==tmp4$x,]
+tmp5$x <- NULL
+tmp5$subset_count <- tmp5$freq
+tmp5$freq <- NULL
+
+#now determining the number of total dendritic cells by each patient
+hnc_dcs <- subset(hnc, subset = global.cluster == c('DCs'))
+hnc_pdc <- subset(hnc, subset = global.cluster == 'pDC')
+hnc_dcs <- subset(hnc_dcs, subset = tissue == 'TIL')
+hnc_pdc <- subset(hnc_pdc, subset = tissue == 'TIL')
+hnc_alldcs <- merge(hnc_dcs, hnc_pdc)
+tmp6 <- as.data.frame(table(hnc_alldcs$orig.ident, hnc_alldcs$global.cluster))
+tmp6$Var2 <- NULL
+tmp7 <- data.table::as.data.table(tmp6)[, lapply(.SD, sum), by = .(Var1)]
+
+#now merging the total DC counts with the other information (tmp5)
+tmp8 <- merge(tmp5, tmp7, by.x = 'orig.ident', by.y = 'Var1')
+tmp8$total_DCs <- tmp8$Freq
+tmp8$Freq <- NULL
+
+#now determining the total cell counts by patient
+hnc_til <- subset(hnc, subset = tissue == 'TIL')
+tmp9 <- as.data.frame(table(hnc_til$orig.ident))
+tmp10 <- tmp9[tmp9$Freq != 0, ]
+tmp10$total_cell_count <- tmp10$Freq
+tmp10$Freq <- NULL
+
+#I realized we were missing sample GSM4138147 from our big dataframe, so I'm adding it back in
+#missing <- subset(hnc, subset = orig.ident == 'GSM4138147')
+#m1 <- as.data.frame(table(missing$global.cluster4)) #this person doesn't have any mregDCs
+#m2 <- as.data.frame(table(missing$global.cluster)) #their total DCs (pDC + DCs) = 45
+#m3 <- as.data.frame(table(missing$orig.ident)) #their total cells are 1168
+#m4 <- c('GSM4138147', 'HPV+', 0, 45, 1168)
+
+#now merging the total cell counts (tmp10) with the other information (tmp8)
+tmp11 <- merge(tmp8, tmp10, by.x = 'orig.ident', by.y = 'Var1')
+#tmp12 <- rbind(tmp11, m4)
+write.csv(tmp11, '/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/Cillo_frequency_table/cillo_cdc2cd1ccd1a_counts.csv')
+```
+
+```{r making count table MANUAL}
+test <- table(hnc_lamp3dc$orig.ident, hnc_lamp3dc$hpv_status)
+test <- as.data.frame(hnc_lamp3dc$hpv_status)
+test1 <- as.data.frame(hnc_lamp3dc$orig.ident)
+test2 <- merge(test, test1, by = 0)
+rownames(test2) <- NULL
+test2$Row.names <- NULL
+test2 <- dplyr::distinct(test2)
+test2$orig.ident <- test2$`hnc_lamp3dc$orig.ident`
+test2$`hnc_lamp3dc$orig.ident` <- NULL
+test2$hpv_status <- test2$`hnc_lamp3dc$hpv_status`
+test2$`hnc_lamp3dc$hpv_status` <- NULL
+rownames(test2) <- test2$orig.ident
+
+#getting a dataframe of the number of lamp3 dendritic cells for each patient
+hpvpos_lamp3 <- subset(hnc_lamp3dc, subset = tissue_hpv == 'HNSCC:TIL:HPV+')
+hpvneg_lamp3 <- subset(hnc_lamp3dc, subset = tissue_hpv == 'HNSCC:TIL:HPV-')
+tmp <- hpvpos_lamp3$orig.ident
+tmp <- plyr::count(tmp)
+tmp2 <- hpvneg_lamp3$orig.ident
+tmp2 <- plyr::count(tmp2)
+tmp3 <- rbind(tmp, tmp2)
+rownames(tmp3) <- tmp3$x
+
+#now merging the number of lamp3 dendritic cells by each patient with test2
+tmp4 <- NULL
+tmp4 <- merge(test2, tmp3, on.x = 'orig.ident', on.y = 'x')
+tmp5 <- tmp4[tmp4$orig.ident==tmp4$x,]
+tmp5$x <- NULL
+tmp5$mregDC_count <- tmp5$freq
+tmp5$freq <- NULL
+
+#now determining the number of total dendritic cells by each patient
+hnc_dcs <- subset(hnc, subset = global.cluster == c('DCs'))
+hnc_pdc <- subset(hnc, subset = global.cluster == 'pDC')
+hnc_dcs <- subset(hnc_dcs, subset = tissue == 'TIL')
+hnc_pdc <- subset(hnc_pdc, subset = tissue == 'TIL')
+hnc_alldcs <- merge(hnc_dcs, hnc_pdc)
+tmp6 <- as.data.frame(table(hnc_alldcs$orig.ident, hnc_alldcs$global.cluster))
+tmp6$Var2 <- NULL
+tmp7 <- data.table::as.data.table(tmp6)[, lapply(.SD, sum), by = .(Var1)]
+
+#now merging the total DC counts with the other information (tmp5)
+tmp8 <- merge(tmp5, tmp7, by.x = 'orig.ident', by.y = 'Var1')
+tmp8$total_DCs <- tmp8$Freq
+tmp8$Freq <- NULL
+
+#now determining the total cell counts by patient
+hnc_til <- subset(hnc, subset = tissue == 'TIL')
+tmp9 <- as.data.frame(table(hnc_til$orig.ident))
+tmp10 <- tmp9[tmp9$Freq != 0, ]
+tmp10$total_cell_count <- tmp10$Freq
+tmp10$Freq <- NULL
+
+#I realized we were missing sample GSM4138147 from our big dataframe, so I'm adding it back in
+missing <- subset(hnc, subset = orig.ident == 'GSM4138147')
+m1 <- as.data.frame(table(missing$global.cluster4)) #this person doesn't have any mregDCs
+m2 <- as.data.frame(table(missing$global.cluster)) #their total DCs (pDC + DCs) = 45
+m3 <- as.data.frame(table(missing$orig.ident)) #their total cells are 1168
+m4 <- c('GSM4138147', 'HPV+', 0, 45, 1168)
+
+#now merging the total cell counts (tmp10) with the other information (tmp8)
+tmp11 <- merge(tmp8, tmp10, by.x = 'orig.ident', by.y = 'Var1')
+tmp12 <- rbind(tmp11, m4)
+write.csv(tmp12, '/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/Cillo_frequency_table/cillo_lamp3dc_counts.csv')
+```
+
+```{r calculating significance of HPV+ vs. HPV- LAMP3DC}
+lamp3 <- read.csv('/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/Cillo_frequency_table/cillo_lamp3dc_counts.csv')
+lamp3$mreg_over_totalcells <- lamp3$mregDC_count/lamp3$total_cell_count
+hpvpos <- subset(lamp3, hpv_status == "HPV+")
+hpvneg <- subset(lamp3, hpv_status == 'HPV-')
+v1 <- as.numeric(hpvpos$mreg_over_totalcells)
+v2 <- as.numeric(hpvneg$mreg_over_totalcells)
+wt <- wilcox.test(v1, v2, alternative = 'two.sided', paired = FALSE, exact = TRUE)
+```
+
+```{r calculating significance of HPV+ vs. HPV- cDC2}
+counts <- read.csv('/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/Cillo_frequency_table/cillo_cdc2cd1ccd1a_counts.csv')
+counts$subset_over_totalcells <- counts$subset_count/counts$total_cell_count
+hpvpos <- subset(counts, hpv_status == 'HPV+')
+hpvneg <- subset(counts, hpv_status == 'HPV-')
+v1 <- as.numeric(hpvpos$subset_over_totalcells)
+v2 <- as.numeric(hpvneg$subset_over_totalcells)
+wt <- wilcox.test(v1, v2, alternative = 'two.sided', paired = FALSE, exact = TRUE)
+```
+
+```{r LAMP3-DC markers HPV+ vs. HPV-}
+hnc_hpvpos <- subset(hnc, subset = tissue_hpv == 'HNSCC:TIL:HPV+')
+
+marks1 <- FindMarkers(hnc_hpvpos, ident.1 = 'DC3_LAMP3', logfc.threshold = 1.8, min.pct = 0.8, only.pos = TRUE, min.diff.pct = 0.8)
+
+hnc_hpvneg <- subset(hnc, subset = tissue_hpv == 'HNSCC:TIL:HPV-')
+
+marks2 <- FindMarkers(hnc_hpvneg, ident.1 = 'DC3_LAMP3', logfc.threshold = 1.8, min.pct = 0.8, only.pos = TRUE, min.diff.pct = 0.8)
+```
+
+```{r Dotplot of LAMP3_DC markers}
+hnc_til <- subset(hnc, subset = tissue == 'TIL')
+
+DotPlot(hnc_til, features = rownames(marks2))
+
+ggsave('/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/LAMP3_DC_markers/LAMP3_DC_tilmarkers_DotPlot.png', height = 12)
+
+VlnPlot(hnc_til, features = rownames(marks2), pt.size = 0)
+
+ggsave('/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/LAMP3_DC_markers/LAMP3_DC_tilmarkers_VlnPlot.png', width = 25)
+
+FeaturePlot(hnc_til, features = rownames(marks2))
+
+ggsave('/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/LAMP3_DC_markers/LAMP3_DC_tilmarkers_FeaturePlot.png', width = 10)
+
+DimPlot(hnc_til)
+
+ggsave('/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/LAMP3_DC_markers/LAMP3_DC_tilmarkers_DimPlot.png', width = 12, height = 7)
+```
+
+```{r}
+#hpvpos <- subset(hnc_til, subset = tissue == 'HPV+')
+#hpvneg <- subset(hnc_til, subset = tissue == 'HPV-')
+
+#hpvpos_cells <- colnames(hpvpos)
+#hpvneg_cells <- colnames(hpvneg)
+
+lamp3 <- subset(hnc_til, idents = 'DC3_LAMP3')
+
+# Set the identity of your cells to the desired column
+Idents(object = lamp3) <- "hpv_status"
+
+de <- FindMarkers(lamp3, ident.1 = 'HPV-', ident = 'HPV+', logfc.threshold = 0.2, min.diff.pct = 0.2, only.pos = TRUE, test.use = 'MAST')
+
+DotPlot(lamp3, features = c('XIST'), col.min = 0)
+VlnPlot(lamp3, features = c('XIST'), pt.size = 0)
+```
+
+# TCGA validation
+
+```{r TCGA validation--creating HPV+ and HPV- gene expression tables with our genes of interest (out = hpvpos_mini, hpvneg_mini)}
+out <- paste(path, 'gdac.broadinstitute.org_HNSC.Merge_rnaseqv2__illuminahiseq_rnaseqv2__unc_edu__Level_3__RSEM_genes_normalized__data.Level_3.2016012800.0.0', '/HNSC.rnaseqv2__illuminahiseq_rnaseqv2__unc_edu__Level_3__RSEM_genes_normalized__data.data.txt', sep = '')
+
+data <- as.data.frame(t(read.delim(out)))
+
+sample_meta <- read.delim('/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/LAMP3_DC_TCGA_validation/hnsc_tcga_pan_can_atlas_2018/data_clinical_sample.txt')
+sample_meta <- sample_meta[5:nrow(sample_meta),c('X.Patient.Identifier', 'Sample.Identifier')]
+
+patient_meta <- read.delim('/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/LAMP3_DC_TCGA_validation/hnsc_tcga_pan_can_atlas_2018/data_clinical_patient.txt')
+patient_meta <- patient_meta[5:nrow(patient_meta), c('X.Patient.Identifier', 'Subtype')]
+
+# checking to see if there are any different entries in these files (there are not)
+setdiff(sample_meta$X.Patient.Identifier, patient_meta$X.Patient.Identifier)
+setdiff(patient_meta$X.Patient.Identifier, sample_meta$X.Patient.Identifier)
+
+# merging all the metadata together so its in one data frame
+all_meta <- merge(sample_meta, patient_meta, by = 'X.Patient.Identifier')
+
+#now getting the right column names in the data
+colnames(data) <- data[1,]
+data <- data[-c(1),]
+
+rownames(data) <- data.frame(lapply(rownames(data), function(x) {
+          gsub("\\.", "-", x)
+          }))
+data$patient <- stringr::str_sub(rownames(data), 1, 12)
+
+#merging all the metadata together with the data itself
+all <- merge(data, all_meta, by.x = 'patient', by.y = 'X.Patient.Identifier')
+
+#splitting into two dataframes that have HPV+ and HPV- data in them.
+hpvpos <- all[all$Subtype %in% c("HNSC_HPV+"),]
+hpvneg <- all[all$Subtype %in% c("HNSC_HPV-"),]
+
+cn <- colnames(hpvpos)[colnames(hpvpos) %like% c('LAMP3|FSCN1|CSF2RA')]
+cn <- unique(c(cn, 'patient', 'Subtype'))
+hpvpos_mini <- hpvpos[,colnames(hpvpos) %in% cn]
+hpvneg_mini <- hpvneg[,colnames(hpvneg) %in% cn]
+```
+
+```{r plotting in a grouped boxplot}
+test1 <- gather(hpvpos_mini, variable, value, 'CSF2RA|1438', 'FSCN1|6624', 'LAMP3|27074') %>%
+        select(-c(1)) %>%
+        mutate(variable = factor(variable))
+test1$value<- as.numeric(test1$value)
+
+test2 <- gather(hpvneg_mini, variable, value, 'CSF2RA|1438', 'FSCN1|6624', 'LAMP3|27074') %>%
+        select(-c(1)) %>%
+        mutate(variable = factor(variable))
+test2$value<- as.numeric(test2$value)
+
+test3 <- rbind(test1, test2)
+                                                  
+glimpse(test3)
+
+ggplot(test3, aes(x = variable, y = value)) + geom_boxplot(aes(fill = Subtype)) + labs(title = 'LAMP3_DC markers in HPV- vs. HPV+ HNC', x = 'Gene name', y = 'Expression value') + theme_gray() + theme(plot.title = element_text(hjust = 0.5, size = 22)) + theme(axis.text = element_text(size = 16), axis.title = element_text(size = 16, face = 'bold')) + facet_wrap( ~ variable, scales = 'free')
+
+ggsave('/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/LAMP3_DC_TCGA_validation/lamp3dc_markers_hpv-vsHPV+HNC.png', height = 12, width = 10)
+```
+
+```{r Wilcox test comparing gene expression in TCGA data}
+lamp3 <- wilcox.test(as.numeric(hpvpos_mini$`LAMP3|27074`), as.numeric(hpvneg_mini$`LAMP3|27074`), alternative = 'two.sided', paired = FALSE, exact = TRUE)
+
+fscn1 <- wilcox.test(as.numeric(hpvpos_mini$`FSCN1|6624`), as.numeric(hpvneg_mini$`FSCN1|6624`), alternative = 'two.sided', paired = FALSE, exact = TRUE)
+
+csf2ra <- wilcox.test(as.numeric(hpvpos_mini$`CSF2RA|1438`), as.numeric(hpvneg_mini$`CSF2RA|1438`), alternative = 'two.sided', paired = FALSE, exact = TRUE)
+```
+
+#split mregDCs by CXCL9 expression (05/19/2022)
+
+```{r}
+mregdcs <- hnc[,hnc$global.cluster4 == 'DC3_LAMP3']
+cxcl9 <- as.data.frame(GetAssayData(object = mregdcs, slot = "data"))
+cxcl9 <- as.data.frame(t(cxcl9[rownames(cxcl9) == 'CXCL9',]))
+cxcl9$cell <- rownames(cxcl9)
+#plot(density(cxcl9)) #we are setting the threshold at 0.4 (above 0.4 is high)
+#test <- density(cxcl9)
+
+cxcl9lo <- cxcl9[cxcl9$CXCL9 < 0.5,]$cell
+cxcl9hi <- cxcl9[cxcl9$CXCL9 > 0.5,]$cell
+
+mreg_cxcl9hi <- hnc[,colnames(hnc) %in% cxcl9[cxcl9$CXCL9 > 0.5,]$cell]
+mreg_cxcl9hi@meta.data$cxcl9 <- 'mregDC_CXCL9hi'
+mreg_cxcl9lo <- hnc[,colnames(hnc) %in% cxcl9[cxcl9$CXCL9 < 0.5,]$cell]
+mreg_cxcl9lo@meta.data$cxcl9 <- 'mregDC_CXCL9lo'
+#saveRDS(mreg_cxcl9hi, '/Volumes/hdlab/Projects/HNC_SPORE/Seurat_Objs/cillo_mregdc_cxcl9cellsonly.RDS')
+#saveRDS(mreg_cxcl9lo, '/Volumes/hdlab/Projects/HNC_SPORE/Seurat_Objs/cillo_mregdc_cxcl9locellsonly.RDS')
+
+mreg_cxcl9hi <- readRDS('/Volumes/hdlab/Projects/HNC_SPORE/Seurat_Objs/cillo_mregdc_cxcl9cellsonly.RDS')
+mreg_cxcl9lo <- readRDS('/Volumes/hdlab/Projects/HNC_SPORE/Seurat_Objs/cillo_mregdc_cxcl9locellsonly.RDS')
+
+
+#adding in cxcl9 metadata (CXCL9hi first)
+hnc@meta.data$mreg_cxcl9_globalcluster4 <- hnc@active.ident
+
+temp_meta <- ifelse(colnames(hnc) %in% colnames(mreg_cxcl9hi),
+                     as.character(mreg_cxcl9hi@meta.data$cxcl9),
+                     as.character(hnc@meta.data$mreg_cxcl9_globalcluster4))
+
+table(temp_meta)
+hnc@meta.data$mreg_cxcl9_globalcluster4 <- temp_meta
+
+#adding in cxcl9 metadata (CXCL9lo now)
+temp_meta <- ifelse(colnames(hnc) %in% colnames(mreg_cxcl9lo),
+                     as.character(mreg_cxcl9lo@meta.data$cxcl9),
+                     as.character(hnc@meta.data$mreg_cxcl9_globalcluster4))
+
+hnc@meta.data$mreg_cxcl9_globalcluster4 <- temp_meta
+saveRDS(hnc, '/Volumes/hdlab/Projects/HNC_SPORE/Seurat_Objs/HNC_human/hnc_all_annot_2022-05-19***.RDS')
+```
+
+```{r origin functions}
+seu <- hnc
+meta <- 'mreg_cxcl9_globalcluster4'
+cell_names <- c('cDC2_CD1C', 'cDC1_CLEC9A')
+target_cell <- c('mregDC_CXCL9lo')
+out <- '/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/'
+
+origins <- function(seu, meta, cell_names, target_cell, out){
+    
+  #making the spreadsheet that will hold statistical information for categorization
+  distributions <- data.frame(Comparison_groups=character(), gene_cutoff = double(),
+                              dropped_cells = double(), kept_cells = double(), n_genes_1 = double(), 
+                              n_genes_2 = double(), Signature_classification = character(), 
+                              meta = character(), num_cells=double(), percent=character())
+  distributions <- rbind(distributions, c(0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+  colnames(distributions) <- c('Comparison_groups', 'gene_cutoff', 'dropped_cells',
+                               'kept_cells', 'sig_genes_1', 'sig_genes_2', 'Signature_classification', 
+                               'meta', 'num_cells', 'percent_cells')
+  
+  #getting our target cell data
+  Seurat::Idents(object = seu) <- seu@meta.data[[meta]]
+  seu1 <- subset(seu, idents = c(target_cell))
+  test <- unique(expand.grid(cell_names, cell_names))
+  test <- test[test$Var1 != test$Var2,]
+  
+  plots <- list()
+  #looping through in every combination of cell IDs
+  for (p in 1:nrow(test)){
+    
+    #getting our combination of cells
+    cell1 <- as.character(test[p,1])
+    cell2 <- as.character(test[p,2])
+    
+    marks <- Seurat::FindMarkers(seu, ident.1 = cell1, ident.2 = cell2, group.by = meta, test.use = 'wilcox', logfc.threshold = 0.1, only.pos = TRUE, min.diff.pct = 0.05)
+    marks2 <- Seurat::FindMarkers(seu, ident.1 = cell2, ident.2 = cell1, group.by = meta, test.use = 'wilcox', logfc.threshold = 0.1, only.pos = TRUE, min.diff.pct = 0.05)
+    
+    #finding the number of markers that we have for each group
+    num_marks <- nrow(marks)
+    num_marks2 <- nrow(marks2)
+    
+    #sorting each of the dataframes before we extract the top signatures
+    marks <- marks[order(marks$avg_log2FC, -rank(marks$p_val_adj), decreasing = TRUE),]
+    marks2 <- marks2[order(marks2$avg_log2FC, -rank(marks2$p_val_adj), decreasing = TRUE),]
+    
+    for (l in c(0.05, 0.10, 0.20)){
+      #only keeping the top X% (X being our DE threshold) of genes upregulated in this data set
+      marks <- marks[1:(num_marks*as.numeric(l)),]
+      marks2 <- marks2[1:(num_marks2*as.numeric(l)),]
+      
+      all_marks <- unique(c(rownames(marks), rownames(marks2)))
+      
+      a <- DotPlot(subset(seu, idents = c(cell1, cell2)), features = c(all_marks), col.min = 0) + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + ggtitle(paste(cell1, 'vs', cell2, sep = ' '), subtitle = paste('DE gene threshold = ', l* 100, '%', sep = ''))
+      
+      #density plot of genes from our two origins in the LAMP3_DCs
+      marks_2 <- rowMeans(Seurat::FetchData(object = seu1, vars = unique(rownames(marks))))
+      marks2_2 <- rowMeans(Seurat::FetchData(object = seu1, vars = unique(rownames(marks2))))
+      
+      fl <- paste(l, 'threshold_Red=', cell1, 'signature_Blue=', cell2, 'signature_DENSITYPLOT.png', sep = '_')
+      fl1 <- paste('/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/', fl, sep = '')
+      png(file = fl1)
+      plot(density(marks_2), col = 'red', main = paste(l, 'DE genes threshold, Red =', cell1, 'signature Blue = ', cell2, 'signature', sep = ' '))
+      lines(density(marks2_2), col = 'blue')
+      dev.off()
+      
+      print(paste('Number of markers in the ', cell1, ' subset is ', nrow(marks),sep = ''))
+      print(paste('Number of markers in the ', cell2, ' subset is ', nrow(marks2), sep = ''))
+      
+      #merging signature1
+      df <- as.data.frame(Seurat::GetAssayData(object = seu1, slot = "data"))
+      cell.ids <- Seurat::FetchData(object = seu1, vars = c(meta))
+      cell.ids$id <- rownames(cell.ids)
+      df <- df[rownames(df) %in% rownames(marks),]
+      df <- as.data.frame(t(df))
+      df$id <- rownames(df)
+      cells_meta <- merge(cell.ids, df, on = 'id')
+      
+      t1 <- as.numeric(length(as.numeric(c(meta)))) + 2
+      cells_meta$signature1 <- rowMeans(cells_meta[,t1:ncol(cells_meta)])
+      
+      #getting signature2
+      df2 <- as.data.frame(Seurat::GetAssayData(object = seu1, slot = 'data'))
+      cell.ids2 <- Seurat::FetchData(object = seu1, vars = c(meta))
+      cell.ids2$id <- rownames(cell.ids2)
+      df2 <- df2[rownames(df2) %in% rownames(marks2),]
+      df2 <- as.data.frame(t(df2))
+      df2$id <- rownames(df2)
+      cells_meta2 <- merge(cell.ids2, df2, on = 'id')
+      t2 <- as.numeric(length(as.numeric(c(meta)))) + 2
+      cells_meta2$signature2 <- rowMeans(cells_meta2[,t2:ncol(cells_meta2)])
+      
+      obj1 <- cells_meta[,c('id', 'signature1')]
+      obj2 <- cells_meta2[,c('id', 'signature2')]
+      obj_all <- merge(obj1, obj2, on = 'id')
+      
+      #getting only those cells that favor one side or the other by at least 20%
+      obj_all_filtered <- obj_all[(abs(obj_all$signature1 - obj_all$signature2)) > (((obj_all$signature1 + obj_all$signature2)/2)*.20),]
+      
+      #getting the number of cells lost and kept when we filter out those that fall down the middle
+      num_dropped <- as.numeric(nrow(obj_all) - nrow(obj_all_filtered))
+      num_kept <- nrow(obj_all) - num_dropped
+      
+      mets <- Seurat::FetchData(object = seu, vars = c(meta))
+      mets$id <- rownames(mets)
+      
+      all <- merge(obj_all_filtered, mets, on = 'id')
+      mets <- seu[['global.cluster4']]
+      all <- merge(all, mets, by.x = 'id', by.y = 0)
+      
+      #adding new metadata of which cell type this should be considered as based on the signatures
+      all$signature_classification <-colnames(all)[2:3][max.col(all[2:3])]
+      all$signature_classification[all$signature_classification == 'signature1'] <- cell1
+      all$signature_classification[all$signature_classification == 'signature2'] <- cell2
+      
+      b <- ggplot(all, aes(signature1, signature2, color = global.cluster4)) + geom_point() + theme_bw() + xlab(cell1) + ylab(cell2) + ggtitle(paste(cell1, 'vs', cell2, sep = ' '), subtitle = paste('DE gene threshold = ', l* 100, '%', sep = ''))
+      
+      plots[[paste(l, cell1, 'vs', cell2, 'dotplot', sep = '_')]] <- a
+      plots[[paste(l, cell1, 'vs', cell2, 'scatterplot', sep = '_')]] <- b
+      
+      #now creating a dataframe with the distribution of our different cell types
+      for (w in unique(all$signature_classification)){
+        mini <- all[all$signature_classification == w,]
+        a <- paste(cell1, 'vs', cell2, sep = '')
+        gt <- paste((l *100), '%', sep = '')
+        z <- nrow(mini)
+        percent <- z/as.numeric(nrow(all)) *100
+        percent <- sprintf(percent, fmt = '%#.2f')
+        percent <- paste(percent, '%', sep = '')
+        distributions <- rbind(distributions, c(a, gt, num_dropped, num_kept, nrow(marks), nrow(marks2), w, z, percent))
+        }
+    }
+  }
+  xxx <- cowplot::plot_grid(plotlist = plots, nrow = nrow(test))
+  cowplot::save_plot(xxx, filename = paste(out, 'cillo_blood_to_tissue_myeloid_origins.png', sep = ''), base_width = 50, base_height = 30, limitsize = FALSE)
+  
+  distributions <- distributions[-1,]
+  
+  plots <- list()
+  for (x in distributions$Comparison_groups){
+    origins <- distributions[distributions$Comparison_groups == x,]
+    origins$meta2 <- paste(origins$Signature_classification, origins$gene_cutoff, sep = '_')
+    origins$pct <- as.numeric(origins$meta)/as.numeric(origins$kept_cells)
+    a <- ggplot(origins,aes(x = Signature_classification, y = as.numeric(pct), fill = Signature_classification)) +
+    geom_bar(stat = "identity", width=0.5, position=position_dodge(width=0.5)) +  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + facet_wrap(~ gene_cutoff) + ggtitle(unique(origins$Comparison_groups), subtitle = 'Expression-based analysis with no subsampling') + labs(x = "Assigned origin", y = paste("Percentage of", target_cell, sep = ' '))
+    plots[[x]] <- a
+  }
+  distributions$target_cell <- target_cell
+  cp <- cowplot::plot_grid(plotlist = plots, nrow = 2)
+  save_plot(paste(out, cell_names[1], 'vs', cell_names[2], 'in', target_cell, 'origin_expressionbased_nosubsample.png', sep = ''), plot = cp, base_height = 10, base_width = 18)
+  write.csv(distributions, file = paste(out, cell_names[1], 'vs', cell_names[2], 'in', target_cell, 'origin_expressionbased_nosubsample.csv', sep = ''))
+  
+  return(distributions)
+}
+
+########################################################
+ origin_subsample <- function(seu, seu_name, meta, cell_names, target_cell, test.use = 'wilcox', out, degenes_threshold = c(0.05, 0.10, 0.20)){
+  
+  #making the spreadsheet that will hold statistical information for categorization
+  distributions <- data.frame(Comparison_groups=character(), gene_cutoff = double(),
+                              dropped_cells = double(), kept_cells = double(),
+                              n_genes_1 = double(), n_genes_2 = double(),
+                              Signature_classification = character(), 
+                              num_cells = double(), pct_cells=double(), 
+                              comparison=character())
+  distributions <- rbind(distributions, c(0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+  colnames(distributions) <- c('Comparison_groups', 'gene_cutoff', 'dropped_cells',
+                               'kept_cells', 'sig_genes_1', 'sig_genes_2',
+                               'Signature_classification', 'meta', 'num_cells',
+                               'percent_cells')
+  
+  #getting our target cell data
+  Seurat::Idents(object = seu) <- seu@meta.data[[meta]]
+  seu1 <- subset(seu, idents = c(target_cell))
+  test <- unique(expand.grid(cell_names, cell_names))
+  test <- test[test$Var1 != test$Var2,]
+  
+  current_human_df <- as.data.frame(Seurat::GetAssayData(object = seu1, slot = 'counts'))
+  
+  plots <- list()
+  #looping through in every combination of cell IDs
+  for (p in 1:nrow(test)){
+    
+    #getting our combination of cells
+    cell1 <- as.character(test[p,1])
+    cell2 <- as.character(test[p,2])
+    
+    marks <- Seurat::FindMarkers(seu, ident.1 = cell1, ident.2 = cell2, group.by = meta, test.use = 'wilcox', logfc.threshold = 0.1, only.pos = TRUE, min.diff.pct = 0.05)
+    
+    marks2 <- Seurat::FindMarkers(seu, ident.1 = cell2, ident.2 = cell1, group.by = meta, test.use = 'wilcox', logfc.threshold = 0.1, only.pos = TRUE, min.diff.pct = 0.05)
+    
+    #finding the number of markers that we have for each group
+    num_marks <- nrow(marks)
+    num_marks2 <- nrow(marks2)
+    
+    #sorting each of the dataframes before we extract the top signatures
+    marks <- marks[order(marks$avg_log2FC, -rank(marks$p_val_adj), decreasing = TRUE),]
+    marks2 <- marks2[order(marks2$avg_log2FC, -rank(marks2$p_val_adj), decreasing = TRUE),]
+    
+    for (l in degenes_threshold){
+      #only keeping the top X% (X being our DE threshold) of genes upregulated in this data set
+      marks <- marks[1:(num_marks*as.numeric(l)),]
+      marks2 <- marks2[1:(num_marks2*as.numeric(l)),]
+      
+      #selecting # of genes for each sig based on which is smaller-- helps not bias the results
+      nrows <- as.numeric(min(nrow(marks), nrow(marks2)))
+      
+      #this is the total delta for all cells in the target cluster
+      marks_ranks = data.frame(cell=character(), rank=double())
+      marks2_ranks = data.frame(cell=character(), rank=double())
+      
+      n <- 100
+      for (i in seq_len(n)){
+        print(paste('Iteration', i, 'of', n, sep = ' '))
+      
+        #now getting each of our dataframes down to an equal number of rows
+        marks <- marks[sample(nrow(marks), nrows),]
+        marks2 <-marks2[sample(nrow(marks2), nrows),]
+        
+        for (z in colnames(seu1)){
+          current_cell_df <- current_human_df[c(z)]
+          current_cell_df$genes <- rownames(current_cell_df)
+          s <- as.data.frame(current_cell_df[order(-current_cell_df[,1]),])
+          s[[z]] <- as.numeric(s[[z]])
+          colnames(s) <- c('counts', 'genes')
+          s <- s %>% dplyr::mutate(rank = dense_rank(desc(counts)))
+          s$rank[which(s$rank == max(s$rank))] <- max(s$rank) + 20000
+          
+          marks_ranks <- rbind(marks_ranks, c(z, sum(s[rownames(s) %in% rownames(marks),]$rank)))
+          marks2_ranks <- rbind(marks2_ranks,c(z, sum(s[rownames(s) %in% rownames(marks2),]$rank)))
+          }
+        }
+      #now getting aggregated data for the cells for each marker set
+      colnames(marks_ranks) <- c('cell', cell1) 
+      marks_ranks[[cell1]] <- as.numeric(marks_ranks[[cell1]])
+      marks_ranks_agg <- aggregate(x = marks_ranks, by = list(marks_ranks$cell), FUN = mean, simplify = FALSE, drop = FALSE)
+      colnames(marks2_ranks) <- c('cell', cell2)
+      marks2_ranks[[cell2]] <- as.numeric(marks2_ranks[[cell2]])
+      marks2_ranks_agg <- aggregate(x = marks2_ranks, by = list(marks2_ranks$cell), FUN = mean)
+      
+      #now making a an object that has scores from both signatures
+      obj_all <- merge(marks_ranks_agg, marks2_ranks_agg, by = 'Group.1')
+      obj_all <- obj_all[,c('Group.1', cell1, cell2)]
+      met <- seu[[c('global.cluster4', 'hpv_status')]]
+      obj_all <- merge(obj_all, met, by.x = 'Group.1', by.y = 0)
+      
+      obj_all[[cell1]] <- as.numeric(obj_all[[cell1]])
+      obj_all[[cell2]] <- as.numeric(obj_all[[cell2]])
+        
+        #getting only those cells that favor one side or the other by at least 20%
+        obj_all_filtered <- obj_all[(abs(obj_all[[cell1]] - obj_all[[cell2]])) >
+                                      (((obj_all[[cell1]] + obj_all[[cell2]])/2)*.20),]
+        
+        #getting the number of cells lost and kept when we filter out those that fall down the middle
+        num_dropped <- as.numeric(nrow(obj_all) - nrow(obj_all_filtered))
+        num_kept <- nrow(obj_all) - num_dropped
+        
+        mets <- Seurat::FetchData(object = seu, vars = c(meta))
+        mets$id <- rownames(mets)
+        
+        all <- merge(obj_all_filtered, mets, by.x = 'Group.1', by.y = 'id')
+        
+        min.col <- function(m, ...) max.col(-m, ...)
+        
+        #adding new metadata of which cell type this should be considered as based on the signatures
+        all$signature_classification <-colnames(all)[2:3][min.col(all[2:3])]
+        all$signature1 <- all[[cell1]]
+        all$signature2 <- all[[cell2]]
+        
+        b <- ggplot(all, aes(signature1, signature2, color = global.cluster4)) + geom_point() + theme_bw() + xlab(cell1) + ylab(cell2) + ggtitle(paste(cell1, 'vs', cell2, sep = ' '), subtitle = paste('DE gene threshold = ', l* 100, '%', sep = ''))
+      
+      plots[[paste(l, cell1, 'vs', cell2, 'scatterplot', sep = '_')]] <- b
+        
+        #ggpubr::ggexport(a, b, filename = paste(out, l, seu_name, cell1, 'vs', cell2, 'signature in', target_cell, 'cells.pdf', sep = '_'), width = 11, height = 8)
+        
+        #now creating a dataframe with the distribution of our different cell types
+        for (w in unique(all$signature_classification)){
+          mini <- all[all$signature_classification == w,]
+          a <- paste(cell1, 'vs', cell2, sep = '')
+          gt <- paste((l *100), '%', sep = '')
+          z <- nrow(mini)
+          percent <- z/as.numeric(nrow(all)) *100
+          percent <- sprintf(percent, fmt = '%#.2f')
+          percent <- paste(percent, '%', sep = '')
+          distributions <- rbind(distributions, c(a, gt, num_dropped, num_kept, nrow(marks), nrow(marks2), w, z, percent))
+          }
+    }
+  }
+  xxx <- cowplot::plot_grid(plotlist = plots, nrow = nrow(test))
+  cowplot::save_plot(xxx, filename = paste(out, 'cillo_blood_to_tissue_myeloid_origins_rankbased.png', sep = ''), base_width = 50, base_height = 30, limitsize = FALSE)
+  return(distributions)
+}
+```
+
+```{r origin analysis - mregDCs from cDC1 and cDC2, warning = FALSE}
+cxcl9lo_exp <- origins(seu = hnc, meta = 'mreg_cxcl9_globalcluster4', cell_names = c('cDC2_CD1C', 'cDC1_CLEC9A'), target_cell = "mregDC_CXCL9lo", out = '/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/')
+
+cxcl9hi_exp <- origins(seu = hnc, meta = 'mreg_cxcl9_globalcluster4', cell_names = c('cDC2_CD1C', 'cDC1_CLEC9A'), target_cell = "mregDC_CXCL9hi", out = '/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/')
+```
+
+#scatterplot/volcano plot of mregDC origins (03/xx/2022-05/xx/2022)
+
+```{r functions, warning = FALSE}
+##############################################################################################################
+  #testing
+  seu <- hnc_alldcs
+  seu_name <- hnc_alldcs
+  meta <- 'global.cluster4'
+  target_cell <- 'DC3_LAMP3'
+  cell1 = 'cDC2_CD1C'
+  cell2 = 'cDC1_CLEC9A'
+  test.use = 'wilcox'
+  meta2 = 'hpv_status'
+  out <- '/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/'
+  fishertest = FALSE
+  vln.logfc = 0.05
+  vln.mindiffpct = 0.05
+  vln.pval_adj = 0.01
+  vln.fccutoff = 0.25
+  vln.pcutoff = 0.01
+  degenes_threshold = c(0.05, 0.10, 0.20)
+  vars_of_interest = c('tissue', 'hpv_status')
+  cell_names = c('cDC1_CLEC9A', 'cDC2_CD1C', 'cDC2_CD33')
+
+seurat_hpvsigs <- function(seu, seu_name, meta, meta2, cell_names, target_cell, vars_of_interest, test.use = 'wilcox', out, degenes_threshold = c(0.05, 0.10, 0.20), fishertest = TRUE, vln.logfc = 0.05, vln.mindiffpct = 0.05, vln.pval_adj = 0.01, vln.fccutoff = 0.25, vln.pcutoff = 0.01){
+  
+  #making the spreadsheet that will hold statistical information for categorization
+  distributions <- data.frame(Comparison_groups=character(), gene_cutoff = double(),
+                              dropped_cells = double(), kept_cells = double(),
+                              n_genes_1 = double(), n_genes_2 = double(),
+                              Signature_classification = character(), 
+                              meta = character(), num_cells=double(), 
+                              percent=character())
+  distributions <- rbind(distributions, c(0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+  colnames(distributions) <- c('Comparison_groups', 'gene_cutoff', 'dropped_cells',
+                               'kept_cells', 'sig_genes_1', 'sig_genes_2',
+                               'Signature_classification', 'meta', 'num_cells',
+                               'percent_cells')
+  
+  #getting our target cell data
+  Seurat::Idents(object = seu) <- seu@meta.data[[meta]]
+  seu1 <- subset(seu, idents = c(target_cell))
+  test <- unique(expand.grid(cell_names, cell_names))
+  test <- test[test$Var1 != test$Var2,]
+  
+  #looping through in every combination of cell IDs
+  for (p in 1:nrow(test)){
+    
+    #getting our combination of cells
+    cell1 <- as.character(test[p,1])
+    cell2 <- as.character(test[p,2])
+    
+    marks <- Seurat::FindMarkers(seu, ident.1 = cell1, ident.2 = cell2, group.by = meta, test.use = test.use, logfc.threshold = 0.1, only.pos = TRUE, min.diff.pct = 0.05)
+    
+    marks2 <- Seurat::FindMarkers(seu, ident.1 = cell2, ident.2 = cell1, group.by = meta, test.use = test.use, logfc.threshold = 0.1, only.pos = TRUE, min.diff.pct = 0.05)
+    
+    #getting signature1
+    #marks_all <- Seurat::FindMarkers(seu, ident.1 = cell1, ident.2 = cell2, 
+                                     #group.by = meta, test.use = test.use,
+                                     #logfc.threshold = 0.1, only.pos = FALSE)
+    
+    #marks_all <- marks_all[marks_all$p_val_adj < 0.05,]
+    #marks_all <- marks_all[!rownames(marks_all) %like any% c('%^RPS%', '%^RPL%', '%^RP%'),]
+    
+    
+    #c <- EnhancedVolcano(marks_all, lab = rownames(marks_all), x = 'avg_log2FC',y = 'p_val_adj', title = paste(as.character(cell2), 'vs.', as.character(cell1), sep = ' '), subtitle = paste('DE logfc =', vln.logfc, 'DE mindiffpct =', vln.mindiffpct, 'Vln fc-cutoff =', vln.fccutoff, 'Vln p-cutoff = 0.05', '\n', nums2[1], nums2[2]), FCcutoff = 0.1, pCutoff = 0.05, legendLabels = NULL, legendIconSize = 0, legendDropLevels = TRUE, legendPosition = 'right', xlab = xlab) 
+  
+    
+    #splitting up our markers based on which way it goes (pos vs neg)
+    #marks <- marks_all[marks_all$avg_log2FC > 0,]
+    #marks2 <- marks_all[marks_all$avg_log2FC < 0,]
+    
+    #finding the number of markers that we have for each group
+    num_marks <- nrow(marks)
+    num_marks2 <- nrow(marks2)
+    
+    #selecting # of genes for each sig based on which is smaller-- helps not bias the results
+    #nrows <- as.numeric(min(nrow(marks), nrow(marks2)))
+    
+    #sorting each of the dataframes before we extract the top signatures
+    marks <- marks[order(marks$avg_log2FC, -rank(marks$p_val_adj), decreasing = TRUE),]
+    marks2 <- marks2[order(marks2$avg_log2FC, -rank(marks2$p_val_adj), decreasing = TRUE),]
+    
+    for (l in degenes_threshold){
+      #only keeping the top X% (X being our DE threshold) of genes upregulated in this data set
+      marks <- marks[1:(num_marks*as.numeric(l)),]
+      marks2 <- marks2[1:(num_marks2*as.numeric(l)),]
+      
+      all_marks <- unique(c(rownames(marks), rownames(marks2)))
+      
+      a <- DotPlot(subset(seu, idents = c(cell1, cell2)), features = c(all_marks), col.min = 0) + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+      
+      #density plot of genes from our two origins in the LAMP3_DCs
+      marks_2 <- rowMeans(Seurat::FetchData(object = seu1, vars = unique(rownames(marks))))
+      marks2_2 <- rowMeans(Seurat::FetchData(object = seu1, vars = unique(rownames(marks2))))
+      
+      fl <- paste(l, 'threshold_Red=', cell1, 'signature_Blue=', cell2, 'signature_DENSITYPLOT.png', sep = '_')
+      fl1 <- paste('/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/', fl, sep = '')
+      png(file = fl1)
+      plot(density(marks_2), col = 'red', main = paste(l, 'DE genes threshold, Red =', cell1, 'signature Blue = ', cell2, 'signature', sep = ' '))
+      lines(density(marks2_2), col = 'blue')
+      dev.off()
+      
+      #marks <- marks[1:nrows,]
+      print(paste('Number of markers in the ', cell1, ' subset is ', nrow(marks),sep = ''))
+      #marks <- marks[1:nrows,]
+      print(paste('Number of markers in the ', cell2, ' subset is ', nrow(marks2), sep = ''))
+      
+      #merging signature1
+      df <- as.data.frame(Seurat::GetAssayData(object = seu1, slot = "data"))
+      cell.ids <- Seurat::FetchData(object = seu1, vars = c(meta))
+      #cell.ids <- Seurat::FetchData(object = seu1, vars = c(meta, vars_of_interest))
+      cell.ids$id <- rownames(cell.ids)
+      df <- df[rownames(df) %in% rownames(marks),]
+      df <- as.data.frame(t(df))
+      df$id <- rownames(df)
+      cells_meta <- merge(cell.ids, df, on = 'id')
+      
+      t1 <- as.numeric(length(as.numeric(c(meta)))) + 2
+      #t1 <- as.numeric(length(as.numeric(c(meta, vars_of_interest)))) + 2 
+      cells_meta$signature1 <- rowMeans(cells_meta[,t1:ncol(cells_meta)])
+      
+      #getting signature2
+      df2 <- as.data.frame(Seurat::GetAssayData(object = seu1, slot = 'data'))
+      #cell.ids2 <- Seurat::FetchData(object = seu1, vars = c(meta, vars_of_interest))
+      cell.ids2 <- Seurat::FetchData(object = seu1, vars = c(meta))
+      cell.ids2$id <- rownames(cell.ids2)
+      df2 <- df2[rownames(df2) %in% rownames(marks2),]
+      df2 <- as.data.frame(t(df2))
+      df2$id <- rownames(df2)
+      cells_meta2 <- merge(cell.ids2, df2, on = 'id')
+      t2 <- as.numeric(length(as.numeric(c(meta)))) + 2
+      #t2 <- as.numeric(length(as.numeric(c(meta, vars_of_interest)))) + 2
+      cells_meta2$signature2 <- rowMeans(cells_meta2[,t1:ncol(cells_meta2)])
+      
+      obj1 <- cells_meta[,c('id', 'signature1')]
+      obj2 <- cells_meta2[,c('id', 'signature2')]
+      obj_all <- merge(obj1, obj2, on = 'id')
+      
+      
+      #getting only those cells that favor one side or the other by at least 20%
+      obj_all_filtered <- obj_all[(abs(obj_all$signature1 - obj_all$signature2)) >
+                                    (((obj_all$signature1 + 
+                                    obj_all$signature2)/2)*.20),]
+      
+      #getting the number of cells lost and kept when we filter out those that fall down the middle
+      num_dropped <- as.numeric(nrow(obj_all) - nrow(obj_all_filtered))
+      num_kept <- nrow(obj_all) - num_dropped
+      
+      mets <- Seurat::FetchData(object = seu, vars = c(meta))
+      #mets <- Seurat::FetchData(object = seu, vars = c(meta2, meta, vars_of_interest))
+      mets$id <- rownames(mets)
+      
+      all <- merge(obj_all_filtered, mets, on = 'id')
+      
+      #adding new metadata of which cell type this should be considered as based on the signatures
+      all$signature_classification <-colnames(all)[2:3][max.col(all[2:3])]
+      all$signature_classification[all$signature_classification == 'signature1'] <- cell1
+      all$signature_classification[all$signature_classification == 'signature2'] <- cell2
+      
+      b <- ggplot(all, aes(signature1, signature2)) + geom_point() + theme_bw() + xlab(cell1) + ylab(cell2)
+     
+      #ggplot(all, aes(signature1, signature2, color = hpv_status)) + geom_point() + labs(y = paste(cell2, 'signature', '(', nrow(marks2), 'genes)', sep = ' '), x = paste(cell1, 'signature', '(', nrow(marks), 'genes)', sep = ' ')) + theme_bw() + ggtitle(paste(cell1, 'vs', cell2, 'signature in', target_cell, 'cells', sep = ' '), subtitle = paste('test used = ', test.use))
+      
+      ggpubr::ggexport(a, b, filename = paste(out, l, seu_name, cell1, 'vs', cell2, 'signature in', target_cell, 'cells.pdf', sep = '_'), width = 11, height = 8)
+      
+      #now creating a dataframe with the distribution of our different cell types
+      for (w in unique(all$signature_classification)){
+        mini <- all[all$signature_classification == w,]
+        #for (x in vars_of_interest){
+        #for (y in unique(mini[[x]])){
+        a <- paste(cell1, 'vs', cell2, sep = '')
+        gt <- paste((l *100), '%', sep = '')
+        #z <- nrow(mini[mini[[x]] == y,])
+        z <- nrow(mini)
+        percent <- z/as.numeric(nrow(all)) *100
+        percent <- sprintf(percent, fmt = '%#.2f')
+        percent <- paste(percent, '%', sep = '')
+        #distributions <- rbind(distributions, c(a, gt, num_dropped, num_kept, nrow(marks), nrow(marks2), w, paste(x, y, sep = ':'), z, percent))
+        distributions <- rbind(distributions, c(a, gt, num_dropped, num_kept, nrow(marks), nrow(marks2), w, z, percent))
+          #}
+        #}
+        }
+    }
+  }
+  return(distributions)
+  #return(seu_all)
+}
+##########################################################################################################
+seurat_hpvsigs_onevsrest <- function(seu, seu_name, meta, meta2, cell_names, target_cell, vars_of_interest, test.use = 'wilcox', out, degenes_threshold = c(0.05, 0.10, 0.20), fishertest = TRUE, vln.logfc = 0.05, vln.mindiffpct = 0.05, vln.pval_adj = 0.01, vln.fccutoff = 0.25, vln.pcutoff = 0.01){
+  
+  #making the spreadsheet that will hold statistical information for categorization
+  distributions <- data.frame(Comparison_groups=character(), gene_cutoff = double(),
+                              dropped_cells = double(), kept_cells = double(),
+                              n_genes_1 = double(), n_genes_2 = double(),
+                              Signature_classification = character(), 
+                              meta = character(), num_cells=double(), 
+                              percent=character())
+  distributions <- rbind(distributions, c(0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+  colnames(distributions) <- c('Comparison_groups', 'gene_cutoff', 'dropped_cells',
+                               'kept_cells', 'sig_genes_1', 'sig_genes_2',
+                               'Signature_classification', 'meta', 'num_cells',
+                               'percent_cells')
+  
+  #getting our target cell data
+  Seurat::Idents(object = seu) <- seu@meta.data[[meta]]
+  seu1 <- subset(seu, idents = c(target_cell))
+  seu <- subset(seu, idents = cell_names)
+  
+  test <- unique(expand.grid(cell_names))
+  
+  #looping through in every combination of cell IDs
+  for (p in 1:nrow(test)){
+    
+    #getting our combination of cells
+    cell1 <- as.character(test[p,1])
+    
+    #getting signature1
+    marks_all <- Seurat::FindMarkers(seu, ident.1 = cell1, 
+                                     group.by = meta, test.use = test.use,
+                                     logfc.threshold = 0.1, only.pos = FALSE, 
+                                     min.diff.pct = 0.05)
+    
+    marks_all <- marks_all[marks_all$p_val_adj < 0.05,]
+    
+    #splitting up our markers based on which way it goes (pos vs neg)
+    marks <- marks_all[marks_all$avg_log2FC > 0,]
+    marks2 <- marks_all[marks_all$avg_log2FC < 0,]
+    
+    #finding the number of markers that we have for each group
+    num_marks <- nrow(marks)
+    num_marks2 <- nrow(marks2)
+    
+    #selecting # of genes for each sig based on which is smaller-- helps not bias the results
+    #nrows <- as.numeric(min(nrow(marks), nrow(marks2)))
+    
+    #sorting each of the dataframes before we extract the top signatures
+    marks <- marks[order(marks$avg_log2FC, -rank(marks$p_val_adj), 
+                         decreasing = TRUE),]
+    marks2 <- marks2[order(marks2$avg_log2FC, -rank(marks2$p_val_adj), 
+                           decreasing = TRUE),]
+    
+    for (l in degenes_threshold){
+      #only keeping the top X% (X being our DE threshold) of genes upregulated in this data set
+      marks <- marks[1:(num_marks*as.numeric(l)),]
+      marks2 <- marks2[1:(num_marks2*as.numeric(l)),]
+    
+      #marks <- marks[1:nrows,]
+      print(paste('Number of markers in the ', cell1, ' subset is ', nrow(marks),
+                  sep = ''))
+      #marks <- marks[1:nrows,]
+      print(paste('Number of markers in the rest is ', nrow(marks2),
+                  sep = ''))
+      
+      #merging signature1
+      df <- as.data.frame(Seurat::GetAssayData(object = seu1, slot = "data"))
+      cell.ids <- Seurat::FetchData(object = seu1, vars = c(meta, vars_of_interest))
+      cell.ids$id <- rownames(cell.ids)
+      df <- df[rownames(df) %in% rownames(marks),]
+      df <- as.data.frame(t(df))
+      df$id <- rownames(df)
+      cells_meta <- merge(cell.ids, df, on = 'id')
+      
+      t1 <- as.numeric(length(as.numeric(c(meta, vars_of_interest)))) + 2 
+      cells_meta$signature1 <- rowMeans(cells_meta[,t1:ncol(cells_meta)])
+      
+      #getting signature2
+      df2 <- as.data.frame(Seurat::GetAssayData(object = seu1, slot = 'data'))
+      cell.ids2 <- Seurat::FetchData(object = seu1, vars = c(meta,
+                                                             vars_of_interest))
+      cell.ids2$id <- rownames(cell.ids2)
+      df2 <- df2[rownames(df2) %in% rownames(marks2),]
+      df2 <- as.data.frame(t(df2))
+      df2$id <- rownames(df2)
+      cells_meta2 <- merge(cell.ids2, df2, on = 'id')
+      t2 <- as.numeric(length(as.numeric(c(meta, vars_of_interest)))) + 2
+      cells_meta2$signature2 <- rowMeans(cells_meta2[,t1:ncol(cells_meta2)])
+      
+      obj1 <- cells_meta[,c('id', 'signature1')]
+      obj2 <- cells_meta2[,c('id', 'signature2')]
+      obj_all <- merge(obj1, obj2, on = 'id')
+      
+      obj_all$diff <- abs(obj_all$signature1 - obj_all$signature2)/pmax(obj_all$signature1, obj_all$signature2)
+> hist(obj_all$diff)
+      
+      #getting only those cells that favor one side or the other by at least 20%
+      #obj_all_filtered <- obj_all[(abs(obj_all$signature1 - obj_all$signature2)) >
+                                    #(((obj_all$signature1 + 
+                                    #obj_all$signature2)/2)*.20),]
+      
+      obj_all_filtered <- obj_all[obj_all$diff > 0.2,]
+      
+      #getting the number of cells lost and kept when we filter out those that fall down the middle
+      num_dropped <- as.numeric(nrow(obj_all) - nrow(obj_all_filtered))
+      num_kept <- nrow(obj_all) - num_dropped
+      
+      mets <- Seurat::FetchData(object = seu1, vars = c(meta2, meta,
+                                                       vars_of_interest))
+      mets$id <- rownames(mets)
+      
+      all <- merge(obj_all_filtered, mets, on = 'id')
+      
+      #adding new metadata of which cell type this should be considered as based on the signatures
+      all$signature_classification <-colnames(all)[2:3][max.col(all[2:3])]
+      all$signature_classification[all$signature_classification == 'signature1'] <- cell1
+      all$signature_classification[all$signature_classification == 'signature2'] <- 'all others'
+     
+      ggplot(all, aes(signature1, signature2, color = hpv_status)) + geom_point() + labs(y = paste(cell2, 'signature', '(', nrow(marks2), 'genes)', sep = ' '), x = paste(cell1, 'signature', '(', nrow(marks), 'genes)', sep = ' ')) + theme_bw() + ggtitle(paste(cell1, 'vs', cell2, 'signature in', target_cell, 'cells', sep = ' '), subtitle = paste('test used = ', test.use))
+      
+      #now creating a dataframe with the distribution of our different cell types
+      for (w in unique(all$signature_classification)){
+        mini <- all[all$signature_classification == w,]
+        for (x in vars_of_interest){
+          for (y in unique(mini[[x]])){
+            a <- paste(cell1, 'vs', 'others', sep = '')
+            gt <- paste((l *100), '%', sep = '')
+            z <- nrow(mini[mini[[x]] == y,])
+            percent <- z/as.numeric(nrow(all)) *100
+            percent <- sprintf(percent, fmt = '%#.2f')
+            percent <- paste(percent, '%', sep = '')
+            distributions <- rbind(distributions, c(a, gt, num_dropped, num_kept, nrow(marks), nrow(marks2), w, paste(x, y, sep = ':'), z, percent))
+            }
+          }
+        }
+    }
+}
+  return(distributions)
+  #return(seu_all)
+}
+##############################################################################
+#testing
+  seu <- hnc_alldcs
+  seu_name <- hnc_alldcs
+  meta <- 'global.cluster4'
+  target_cell <- 'DC3_LAMP3'
+  cell1 = 'cDC2_CD1C'
+  cell2 = 'cDC1_CLEC9A'
+  test.use = 'wilcox'
+  out <- '/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/'
+  fishertest = FALSE
+  degenes_threshold = c(0.05, 0.10, 0.20)
+  cell_names = c('cDC1_CLEC9A', 'cDC2_CD1C', 'cDC2_CD33')
+
+seurat_hpvsigs_subsample <- function(seu, seu_name, meta, cell_names, target_cell, test.use = 'wilcox', out, degenes_threshold = c(0.05, 0.10, 0.20)){
+  
+  #making the spreadsheet that will hold statistical information for categorization
+  distributions <- data.frame(Comparison_groups=character(), gene_cutoff = double(),
+                              dropped_cells = double(), kept_cells = double(),
+                              n_genes_1 = double(), n_genes_2 = double(),
+                              Signature_classification = character(), 
+                              num_cells = double(), pct_cells=double(), 
+                              comparison=character())
+  distributions <- rbind(distributions, c(0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+  colnames(distributions) <- c('Comparison_groups', 'gene_cutoff', 'dropped_cells',
+                               'kept_cells', 'sig_genes_1', 'sig_genes_2',
+                               'Signature_classification', 'meta', 'num_cells',
+                               'percent_cells')
+  
+  #getting our target cell data
+  Seurat::Idents(object = seu) <- seu@meta.data[[meta]]
+  seu1 <- subset(seu, idents = c(target_cell))
+  test <- unique(expand.grid(cell_names, cell_names))
+  test <- test[test$Var1 != test$Var2,]
+  current_human_df <- as.data.frame(Seurat::GetAssayData(object = seu1, slot = 'counts'))
+  
+  #looping through in every combination of cell IDs
+  for (p in 1:nrow(test)){
+    
+    #getting our combination of cells
+    cell1 <- as.character(test[p,1])
+    cell2 <- as.character(test[p,2])
+    
+    marks <- Seurat::FindMarkers(seu, ident.1 = cell1, ident.2 = cell2, group.by = meta, test.use = test.use, logfc.threshold = 0.1, only.pos = TRUE, min.diff.pct = 0.05)
+    
+    marks2 <- Seurat::FindMarkers(seu, ident.1 = cell2, ident.2 = cell1, group.by = meta, test.use = test.use, logfc.threshold = 0.1, only.pos = TRUE, min.diff.pct = 0.05)
+    
+    #finding the number of markers that we have for each group
+    num_marks <- nrow(marks)
+    num_marks2 <- nrow(marks2)
+    
+    #sorting each of the dataframes before we extract the top signatures
+    marks <- marks[order(marks$avg_log2FC, -rank(marks$p_val_adj), decreasing = TRUE),]
+    marks2 <- marks2[order(marks2$avg_log2FC, -rank(marks2$p_val_adj), decreasing = TRUE),]
+    
+    for (l in degenes_threshold){
+      #only keeping the top X% (X being our DE threshold) of genes upregulated in this data set
+      marks <- marks[1:(num_marks*as.numeric(l)),]
+      marks2 <- marks2[1:(num_marks2*as.numeric(l)),]
+      
+      #selecting # of genes for each sig based on which is smaller-- helps not bias the results
+      nrows <- as.numeric(min(nrow(marks), nrow(marks2)))
+      
+      #this is the total delta for all cells in the target cluster
+      marks_ranks = data.frame(cell=character(), rank=double())
+      marks2_ranks = data.frame(cell=character(), rank=double())
+      
+      set.seed(42)
+      
+      n <- 100
+      for (i in seq_len(n)){
+        #print(paste('Iteration', i, 'of', n, sep = ' '))
+      
+        #now getting each of our dataframes down to an equal number of rows
+        marks <- marks[sample(nrow(marks), nrows),]
+        marks2 <-marks2[sample(nrow(marks2), nrows),]
+        
+        for (z in colnames(seu1)){
+          current_cell_df <- current_human_df[c(z)]
+          current_cell_df$genes <- rownames(current_cell_df)
+          s <- as.data.frame(current_cell_df[order(-current_cell_df[,1]),])
+          s[[z]] <- as.numeric(s[[z]])
+          colnames(s) <- c('counts', 'genes')
+          s <- s %>% dplyr::mutate(rank = dense_rank(desc(counts)))
+          s$rank[which(s$rank == max(s$rank))] <- max(s$rank) + 20000
+          
+          marks_ranks <- rbind(marks_ranks, c(z, sum(s[rownames(s) %in% rownames(marks),]$rank)))
+          marks2_ranks <- rbind(marks2_ranks,c(z, sum(s[rownames(s) %in% rownames(marks2),]$rank)))
+          }
+        }
+      #now getting aggregated data for the cells for each marker set
+      colnames(marks_ranks) <- c('cell', cell1) 
+      marks_ranks[[cell1]] <- as.numeric(marks_ranks[[cell1]])
+      marks_ranks_agg <- aggregate(x = marks_ranks, by = list(marks_ranks$cell), FUN = mean, simplify = FALSE, drop = FALSE)
+      colnames(marks2_ranks) <- c('cell', cell2)
+      marks2_ranks[[cell2]] <- as.numeric(marks2_ranks[[cell2]])
+      marks2_ranks_agg <- aggregate(x = marks2_ranks, by = list(marks2_ranks$cell), FUN = mean)
+      
+      #now making a an object that has scores from both signatures
+      obj_all <- merge(marks_ranks_agg, marks2_ranks_agg, by = 'Group.1')
+      obj_all <- obj_all[,c('Group.1', cell1, cell2)]
+      
+      obj_all[[cell1]] <- as.numeric(obj_all[[cell1]])
+      obj_all[[cell2]] <- as.numeric(obj_all[[cell2]])
+        
+        #getting only those cells that favor one side or the other by at least 20%
+        obj_all_filtered <- obj_all[(abs(obj_all[[cell1]] - obj_all[[cell2]])) >
+                                      (((obj_all[[cell1]] + obj_all[[cell2]])/2)*.20),]
+        
+        #getting the number of cells lost and kept when we filter out those that fall down the middle
+        num_dropped <- as.numeric(nrow(obj_all) - nrow(obj_all_filtered))
+        num_kept <- nrow(obj_all) - num_dropped
+        
+        mets <- Seurat::FetchData(object = seu, vars = c(meta))
+        mets$id <- rownames(mets)
+        
+        all <- merge(obj_all_filtered, mets, by.x = 'Group.1', by.y = 'id')
+        
+        min.col <- function(m, ...) max.col(-m, ...)
+        
+        #adding new metadata of which cell type this should be considered as based on the signatures
+        all$signature_classification <-colnames(all)[2:3][min.col(all[2:3])]
+        all$signature1 <- all[[cell1]]
+        all$signature2 <- all[[cell2]]
+        
+        #b <- ggplot(all, aes(signature1, signature2)) + geom_point() + theme_bw() + xlab(cell1) + ylab(cell2)
+        
+        #ggpubr::ggexport(a, b, filename = paste(out, l, seu_name, cell1, 'vs', cell2, 'signature in', target_cell, 'cells.pdf', sep = '_'), width = 11, height = 8)
+        
+        #now creating a dataframe with the distribution of our different cell types
+        for (w in unique(all$signature_classification)){
+          mini <- all[all$signature_classification == w,]
+          a <- paste(cell1, 'vs', cell2, sep = '')
+          gt <- paste((l *100), '%', sep = '')
+          z <- nrow(mini)
+          percent <- z/as.numeric(nrow(all)) *100
+          percent <- sprintf(percent, fmt = '%#.2f')
+          percent <- paste(percent, '%', sep = '')
+          distributions <- rbind(distributions, c(a, gt, num_dropped, num_kept, nrow(marks), nrow(marks2), w, z, percent))
+          }
+    }
+  }
+  return(distributions)
+}
+#######################################################################################################
+```
+
+```{r dotplots, scatter plots and volcano plots based on mregDC origin, warning=FALSE}
+seu <- hnc_alldcs
+seu_name <- hnc_alldcs
+meta <- 'global.cluster4'
+target_cell <- 'DC3_LAMP3'
+cell1 = 'cDC2_CD33'
+cell2 = 'cDC2_CD1C'
+test.use = 'wilcox'
+meta2 = 'hpv_status'
+out <- '/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/'
+fishertest = FALSE
+vln.logfc = 0.05
+vln.mindiffpct = 0.05
+vln.pval_adj = 0.01
+vln.fccutoff = 0.25
+vln.pcutoff = 0.01
+degenes_threshold = 0.05
+vars_of_interest = c('tissue', 'hpv_status')
+cell_names = c('cDC1_CLEC9A', 'cDC2_CD1C', 'cDC2_CD33')
+
+###########################################################3
+######3 EXPRESSION BASED, NO SUBSAMPLING ##########
+#NOT SPLIT BY ANYTHING--ALL
+sigone_onlypos <- seurat_hpvsigs(seu = hnc, seu_name = 'hnc', meta = 'global.cluster4', cell_names = c('cDC1_CLEC9A', 'cDC2_CD1C', 'cDC2_CD33'), meta2 = 'hpv_status', target_cell = 'DC3_LAMP3', out = '/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/', vars_of_interest = c('tissue', 'hpv_status'), fishertest = FALSE)
+write.csv(sigone_onlypos, file = '/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/mreg_origins_expressionbased.csv')
+sigone_onlypos <- sigone_onlypos[-1,]
+sigone_onlypos$pct <- as.numeric(sigone_onlypos$meta)/as.numeric(sigone_onlypos$kept_cells) * 100
+
+sigall <- sigone_onlypos[sigone_onlypos$Comparison_groups == "cDC1_CLEC9AvscDC2_CD1C",]
+sigall$meta2 <- paste(sigall$Signature_classification, sigall$gene_cutoff, sep = '_')
+
+title <- paste('/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/Origin_comparison_barplot*/', as.character(unique(sigall$Comparison_groups)), '_ONLYPOS_comparison_barplot.png', sep = '')
+ggplot(sigall,aes(x = Signature_classification, y = as.numeric(pct), fill = Signature_classification)) +
+  geom_bar(stat = "identity", width=0.5, position=position_dodge(width=0.5)) +  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + facet_wrap(~ gene_cutoff) + ggtitle(unique(sigall$Comparison_groups))
+
+ggsave(title, width = 10, height = 5)
+
+####################################### 05/04/22 ####################################3
+mreg_cxcl9hi_origins <- seurat_hpvsigs(seu = hnc, seu_name = 'hnc', meta = 'mreg_cxcl9_globalcluster4', cell_names = c('cDC1_CLEC9A', 'cDC2_CD1C', 'cDC2_CD33'), meta2 = 'hpv_status', target_cell = "mregDC_CXCL9hi", out = '/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/', vars_of_interest = c('tissue', 'hpv_status'), fishertest = FALSE)
+
+mreg_cxcl9lo_origins <- seurat_hpvsigs(seu = hnc, seu_name = 'hnc', meta = 'mreg_cxcl9_globalcluster4', cell_names = c('cDC1_CLEC9A', 'cDC2_CD1C', 'cDC2_CD33'), meta2 = 'hpv_status', target_cell = "mregDC_CXCL9lo", out = '/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/', vars_of_interest = c('tissue', 'hpv_status'), fishertest = FALSE)
+
+#################################
+##### RANK BASED SUBSAMPLING #######
+mreg_origins <- seurat_hpvsigs_subsample(seu = hnc, seu_name = 'hnc', meta = 'global.cluster4', cell_names = c('cDC1_CLEC9A', 'cDC2_CD1C', 'cDC2_CD33'), target_cell = 'DC3_LAMP3', out = '/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/')
+
+write.csv(mreg_origins, file = '/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/mregDC_origins_rankbased_100xiterations.csv')
+
+mreg_origins <- mreg_origins[-1,]
+
+plots <- list()
+for (x in mreg_origins$Comparison_groups){
+  origins <- mreg_origins[mreg_origins$Comparison_groups == x,]
+  origins$meta2 <- paste(origins$Signature_classification, origins$gene_cutoff, sep = '_')
+  origins$pct <- as.numeric(origins$meta)/as.numeric(origins$kept_cells)
+  a <- ggplot(origins,aes(x = Signature_classification, y = as.numeric(pct), fill = Signature_classification)) +
+  geom_bar(stat = "identity", width=0.5, position=position_dodge(width=0.5)) +  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + facet_wrap(~ gene_cutoff) + ggtitle(unique(origins$Comparison_groups), subtitle = 'Rank-based analysis with gene signature subsampling and 100 iterations') + labs(x = "Assigned origin", y = "Percentage of LAMP3+ DCs")
+  plots[[x]] <- a
+}
+
+cp <- cowplot::plot_grid(plotlist = plots, nrow = 2)
+cowplot::save_plot('/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/mreg_origins_rankbased_05062022_100xiterations.png', plot = cp, base_height = 10, base_width = 18)
+
+
+title <- paste('/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/Origin_comparison_barplot*/', as.character(unique(sigall$Comparison_groups)), '_ONLYPOS_comparison_barplot.png', sep = '')
+
+ggsave(title, width = 10, height = 5)
+
+```
+
+#blood vs tissue CD33 cDC2s
+
+```{r volcano plot of blood vs. tissue CD33 cDC2s}
+############ LOADING IN AND PLOTTING HUY'S MARKERS ################
+h <- read.csv('/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/CD33PBMCvsTIL_DEgenes.csv', row.names = 'X')
+
+EnhancedVolcano(h, lab = rownames(h), x = 'avg_log2FC',y = 'p_val_adj', title = 'HPV+ vs. HPV- CD33+ cDC2s', legendLabels = NULL, legendIconSize = 0, legendDropLevels = TRUE, legendPosition = 'right', pCutoff = 0.05, FCcutoff = 0.25)
+  ggsave(paste(out, seu_name, paste(as.character(ids[1]), 'vs.', as.character(ids[2]), 'logfc', logfc, 'mindiffpct', mindiffpct, 'pvaladj', pval_adj, 'volcano_plot.png', sep = '_')), width = 10)
+
+#################################################################################
+seu <- hnc[,hnc$global.cluster4 == 'cDC2_CD33'] 
+seu <- seu[,seu$is_HD == 'HNSCC']
+
+cd33_vp <- cd33_volcanoplot(seu = seu, seu_name = 'hnc_cdc2cd33only', meta = 'tissue', cell1 = 'TIL', cell2 = 'PBMC')
+write.csv(cd33_vp, file = '/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/hnc_cdc2cd33only_volcanoplot_TILvsPBMC.csv')
+
+seu_name <- 'hnc_cd33_HPVposvsneg_tilonly'
+meta <- 'tissue'
+cell1 = 'TIL'
+cell2 = 'PBMC'
+test.use = 'wilcox'
+mindiffpct = 0.05
+logfc = 0.1
+out <- '/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/' 
+pval_adj = 0.01
+fccutoff = 0.5
+pcutoff = 0.01
+
+cd33_volcanoplot <- function(seu, seu_name, meta, cell1, cell2, out='/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/', test.use = 'wilcox', logfc = 0.1, pval_adj = 0.01, fccutoff = 0.5, pcutoff = 0.01) {
+  
+  Seurat::Idents(object = seu) <- seu[[meta]]
+
+  ids <- unique(seu@active.ident)
+  
+  marks_all <- Seurat::FindMarkers(seu, ident.1 = cell1, ident.2 = cell2, group.by = meta, test.use = test.use, logfc.threshold = logfc, only.pos = FALSE)
+  
+  marks_all$p_val_adj <- as.numeric(marks_all$p_val_adj)
+  marks_all <- marks_all[!rownames(marks_all) %like any% c('%^RP%', '%^RPS%', '%^RPL%'),]
+  
+  xlab <- paste('<-----', cell2, 'genes', '     log2 fold change     ', cell1, 'genes', '-----> ', sep = ' ')
+  
+  nums <- as.data.frame(table(seu@active.ident))
+  nums$fin <- paste(nums$Var1, nums$Freq, sep = '=')
+  nums2 <- as.character(nums$fin)
+  
+  EnhancedVolcano(marks_all, lab = rownames(marks_all), x = 'avg_log2FC',y = 'p_val_adj', title = paste(as.character(cell2), 'vs.', as.character(cell1), sep = ' '), subtitle = paste('DE logfc =', logfc, 'Vln fc-cutoff =', fccutoff, 'Vln p-cutoff =', pcutoff), caption = paste(nums2[1], nums2[2], sep = "   "), FCcutoff = fccutoff, pCutoff = pcutoff, legendLabels = NULL, legendIconSize = 0, legendDropLevels = TRUE, legendPosition = 'right', xlab = xlab)
+  ggsave(paste(out, seu_name, paste(as.character(ids[1]), 'vs.', as.character(ids[2]), 'logfc', logfc, 'pvaladj', pval_adj, 'volcano_plot.png', sep = '_')), width = 12, height = 12)
+  return(marks_all)
+}
+```
+
+```{r GSVA of CD33 cDC2s}
+test <- performGeneSetEnrichmentAnalysis(
+  hnc[,hnc$global.cluster4 == 'cDC2_CD33'],
+  assay = "RNA",
+  '/Volumes/hdlab/Projects/HNC_SPORE/Resources/mSigDB_hallmarkSigs/c5.go.bp.v7.5.1.symbols.gmt',
+  groups = 'hpv_status',
+  name = "cerebro_GSVA",
+  thresh_p_val = 0.05,
+  thresh_q_val = 0.1)
+
+#writing a CSV for the c7 results
+write.csv(test@misc$enriched_pathways$cerebro_GSVA$hpv_status, file = '/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/CD33cDC_HPV+vsHPV-_C7GSVAresults.csv')
+
+View(test@misc$enriched_pathways$cerebro_GSVA$hpv_status)
+
+#writing a CSV for the c8 results
+write.csv(test@misc$enriched_pathways$cerebro_GSVA$hpv_status, file = '/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/CD33cDC_HPV+vsHPV-_C8GSVAresults.csv')
+```
+
+```{r plotting GSVA of CD33 cDC2s}
+c7 <- read.csv('/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/CD33cDC_HPV+vsHPV-_C7GSVAresults.csv')
+c8 <- read.csv('/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/CD33cDC_HPV+vsHPV-_C8GSVAresults.csv')
+
+c7 %>% ggplot(aes(name, enrichment_score, fill = hpv_status)) + geom_col() + coord_flip() + theme(axis.text=element_text(size=20), axis.title=element_text(size=20,face="bold"), legend.text = element_text(size = 30), legend.title = element_text(size = 30))
+ggsave('/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/cd33+dcs_HPV+vsHPV-_GSVA_C7.png', width = 45, height = 30)
+
+c8 %>% ggplot(aes(name, enrichment_score, fill = hpv_status)) + geom_col() + coord_flip() + theme(axis.text=element_text(size=20), axis.title=element_text(size=20,face="bold"), legend.text = element_text(size = 30), legend.title = element_text(size = 30))
+ggsave('/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/cd33+dcs_HPV+vsHPV-_GSVA_C8.png', width = 45, height = 20)
+```
+
+# blood CD33 DCs and cDC2_CD1C cells
+
+```{r}
+hnc$cluster_tissue <- paste(hnc$global.cluster4, hnc$tissue, sep = '_')
+saveRDS(hnc, file = '/Volumes/hdlab/Projects/HNC_SPORE/Seurat_Objs/hnc_all_annot_2022-05-12***.rds')
+
+seu <- hnc[,hnc$cluster_tissue %in% c('cDC2_CD33_PBMC', 'cDC2_CD1C_PBMC', 'cDC2_CD1C_TIL')] 
+seu <- seu[,seu$is_HD == 'HNSCC']
+
+#SPLIT BY NOTHING
+vp <- volcplot(seu = seu, seu_name = 'hnc_cd33DCsvsCD1Cdcs', meta = 'cluster_tissue', cell1 = 'cDC2_CD33_PBMC', cell2 = 'cDC2_CD1C_TIL')
+write.csv(vp, file = '/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/hnc_cDC2CD33PBMCvscDC2CD1CTIL_volcanoplot.csv')
+
+seu_name <- 'hnc_cd33_HPVposvsneg_tilonly'
+meta <- 'tissue'
+cell1 = 'TIL'
+cell2 = 'PBMC'
+test.use = 'wilcox'
+mindiffpct = 0.05
+logfc = 0.1
+out <- '/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/' 
+pval_adj = 0.01
+fccutoff = 0.5
+pcutoff = 0.01
+
+volcplot <- function(seu, seu_name, meta, cell1, cell2, out='/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/', test.use = 'wilcox', logfc = 0.1, pval_adj = 0.01, fccutoff = 0.5, pcutoff = 0.01) {
+  
+  Seurat::Idents(object = seu) <- seu[[meta]]
+
+  ids <- unique(seu@active.ident)
+  
+  marks_all <- Seurat::FindMarkers(seu, ident.1 = cell1, ident.2 = cell2, group.by = meta, test.use = test.use, logfc.threshold = logfc, only.pos = FALSE)
+  
+  marks_all$p_val_adj <- as.numeric(marks_all$p_val_adj)
+  marks_all <- marks_all[!rownames(marks_all) %like any% c('%^RP%', '%^RPS%', '%^RPL%'),]
+  
+  xlab <- paste('<-----', cell2, 'genes', '     log2 fold change     ', cell1, 'genes', '-----> ', sep = ' ')
+  
+  nums <- as.data.frame(table(seu@active.ident))
+  nums$fin <- paste(nums$Var1, nums$Freq, sep = '=')
+  nums2 <- as.character(nums$fin)
+  
+  library(EnhancedVolcano)
+  EnhancedVolcano(marks_all, lab = rownames(marks_all), x = 'avg_log2FC',y = 'p_val_adj', title = paste(as.character(cell2), 'vs.', as.character(cell1), sep = ' '), subtitle = paste('DE logfc =', logfc, 'Vln fc-cutoff =', fccutoff, 'Vln p-cutoff =', pcutoff), caption = paste(nums2[1], nums2[2], sep = "   "), FCcutoff = fccutoff, pCutoff = pcutoff, legendLabels = NULL, legendIconSize = 0, legendDropLevels = TRUE, legendPosition = 'right', xlab = xlab)
+  ggsave(paste(out, seu_name, paste(as.character(ids[1]), 'vs.', as.character(ids[2]), 'logfc', logfc, 'pvaladj', pval_adj, 'volcano_plot.png', sep = '_')), width = 12, height = 12)
+  return(marks_all)
+}
+```
+
+#tissue dendritic cell origins from blood cell types (05/05/2022)
+
+```{r functions}
+#testing
+  seu <- hnc[,hnc$tissue %like any% c('TIL', 'PBMC')]
+  seu_name <- 'hnc_notonsil'
+  meta <- 'cluster_tissue'
+  target_cell <- 'TIL Dendritic Cells'
+  cell1 = 'PBMC cDC2_CD33'
+  cell2 = 'PBMC Monocytes'
+  out <- '/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/'
+  #vln.logfc = 0.05
+  #vln.mindiffpct = 0.05
+  #vln.pval_adj = 0.01
+  #vln.fccutoff = 0.25
+  #vln.pcutoff = 0.01
+  degenes_threshold = c(0.05, 0.10, 0.20)
+  cell_names = c("PBMC cDC2_CD33" , "PBMC DC_pDC", 'PBMC Monocytes')
+
+  seu$cluster_tissue <- paste(seu$tissue, seu$global.cluster4)
+  seu$cluster_tissue[seu$cluster_tissue %like any% c("TIL cDC2_CD1C", "TIL DC3_LAMP3", "TIL cDC2_CD33", "TIL cDC1_CLEC9A", "TIL DCs")] <- 'TIL Dendritic Cells'
+  seu$cluster_tissue[seu$cluster_tissue %like any% c("PBMC Mono_CD14", "PBMC Mono_CD14_THBS1", "PBMC Mono_Int", "PBMC Mono_CD16", "PBMC Mono_CD14_IL1B", "PBMC Mono_CD14_ID1")] <- 'PBMC Monocytes'
+  
+  ####################################################################3
+  cillo_blood_to_tissue_origins <- function(seu, seu_name, meta, cell_names, target_cell, vars_of_interest, out, degenes_threshold = c(0.05, 0.10, 0.20), vln.logfc = 0.05, vln.mindiffpct = 0.05, vln.pval_adj = 0.01, vln.fccutoff = 0.25, vln.pcutoff = 0.01){
+  
+  seu$cluster_tissue <- paste(seu$tissue, seu$global.cluster4)
+  seu$cluster_tissue[seu$cluster_tissue %like any% c("TIL cDC2_CD1C", "TIL DC3_LAMP3", "TIL cDC2_CD33", "TIL cDC1_CLEC9A", "TIL DCs")] <- 'TIL Dendritic Cells'
+  seu$cluster_tissue[seu$cluster_tissue %like any% c("PBMC Mono_CD14", "PBMC Mono_CD14_THBS1", "PBMC Mono_Int", "PBMC Mono_CD16", "PBMC Mono_CD14_IL1B", "PBMC Mono_CD14_ID1")] <- 'PBMC Monocytes'  
+    
+  #making the spreadsheet that will hold statistical information for categorization
+  distributions <- data.frame(Comparison_groups=character(), gene_cutoff = double(),
+                              dropped_cells = double(), kept_cells = double(), n_genes_1 = double(), 
+                              n_genes_2 = double(), Signature_classification = character(), 
+                              meta = character(), num_cells=double(), percent=character())
+  distributions <- rbind(distributions, c(0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+  colnames(distributions) <- c('Comparison_groups', 'gene_cutoff', 'dropped_cells',
+                               'kept_cells', 'sig_genes_1', 'sig_genes_2', 'Signature_classification', 
+                               'meta', 'num_cells', 'percent_cells')
+  
+  #getting our target cell data
+  Seurat::Idents(object = seu) <- seu@meta.data[[meta]]
+  seu1 <- subset(seu, idents = c(target_cell))
+  test <- unique(expand.grid(cell_names, cell_names))
+  test <- test[test$Var1 != test$Var2,]
+  
+  plots <- list()
+  #looping through in every combination of cell IDs
+  for (p in 1:nrow(test)){
+    
+    #getting our combination of cells
+    cell1 <- as.character(test[p,1])
+    cell2 <- as.character(test[p,2])
+    
+    marks <- Seurat::FindMarkers(seu, ident.1 = cell1, ident.2 = cell2, group.by = meta, test.use = 'wilcox', logfc.threshold = 0.1, only.pos = TRUE, min.diff.pct = 0.05)
+    marks2 <- Seurat::FindMarkers(seu, ident.1 = cell2, ident.2 = cell1, group.by = meta, test.use = 'wilcox', logfc.threshold = 0.1, only.pos = TRUE, min.diff.pct = 0.05)
+    
+    #getting signature for volcano plot
+    #marks_all <- Seurat::FindMarkers(seu, ident.1 = cell1, ident.2 = cell2, group.by = meta, test.use = 'wilcox', logfc.threshold = 0.1, only.pos = FALSE)
+    #marks_all <- marks_all[marks_all$p_val_adj < 0.05,]
+    #marks_all <- marks_all[!rownames(marks_all) %like any% c('%^RPS%', '%^RPL%', '%^RP%'),]
+    
+    
+    #plots[paste(cell1, cell2, 'volcanoplot', sep = '_')] <- EnhancedVolcano(marks_all, lab = rownames(marks_all), x = 'avg_log2FC',y = 'p_val_adj', title = paste(as.character(cell2), 'vs.', as.character(cell1), sep = ' '), subtitle = paste('DE logfc =', vln.logfc, 'DE mindiffpct =', vln.mindiffpct, 'Vln fc-cutoff =', vln.fccutoff, 'Vln p-cutoff = 0.05'), FCcutoff = 0.1, pCutoff = 0.05, legendLabels = NULL, legendIconSize = 0, legendDropLevels = TRUE, legendPosition = 'right', xlab = xlab) 
+    
+    #splitting up our markers based on which way it goes (pos vs neg)
+    #marks <- marks_all[marks_all$avg_log2FC > 0,]
+    #marks2 <- marks_all[marks_all$avg_log2FC < 0,]
+    
+    #finding the number of markers that we have for each group
+    num_marks <- nrow(marks)
+    num_marks2 <- nrow(marks2)
+    
+    #selecting # of genes for each sig based on which is smaller-- helps not bias the results
+    #nrows <- as.numeric(min(nrow(marks), nrow(marks2)))
+    
+    #sorting each of the dataframes before we extract the top signatures
+    marks <- marks[order(marks$avg_log2FC, -rank(marks$p_val_adj), decreasing = TRUE),]
+    marks2 <- marks2[order(marks2$avg_log2FC, -rank(marks2$p_val_adj), decreasing = TRUE),]
+    
+    for (l in degenes_threshold){
+      #only keeping the top X% (X being our DE threshold) of genes upregulated in this data set
+      marks <- marks[1:(num_marks*as.numeric(l)),]
+      marks2 <- marks2[1:(num_marks2*as.numeric(l)),]
+      
+      all_marks <- unique(c(rownames(marks), rownames(marks2)))
+      
+      a <- DotPlot(subset(seu, idents = c(cell1, cell2)), features = c(all_marks), col.min = 0) + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + ggtitle(paste(cell1, 'vs', cell2, sep = ' '), subtitle = paste('DE gene threshold = ', l* 100, '%', sep = ''))
+      
+      #density plot of genes from our two origins in the LAMP3_DCs
+      marks_2 <- rowMeans(Seurat::FetchData(object = seu1, vars = unique(rownames(marks))))
+      marks2_2 <- rowMeans(Seurat::FetchData(object = seu1, vars = unique(rownames(marks2))))
+      
+      fl <- paste(l, 'threshold_Red=', cell1, 'signature_Blue=', cell2, 'signature_DENSITYPLOT.png', sep = '_')
+      fl1 <- paste('/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/', fl, sep = '')
+      png(file = fl1)
+      plot(density(marks_2), col = 'red', main = paste(l, 'DE genes threshold, Red =', cell1, 'signature Blue = ', cell2, 'signature', sep = ' '))
+      lines(density(marks2_2), col = 'blue')
+      dev.off()
+      
+      #marks <- marks[1:nrows,]
+      print(paste('Number of markers in the ', cell1, ' subset is ', nrow(marks),sep = ''))
+      #marks2 <- marks2[1:nrows,]
+      print(paste('Number of markers in the ', cell2, ' subset is ', nrow(marks2), sep = ''))
+      
+      #merging signature1
+      df <- as.data.frame(Seurat::GetAssayData(object = seu1, slot = "data"))
+      cell.ids <- Seurat::FetchData(object = seu1, vars = c(meta))
+      cell.ids$id <- rownames(cell.ids)
+      df <- df[rownames(df) %in% rownames(marks),]
+      df <- as.data.frame(t(df))
+      df$id <- rownames(df)
+      cells_meta <- merge(cell.ids, df, on = 'id')
+      
+      t1 <- as.numeric(length(as.numeric(c(meta)))) + 2
+      #t1 <- as.numeric(length(as.numeric(c(meta, vars_of_interest)))) + 2 
+      cells_meta$signature1 <- rowMeans(cells_meta[,t1:ncol(cells_meta)])
+      
+      #getting signature2
+      df2 <- as.data.frame(Seurat::GetAssayData(object = seu1, slot = 'data'))
+      #cell.ids2 <- Seurat::FetchData(object = seu1, vars = c(meta, vars_of_interest))
+      cell.ids2 <- Seurat::FetchData(object = seu1, vars = c(meta))
+      cell.ids2$id <- rownames(cell.ids2)
+      df2 <- df2[rownames(df2) %in% rownames(marks2),]
+      df2 <- as.data.frame(t(df2))
+      df2$id <- rownames(df2)
+      cells_meta2 <- merge(cell.ids2, df2, on = 'id')
+      t2 <- as.numeric(length(as.numeric(c(meta)))) + 2
+      #t2 <- as.numeric(length(as.numeric(c(meta, vars_of_interest)))) + 2
+      cells_meta2$signature2 <- rowMeans(cells_meta2[,t2:ncol(cells_meta2)])
+      
+      obj1 <- cells_meta[,c('id', 'signature1')]
+      obj2 <- cells_meta2[,c('id', 'signature2')]
+      obj_all <- merge(obj1, obj2, on = 'id')
+      
+      
+      #getting only those cells that favor one side or the other by at least 20%
+      obj_all_filtered <- obj_all[(abs(obj_all$signature1 - obj_all$signature2)) > (((obj_all$signature1 + obj_all$signature2)/2)*.20),]
+      
+      #getting the number of cells lost and kept when we filter out those that fall down the middle
+      num_dropped <- as.numeric(nrow(obj_all) - nrow(obj_all_filtered))
+      num_kept <- nrow(obj_all) - num_dropped
+      
+      mets <- Seurat::FetchData(object = seu, vars = c(meta))
+      #mets <- Seurat::FetchData(object = seu, vars = c(meta2, meta, vars_of_interest))
+      mets$id <- rownames(mets)
+      
+      all <- merge(obj_all_filtered, mets, on = 'id')
+      mets <- seu[['global.cluster4']]
+      all <- merge(all, mets, by.x = 'id', by.y = 0)
+      
+      #adding new metadata of which cell type this should be considered as based on the signatures
+      all$signature_classification <-colnames(all)[2:3][max.col(all[2:3])]
+      all$signature_classification[all$signature_classification == 'signature1'] <- cell1
+      all$signature_classification[all$signature_classification == 'signature2'] <- cell2
+      
+      b <- ggplot(all, aes(signature1, signature2, color = global.cluster4)) + geom_point() + theme_bw() + xlab(cell1) + ylab(cell2) + ggtitle(paste(cell1, 'vs', cell2, sep = ' '), subtitle = paste('DE gene threshold = ', l* 100, '%', sep = ''))
+      
+      #ggpubr::ggexport(a, b, filename = paste(out, l, seu_name, cell1, 'vs', cell2, 'signature in', target_cell, 'cells.pdf', sep = '_'), width = 11, height = 8)
+      plots[[paste(l, cell1, 'vs', cell2, 'dotplot', sep = '_')]] <- a
+      plots[[paste(l, cell1, 'vs', cell2, 'scatterplot', sep = '_')]] <- b
+      
+      #now creating a dataframe with the distribution of our different cell types
+      for (w in unique(all$signature_classification)){
+        mini <- all[all$signature_classification == w,]
+        #for (x in vars_of_interest){
+        #for (y in unique(mini[[x]])){
+        a <- paste(cell1, 'vs', cell2, sep = '')
+        gt <- paste((l *100), '%', sep = '')
+        #z <- nrow(mini[mini[[x]] == y,])
+        z <- nrow(mini)
+        percent <- z/as.numeric(nrow(all)) *100
+        percent <- sprintf(percent, fmt = '%#.2f')
+        percent <- paste(percent, '%', sep = '')
+        #distributions <- rbind(distributions, c(a, gt, num_dropped, num_kept, nrow(marks), nrow(marks2), w, paste(x, y, sep = ':'), z, percent))
+        distributions <- rbind(distributions, c(a, gt, num_dropped, num_kept, nrow(marks), nrow(marks2), w, z, percent))
+          #}
+        #}
+        }
+    }
+  }
+  xxx <- cowplot::plot_grid(plotlist = plots, nrow = nrow(test))
+  cowplot::save_plot(xxx, filename = paste(out, 'cillo_blood_to_tissue_myeloid_origins.png', sep = ''), base_width = 50, base_height = 30, limitsize = FALSE)
+  return(distributions)
+  }
+  ######################################################################
+  cillo_blood_to_tissue_rank_subsample <- function(seu, seu_name, meta, cell_names, target_cell, test.use = 'wilcox', out, degenes_threshold = c(0.05, 0.10, 0.20)){
+  
+  #making the spreadsheet that will hold statistical information for categorization
+  distributions <- data.frame(Comparison_groups=character(), gene_cutoff = double(),
+                              dropped_cells = double(), kept_cells = double(),
+                              n_genes_1 = double(), n_genes_2 = double(),
+                              Signature_classification = character(), 
+                              num_cells = double(), pct_cells=double(), 
+                              comparison=character())
+  distributions <- rbind(distributions, c(0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+  colnames(distributions) <- c('Comparison_groups', 'gene_cutoff', 'dropped_cells',
+                               'kept_cells', 'sig_genes_1', 'sig_genes_2',
+                               'Signature_classification', 'meta', 'num_cells',
+                               'percent_cells')
+  
+  #getting our target cell data
+  Seurat::Idents(object = seu) <- seu@meta.data[[meta]]
+  seu1 <- subset(seu, idents = c(target_cell))
+  test <- unique(expand.grid(cell_names, cell_names))
+  test <- test[test$Var1 != test$Var2,]
+  
+  current_human_df <- as.data.frame(Seurat::GetAssayData(object = seu1, slot = 'counts'))
+  
+  plots <- list()
+  #looping through in every combination of cell IDs
+  for (p in 1:nrow(test)){
+    
+    #getting our combination of cells
+    cell1 <- as.character(test[p,1])
+    cell2 <- as.character(test[p,2])
+    
+    marks <- Seurat::FindMarkers(seu, ident.1 = cell1, ident.2 = cell2, group.by = meta, test.use = 'wilcox', logfc.threshold = 0.1, only.pos = TRUE, min.diff.pct = 0.05)
+    
+    marks2 <- Seurat::FindMarkers(seu, ident.1 = cell2, ident.2 = cell1, group.by = meta, test.use = 'wilcox', logfc.threshold = 0.1, only.pos = TRUE, min.diff.pct = 0.05)
+    
+    #finding the number of markers that we have for each group
+    num_marks <- nrow(marks)
+    num_marks2 <- nrow(marks2)
+    
+    #sorting each of the dataframes before we extract the top signatures
+    marks <- marks[order(marks$avg_log2FC, -rank(marks$p_val_adj), decreasing = TRUE),]
+    marks2 <- marks2[order(marks2$avg_log2FC, -rank(marks2$p_val_adj), decreasing = TRUE),]
+    
+    for (l in degenes_threshold){
+      #only keeping the top X% (X being our DE threshold) of genes upregulated in this data set
+      marks <- marks[1:(num_marks*as.numeric(l)),]
+      marks2 <- marks2[1:(num_marks2*as.numeric(l)),]
+      
+      #selecting # of genes for each sig based on which is smaller-- helps not bias the results
+      nrows <- as.numeric(min(nrow(marks), nrow(marks2)))
+      
+      #this is the total delta for all cells in the target cluster
+      marks_ranks = data.frame(cell=character(), rank=double())
+      marks2_ranks = data.frame(cell=character(), rank=double())
+      
+      n <- 100
+      for (i in seq_len(n)){
+        print(paste('Iteration', i, 'of', n, sep = ' '))
+      
+        #now getting each of our dataframes down to an equal number of rows
+        marks <- marks[sample(nrow(marks), nrows),]
+        marks2 <-marks2[sample(nrow(marks2), nrows),]
+        
+        for (z in colnames(seu1)){
+          current_cell_df <- current_human_df[c(z)]
+          current_cell_df$genes <- rownames(current_cell_df)
+          s <- as.data.frame(current_cell_df[order(-current_cell_df[,1]),])
+          s[[z]] <- as.numeric(s[[z]])
+          colnames(s) <- c('counts', 'genes')
+          s <- s %>% dplyr::mutate(rank = dense_rank(desc(counts)))
+          s$rank[which(s$rank == max(s$rank))] <- max(s$rank) + 20000
+          
+          marks_ranks <- rbind(marks_ranks, c(z, sum(s[rownames(s) %in% rownames(marks),]$rank)))
+          marks2_ranks <- rbind(marks2_ranks,c(z, sum(s[rownames(s) %in% rownames(marks2),]$rank)))
+          }
+        }
+      #now getting aggregated data for the cells for each marker set
+      colnames(marks_ranks) <- c('cell', cell1) 
+      marks_ranks[[cell1]] <- as.numeric(marks_ranks[[cell1]])
+      marks_ranks_agg <- aggregate(x = marks_ranks, by = list(marks_ranks$cell), FUN = mean, simplify = FALSE, drop = FALSE)
+      colnames(marks2_ranks) <- c('cell', cell2)
+      marks2_ranks[[cell2]] <- as.numeric(marks2_ranks[[cell2]])
+      marks2_ranks_agg <- aggregate(x = marks2_ranks, by = list(marks2_ranks$cell), FUN = mean)
+      
+      #now making a an object that has scores from both signatures
+      obj_all <- merge(marks_ranks_agg, marks2_ranks_agg, by = 'Group.1')
+      obj_all <- obj_all[,c('Group.1', cell1, cell2)]
+      met <- seu[[c('global.cluster4', 'hpv_status')]]
+      obj_all <- merge(obj_all, met, by.x = 'Group.1', by.y = 0)
+      
+      obj_all[[cell1]] <- as.numeric(obj_all[[cell1]])
+      obj_all[[cell2]] <- as.numeric(obj_all[[cell2]])
+        
+        #getting only those cells that favor one side or the other by at least 20%
+        obj_all_filtered <- obj_all[(abs(obj_all[[cell1]] - obj_all[[cell2]])) >
+                                      (((obj_all[[cell1]] + obj_all[[cell2]])/2)*.20),]
+        
+        #getting the number of cells lost and kept when we filter out those that fall down the middle
+        num_dropped <- as.numeric(nrow(obj_all) - nrow(obj_all_filtered))
+        num_kept <- nrow(obj_all) - num_dropped
+        
+        mets <- Seurat::FetchData(object = seu, vars = c(meta))
+        mets$id <- rownames(mets)
+        
+        all <- merge(obj_all_filtered, mets, by.x = 'Group.1', by.y = 'id')
+        
+        min.col <- function(m, ...) max.col(-m, ...)
+        
+        #adding new metadata of which cell type this should be considered as based on the signatures
+        all$signature_classification <-colnames(all)[2:3][min.col(all[2:3])]
+        all$signature1 <- all[[cell1]]
+        all$signature2 <- all[[cell2]]
+        
+        b <- ggplot(all, aes(signature1, signature2, color = global.cluster4)) + geom_point() + theme_bw() + xlab(cell1) + ylab(cell2) + ggtitle(paste(cell1, 'vs', cell2, sep = ' '), subtitle = paste('DE gene threshold = ', l* 100, '%', sep = ''))
+      
+      plots[[paste(l, cell1, 'vs', cell2, 'scatterplot', sep = '_')]] <- b
+        
+        #ggpubr::ggexport(a, b, filename = paste(out, l, seu_name, cell1, 'vs', cell2, 'signature in', target_cell, 'cells.pdf', sep = '_'), width = 11, height = 8)
+        
+        #now creating a dataframe with the distribution of our different cell types
+        for (w in unique(all$signature_classification)){
+          mini <- all[all$signature_classification == w,]
+          a <- paste(cell1, 'vs', cell2, sep = '')
+          gt <- paste((l *100), '%', sep = '')
+          z <- nrow(mini)
+          percent <- z/as.numeric(nrow(all)) *100
+          percent <- sprintf(percent, fmt = '%#.2f')
+          percent <- paste(percent, '%', sep = '')
+          distributions <- rbind(distributions, c(a, gt, num_dropped, num_kept, nrow(marks), nrow(marks2), w, z, percent))
+          }
+    }
+  }
+  xxx <- cowplot::plot_grid(plotlist = plots, nrow = nrow(test))
+  cowplot::save_plot(xxx, filename = paste(out, 'cillo_blood_to_tissue_myeloid_origins_rankbased.png', sep = ''), base_width = 50, base_height = 30, limitsize = FALSE)
+  return(distributions)
+}
+```
+
+```{r run function, warning=FALSE}
+ out <- '/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/'
+  vln.logfc = 0.05
+  vln.mindiffpct = 0.05
+  vln.pval_adj = 0.01
+  vln.fccutoff = 0.25
+  vln.pcutoff = 0.01
+  degenes_threshold = c(0.05, 0.10, 0.20)
+  cell_names = c("PBMC cDC2_CD33" , "PBMC DC_pDC", 'cDC2_CD33')
+seu <- hnc[,hnc$tissue %like any% c('TIL', 'PBMC')]
+
+seu$cluster_tissue <- paste(seu$tissue, seu$global.cluster4)
+seu$cluster_tissue[seu$cluster_tissue %like any% c("TIL cDC2_CD1C", "TIL DC3_LAMP3", "TIL cDC1_CLEC9A", "TIL DCs")] <- 'TIL Dendritic Cells'
+seu$cluster_tissue[seu$cluster_tissue %like any% c("PBMC Mono_CD14", "PBMC Mono_CD14_THBS1", "PBMC Mono_Int", "PBMC Mono_CD16", "PBMC Mono_CD14_IL1B", "PBMC Mono_CD14_ID1")] <- 'PBMC Monocytes'
+
+################################3
+bld_tis_rank <- cillo_blood_to_tissue_rank_subsample(seu = seu, seu_name = 'hnc_notonsil', meta = 'cluster_tissue', target_cell = 'TIL Dendritic Cells', out = '/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/', degenes_threshold = c(0.05, 0.10, 0.20), cell_names = c("PBMC cDC2_CD33" , "PBMC DC_pDC", 'PBMC Monocytes'))
+
+write.csv(bld_tis_rank, file = '/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/bld_tis_rank_100xiterations.csv')
+
+bld_tis_rank <- bld_tis_rank[-1,]
+
+plots <- list()
+for (x in bld_tis_rank$Comparison_groups){
+  origins <- bld_tis_rank[bld_tis_rank$Comparison_groups == x,]
+  origins$meta2 <- paste(origins$Signature_classification, origins$gene_cutoff, sep = '_')
+  origins$pct <- as.numeric(origins$meta)/as.numeric(origins$kept_cells)
+  a <- ggplot(origins,aes(x = Signature_classification, y = as.numeric(pct), fill = Signature_classification)) +
+  geom_bar(stat = "identity", width=0.5, position=position_dodge(width=0.5)) +  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + facet_wrap(~ gene_cutoff) + ggtitle(unique(origins$Comparison_groups), subtitle = 'Rank-based analysis with 100 subsampling iterations') + labs(x = "Assigned origin", y = "Percentage of Dendritic cells")
+  plots[[x]] <- a
+}
+
+cp <- cowplot::plot_grid(plotlist = plots, nrow = 2)
+save_plot('/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/DC_origins_rankbased_100xsubsample.png', plot = cp, base_height = 10, base_width = 18)
+#write.csv(bld_tis_rank, file = '/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/DC_origins_rankbased_5xsubsample.csv')
+
+###############################3
+
+bld_tis <- cillo_blood_to_tissue_origins(seu = seu, seu_name = 'hnc_notonsil', meta = 'cluster_tissue', target_cell = 'TIL Dendritic Cells', out = '/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/', degenes_threshold = c(0.05, 0.10, 0.20), cell_names = c("PBMC cDC2_CD33" , "PBMC DC_pDC", 'PBMC Monocytes'))
+
+bld_tis <- bld_tis[-1,]
+
+plots <- list()
+for (x in bld_tis$Comparison_groups){
+  origins <- bld_tis[bld_tis$Comparison_groups == x,]
+  origins$meta2 <- paste(origins$Signature_classification, origins$gene_cutoff, sep = '_')
+  origins$pct <- as.numeric(origins$meta)/as.numeric(origins$kept_cells)
+  a <- ggplot(origins,aes(x = Signature_classification, y = as.numeric(pct), fill = Signature_classification)) +
+  geom_bar(stat = "identity", width=0.5, position=position_dodge(width=0.5)) +  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + facet_wrap(~ gene_cutoff) + ggtitle(unique(origins$Comparison_groups), subtitle = 'Expression-based analysis with no subsampling') + labs(x = "Assigned origin", y = "Percentage of Dendritic cells")
+  plots[[x]] <- a
+}
+
+cp <- cowplot::plot_grid(plotlist = plots, nrow = 2)
+save_plot('/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/DC_origins_expressionbased_nosubsample.png', plot = cp, base_height = 10, base_width = 18)
+write.csv(bld_tis, file = '/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/bld_tis_expressionbased_nosubsampling.csv')
+
+```
+
+#blood CD33 DCs and cDC2_CD1C to mreg origins (05/13/2022)
+
+```{r functions}
+origins <- function(seu, seu_name, meta, cell_names, target_cell, out, degenes_threshold = c(0.05, 0.10, 0.20)){
+    
+  #making the spreadsheet that will hold statistical information for categorization
+  distributions <- data.frame(Comparison_groups=character(), gene_cutoff = double(),
+                              dropped_cells = double(), kept_cells = double(), n_genes_1 = double(), 
+                              n_genes_2 = double(), Signature_classification = character(), 
+                              meta = character(), num_cells=double(), percent=character())
+  distributions <- rbind(distributions, c(0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+  colnames(distributions) <- c('Comparison_groups', 'gene_cutoff', 'dropped_cells',
+                               'kept_cells', 'sig_genes_1', 'sig_genes_2', 'Signature_classification', 
+                               'meta', 'num_cells', 'percent_cells')
+  
+  #getting our target cell data
+  Seurat::Idents(object = seu) <- seu@meta.data[[meta]]
+  seu1 <- subset(seu, idents = c(target_cell))
+  test <- unique(expand.grid(cell_names, cell_names))
+  test <- test[test$Var1 != test$Var2,]
+  
+  plots <- list()
+  #looping through in every combination of cell IDs
+  for (p in 1:nrow(test)){
+    
+    #getting our combination of cells
+    cell1 <- as.character(test[p,1])
+    cell2 <- as.character(test[p,2])
+    
+    marks <- Seurat::FindMarkers(seu, ident.1 = cell1, ident.2 = cell2, group.by = meta, test.use = 'wilcox', logfc.threshold = 0.1, only.pos = TRUE, min.diff.pct = 0.05)
+    marks2 <- Seurat::FindMarkers(seu, ident.1 = cell2, ident.2 = cell1, group.by = meta, test.use = 'wilcox', logfc.threshold = 0.1, only.pos = TRUE, min.diff.pct = 0.05)
+    
+    #finding the number of markers that we have for each group
+    num_marks <- nrow(marks)
+    num_marks2 <- nrow(marks2)
+    
+    #sorting each of the dataframes before we extract the top signatures
+    marks <- marks[order(marks$avg_log2FC, -rank(marks$p_val_adj), decreasing = TRUE),]
+    marks2 <- marks2[order(marks2$avg_log2FC, -rank(marks2$p_val_adj), decreasing = TRUE),]
+    
+    for (l in degenes_threshold){
+      #only keeping the top X% (X being our DE threshold) of genes upregulated in this data set
+      marks <- marks[1:(num_marks*as.numeric(l)),]
+      marks2 <- marks2[1:(num_marks2*as.numeric(l)),]
+      
+      all_marks <- unique(c(rownames(marks), rownames(marks2)))
+      
+      a <- DotPlot(subset(seu, idents = c(cell1, cell2)), features = c(all_marks), col.min = 0) + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + ggtitle(paste(cell1, 'vs', cell2, sep = ' '), subtitle = paste('DE gene threshold = ', l* 100, '%', sep = ''))
+      
+      #density plot of genes from our two origins in the LAMP3_DCs
+      marks_2 <- rowMeans(Seurat::FetchData(object = seu1, vars = unique(rownames(marks))))
+      marks2_2 <- rowMeans(Seurat::FetchData(object = seu1, vars = unique(rownames(marks2))))
+      
+      fl <- paste(l, 'threshold_Red=', cell1, 'signature_Blue=', cell2, 'signature_DENSITYPLOT.png', sep = '_')
+      fl1 <- paste('/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/', fl, sep = '')
+      png(file = fl1)
+      plot(density(marks_2), col = 'red', main = paste(l, 'DE genes threshold, Red =', cell1, 'signature Blue = ', cell2, 'signature', sep = ' '))
+      lines(density(marks2_2), col = 'blue')
+      dev.off()
+      
+      print(paste('Number of markers in the ', cell1, ' subset is ', nrow(marks),sep = ''))
+      print(paste('Number of markers in the ', cell2, ' subset is ', nrow(marks2), sep = ''))
+      
+      #merging signature1
+      df <- as.data.frame(Seurat::GetAssayData(object = seu1, slot = "data"))
+      cell.ids <- Seurat::FetchData(object = seu1, vars = c(meta))
+      cell.ids$id <- rownames(cell.ids)
+      df <- df[rownames(df) %in% rownames(marks),]
+      df <- as.data.frame(t(df))
+      df$id <- rownames(df)
+      cells_meta <- merge(cell.ids, df, on = 'id')
+      
+      t1 <- as.numeric(length(as.numeric(c(meta)))) + 2
+      cells_meta$signature1 <- rowMeans(cells_meta[,t1:ncol(cells_meta)])
+      
+      #getting signature2
+      df2 <- as.data.frame(Seurat::GetAssayData(object = seu1, slot = 'data'))
+      cell.ids2 <- Seurat::FetchData(object = seu1, vars = c(meta))
+      cell.ids2$id <- rownames(cell.ids2)
+      df2 <- df2[rownames(df2) %in% rownames(marks2),]
+      df2 <- as.data.frame(t(df2))
+      df2$id <- rownames(df2)
+      cells_meta2 <- merge(cell.ids2, df2, on = 'id')
+      t2 <- as.numeric(length(as.numeric(c(meta)))) + 2
+      cells_meta2$signature2 <- rowMeans(cells_meta2[,t2:ncol(cells_meta2)])
+      
+      obj1 <- cells_meta[,c('id', 'signature1')]
+      obj2 <- cells_meta2[,c('id', 'signature2')]
+      obj_all <- merge(obj1, obj2, on = 'id')
+      
+      #getting only those cells that favor one side or the other by at least 20%
+      obj_all_filtered <- obj_all[(abs(obj_all$signature1 - obj_all$signature2)) > (((obj_all$signature1 + obj_all$signature2)/2)*.20),]
+      
+      #getting the number of cells lost and kept when we filter out those that fall down the middle
+      num_dropped <- as.numeric(nrow(obj_all) - nrow(obj_all_filtered))
+      num_kept <- nrow(obj_all) - num_dropped
+      
+      mets <- Seurat::FetchData(object = seu, vars = c(meta))
+      mets$id <- rownames(mets)
+      
+      all <- merge(obj_all_filtered, mets, on = 'id')
+      mets <- seu[['global.cluster4']]
+      all <- merge(all, mets, by.x = 'id', by.y = 0)
+      
+      #adding new metadata of which cell type this should be considered as based on the signatures
+      all$signature_classification <-colnames(all)[2:3][max.col(all[2:3])]
+      all$signature_classification[all$signature_classification == 'signature1'] <- cell1
+      all$signature_classification[all$signature_classification == 'signature2'] <- cell2
+      
+      b <- ggplot(all, aes(signature1, signature2, color = global.cluster4)) + geom_point() + theme_bw() + xlab(cell1) + ylab(cell2) + ggtitle(paste(cell1, 'vs', cell2, sep = ' '), subtitle = paste('DE gene threshold = ', l* 100, '%', sep = ''))
+      
+      plots[[paste(l, cell1, 'vs', cell2, 'dotplot', sep = '_')]] <- a
+      plots[[paste(l, cell1, 'vs', cell2, 'scatterplot', sep = '_')]] <- b
+      
+      #now creating a dataframe with the distribution of our different cell types
+      for (w in unique(all$signature_classification)){
+        mini <- all[all$signature_classification == w,]
+        a <- paste(cell1, 'vs', cell2, sep = '')
+        gt <- paste((l *100), '%', sep = '')
+        z <- nrow(mini)
+        percent <- z/as.numeric(nrow(all)) *100
+        percent <- sprintf(percent, fmt = '%#.2f')
+        percent <- paste(percent, '%', sep = '')
+        distributions <- rbind(distributions, c(a, gt, num_dropped, num_kept, nrow(marks), nrow(marks2), w, z, percent))
+        }
+    }
+  }
+  xxx <- cowplot::plot_grid(plotlist = plots, nrow = nrow(test))
+  cowplot::save_plot(xxx, filename = paste(out, 'cillo_blood_to_tissue_myeloid_origins.png', sep = ''), base_width = 50, base_height = 30, limitsize = FALSE)
+  
+  distributions <- distributions[-1,]
+  
+  plots <- list()
+  for (x in distributions$Comparison_groups){
+    origins <- distributions[distributions$Comparison_groups == x,]
+    origins$meta2 <- paste(origins$Signature_classification, origins$gene_cutoff, sep = '_')
+    origins$pct <- as.numeric(origins$meta)/as.numeric(origins$kept_cells)
+    a <- ggplot(origins,aes(x = Signature_classification, y = as.numeric(pct), fill = Signature_classification)) +
+    geom_bar(stat = "identity", width=0.5, position=position_dodge(width=0.5)) +  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + facet_wrap(~ gene_cutoff) + ggtitle(unique(origins$Comparison_groups), subtitle = 'Expression-based analysis with no subsampling') + labs(x = "Assigned origin", y = "Percentage of Dendritic cells")
+    plots[[x]] <- a
+  }
+  
+  cp <- cowplot::plot_grid(plotlist = plots, nrow = 2)
+  save_plot(paste(out, cell_names[1], 'vs', cell_names[2], 'in', target_cell, 'origin_expressionbased_nosubsample.png', sep = ''), plot = cp, base_height = 10, base_width = 18)
+  write.csv(og, file = paste(out, cell_names[1], 'vs', cell_names[2], 'in', target_cell, 'origin_expressionbased_nosubsample.csv', sep = ''))
+  
+  return(distributions)
+}
+
+########################################################
+ origin_subsample <- function(seu, seu_name, meta, cell_names, target_cell, test.use = 'wilcox', out, degenes_threshold = c(0.05, 0.10, 0.20)){
+  
+  #making the spreadsheet that will hold statistical information for categorization
+  distributions <- data.frame(Comparison_groups=character(), gene_cutoff = double(),
+                              dropped_cells = double(), kept_cells = double(),
+                              n_genes_1 = double(), n_genes_2 = double(),
+                              Signature_classification = character(), 
+                              num_cells = double(), pct_cells=double(), 
+                              comparison=character())
+  distributions <- rbind(distributions, c(0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+  colnames(distributions) <- c('Comparison_groups', 'gene_cutoff', 'dropped_cells',
+                               'kept_cells', 'sig_genes_1', 'sig_genes_2',
+                               'Signature_classification', 'meta', 'num_cells',
+                               'percent_cells')
+  
+  #getting our target cell data
+  Seurat::Idents(object = seu) <- seu@meta.data[[meta]]
+  seu1 <- subset(seu, idents = c(target_cell))
+  test <- unique(expand.grid(cell_names, cell_names))
+  test <- test[test$Var1 != test$Var2,]
+  
+  current_human_df <- as.data.frame(Seurat::GetAssayData(object = seu1, slot = 'counts'))
+  
+  plots <- list()
+  #looping through in every combination of cell IDs
+  for (p in 1:nrow(test)){
+    
+    #getting our combination of cells
+    cell1 <- as.character(test[p,1])
+    cell2 <- as.character(test[p,2])
+    
+    marks <- Seurat::FindMarkers(seu, ident.1 = cell1, ident.2 = cell2, group.by = meta, test.use = 'wilcox', logfc.threshold = 0.1, only.pos = TRUE, min.diff.pct = 0.05)
+    
+    marks2 <- Seurat::FindMarkers(seu, ident.1 = cell2, ident.2 = cell1, group.by = meta, test.use = 'wilcox', logfc.threshold = 0.1, only.pos = TRUE, min.diff.pct = 0.05)
+    
+    #finding the number of markers that we have for each group
+    num_marks <- nrow(marks)
+    num_marks2 <- nrow(marks2)
+    
+    #sorting each of the dataframes before we extract the top signatures
+    marks <- marks[order(marks$avg_log2FC, -rank(marks$p_val_adj), decreasing = TRUE),]
+    marks2 <- marks2[order(marks2$avg_log2FC, -rank(marks2$p_val_adj), decreasing = TRUE),]
+    
+    for (l in degenes_threshold){
+      #only keeping the top X% (X being our DE threshold) of genes upregulated in this data set
+      marks <- marks[1:(num_marks*as.numeric(l)),]
+      marks2 <- marks2[1:(num_marks2*as.numeric(l)),]
+      
+      #selecting # of genes for each sig based on which is smaller-- helps not bias the results
+      nrows <- as.numeric(min(nrow(marks), nrow(marks2)))
+      
+      #this is the total delta for all cells in the target cluster
+      marks_ranks = data.frame(cell=character(), rank=double())
+      marks2_ranks = data.frame(cell=character(), rank=double())
+      
+      n <- 100
+      for (i in seq_len(n)){
+        print(paste('Iteration', i, 'of', n, sep = ' '))
+      
+        #now getting each of our dataframes down to an equal number of rows
+        marks <- marks[sample(nrow(marks), nrows),]
+        marks2 <-marks2[sample(nrow(marks2), nrows),]
+        
+        for (z in colnames(seu1)){
+          current_cell_df <- current_human_df[c(z)]
+          current_cell_df$genes <- rownames(current_cell_df)
+          s <- as.data.frame(current_cell_df[order(-current_cell_df[,1]),])
+          s[[z]] <- as.numeric(s[[z]])
+          colnames(s) <- c('counts', 'genes')
+          s <- s %>% dplyr::mutate(rank = dense_rank(desc(counts)))
+          s$rank[which(s$rank == max(s$rank))] <- max(s$rank) + 20000
+          
+          marks_ranks <- rbind(marks_ranks, c(z, sum(s[rownames(s) %in% rownames(marks),]$rank)))
+          marks2_ranks <- rbind(marks2_ranks,c(z, sum(s[rownames(s) %in% rownames(marks2),]$rank)))
+          }
+        }
+      #now getting aggregated data for the cells for each marker set
+      colnames(marks_ranks) <- c('cell', cell1) 
+      marks_ranks[[cell1]] <- as.numeric(marks_ranks[[cell1]])
+      marks_ranks_agg <- aggregate(x = marks_ranks, by = list(marks_ranks$cell), FUN = mean, simplify = FALSE, drop = FALSE)
+      colnames(marks2_ranks) <- c('cell', cell2)
+      marks2_ranks[[cell2]] <- as.numeric(marks2_ranks[[cell2]])
+      marks2_ranks_agg <- aggregate(x = marks2_ranks, by = list(marks2_ranks$cell), FUN = mean)
+      
+      #now making a an object that has scores from both signatures
+      obj_all <- merge(marks_ranks_agg, marks2_ranks_agg, by = 'Group.1')
+      obj_all <- obj_all[,c('Group.1', cell1, cell2)]
+      met <- seu[[c('global.cluster4', 'hpv_status')]]
+      obj_all <- merge(obj_all, met, by.x = 'Group.1', by.y = 0)
+      
+      obj_all[[cell1]] <- as.numeric(obj_all[[cell1]])
+      obj_all[[cell2]] <- as.numeric(obj_all[[cell2]])
+        
+        #getting only those cells that favor one side or the other by at least 20%
+        obj_all_filtered <- obj_all[(abs(obj_all[[cell1]] - obj_all[[cell2]])) >
+                                      (((obj_all[[cell1]] + obj_all[[cell2]])/2)*.20),]
+        
+        #getting the number of cells lost and kept when we filter out those that fall down the middle
+        num_dropped <- as.numeric(nrow(obj_all) - nrow(obj_all_filtered))
+        num_kept <- nrow(obj_all) - num_dropped
+        
+        mets <- Seurat::FetchData(object = seu, vars = c(meta))
+        mets$id <- rownames(mets)
+        
+        all <- merge(obj_all_filtered, mets, by.x = 'Group.1', by.y = 'id')
+        
+        min.col <- function(m, ...) max.col(-m, ...)
+        
+        #adding new metadata of which cell type this should be considered as based on the signatures
+        all$signature_classification <-colnames(all)[2:3][min.col(all[2:3])]
+        all$signature1 <- all[[cell1]]
+        all$signature2 <- all[[cell2]]
+        
+        b <- ggplot(all, aes(signature1, signature2, color = global.cluster4)) + geom_point() + theme_bw() + xlab(cell1) + ylab(cell2) + ggtitle(paste(cell1, 'vs', cell2, sep = ' '), subtitle = paste('DE gene threshold = ', l* 100, '%', sep = ''))
+      
+      plots[[paste(l, cell1, 'vs', cell2, 'scatterplot', sep = '_')]] <- b
+        
+        #ggpubr::ggexport(a, b, filename = paste(out, l, seu_name, cell1, 'vs', cell2, 'signature in', target_cell, 'cells.pdf', sep = '_'), width = 11, height = 8)
+        
+        #now creating a dataframe with the distribution of our different cell types
+        for (w in unique(all$signature_classification)){
+          mini <- all[all$signature_classification == w,]
+          a <- paste(cell1, 'vs', cell2, sep = '')
+          gt <- paste((l *100), '%', sep = '')
+          z <- nrow(mini)
+          percent <- z/as.numeric(nrow(all)) *100
+          percent <- sprintf(percent, fmt = '%#.2f')
+          percent <- paste(percent, '%', sep = '')
+          distributions <- rbind(distributions, c(a, gt, num_dropped, num_kept, nrow(marks), nrow(marks2), w, z, percent))
+          }
+    }
+  }
+  xxx <- cowplot::plot_grid(plotlist = plots, nrow = nrow(test))
+  cowplot::save_plot(xxx, filename = paste(out, 'cillo_blood_to_tissue_myeloid_origins_rankbased.png', sep = ''), base_width = 50, base_height = 30, limitsize = FALSE)
+  return(distributions)
+}
+```
+
+```{r using functions, warning = FALSE}
+og <- origins(hnc, seu_name = 'hnc', meta = 'cluster_tissue', cell_names = c('cDC2_CD33_PBMC', "cDC2_CD1C_TIL"), target_cell = "DC3_LAMP3_TIL", out = '/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/')
+
+
+og_rank <- origin_subsample(hnc, seu_name = 'hnc', meta = 'cluster_tissue', cell_names = c('cDC2_CD33_PBMC', "cDC2_CD1C_TIL"), target_cell = "DC3_LAMP3_TIL", out = '/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/')
+
+og_rank <- og_rank[-1,]
+
+plots <- list()
+for (x in og_rank$Comparison_groups){
+  origins <- og_rank[og_rank$Comparison_groups == x,]
+  origins$meta2 <- paste(origins$Signature_classification, origins$gene_cutoff, sep = '_')
+  origins$pct <- as.numeric(origins$meta)/as.numeric(origins$kept_cells)
+  a <- ggplot(origins,aes(x = Signature_classification, y = as.numeric(pct), fill = Signature_classification)) +
+  geom_bar(stat = "identity", width=0.5, position=position_dodge(width=0.5)) +  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + facet_wrap(~ gene_cutoff) + ggtitle(unique(origins$Comparison_groups), subtitle = 'Rank-based analysis with 100 subsampling iterations') + labs(x = "Assigned origin", y = "Percentage of Dendritic cells")
+  plots[[x]] <- a
+}
+
+cp <- cowplot::plot_grid(plotlist = plots, nrow = 2)
+save_plot('/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/cDC2_CD1cvscDC2_CD33inmregs_origins_rankbased_100xsubsample.png', plot = cp, base_height = 10, base_width = 18)
+write.csv(og_rank, file = '/Volumes/hdlab/Projects/HNC_SPORE/LAMP3_DCs/cDC2_CD1cvscDC2_CD33inmregs_origins_rankbased_5xsubsample.csv')
+
+```

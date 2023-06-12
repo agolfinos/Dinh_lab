@@ -1,0 +1,43 @@
+---
+title: "HNC_human_mouse_comparison"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#reading in our libraries
+library(Seurat)
+
+#reading in our files
+load('/Users/agolfinos/Desktop/Seurat_MOC2_K17KO_2021-09-28.rda')
+mm <- seurat
+
+load('/Users/agolfinos/Desktop/hnc_all_annot_2021-09-20.rda')
+hs <- hnc
+
+#dimplot to visualize the current identities
+DimPlot(mm, group.by = 'global.cluster2')
+Idents(object = mm) <- 'global.cluster2'
+DimPlot(hs)
+DimPlot(mm)
+
+#getting a list of the top 50 marker genes for each cluster
+genes = vector(mode = 'list')
+for (x in unique(mm@active.ident)) {
+  marks <- FindMarkers(mm, ident.1 = x, min.pct = 0.25, only.pos = TRUE)
+  marks1 <- marks[order(-marks$avg_log2FC, -marks$p_val_adj),]
+  marks2 <- filter(marks1, avg_log2FC > 1 & p_val_adj < 0.01)
+  if (length(row.names(marks2) > 50)) {
+    genes[[x]] <- row.names(marks2[1:50,])
+  } else {
+  genes[[x]] <- row.names(marks2)
+    
+  }
+  
+ 
+}
+```
+

@@ -1,0 +1,829 @@
+---
+title: "MOC2_TNK_analysis"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r load packages}
+library(Seurat)
+library(patchwork)
+library(dplyr)
+library(ggplot2)
+library(clustree)
+library(topGO)
+library(biomaRt)
+```
+```{r read in}
+load(file = "/Users/agolfinos/Desktop/Seurat_MOC2_K17KO_2021-07-16.rda")
+DimPlot(seurat, group.by = "global.cluster")
+#DimPlot(seurat, group.by = "global.cluster2")
+```
+```{r subset based on batch}
+wt <- subset(x = seurat, subset = tissue == 'MOC2')
+ko <- subset(x = seurat, subset = tissue == 'K17KOMOC2')
+```
+```{r Mouse gene to human genes wt}
+  musGenes <- rownames(wt)
+  
+#Basic function to convert mouse to human gene names
+convertMouseGeneList <- function(x){
+
+require("biomaRt")
+human = useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+mouse = useMart("ensembl", dataset = "mmusculus_gene_ensembl")
+
+genesV2 = getLDS(attributes = c("mgi_symbol"), filters = "mgi_symbol", values = x , mart = mouse, attributesL = c("hgnc_symbol"), martL = human, uniqueRows=T)
+
+convertMouseGeneList(musGenes)}
+```
+```{r Cellphone DB wt}
+  counts <- as.data.frame(as.matrix(wt@assays$RNA[,1:ncol(wt@assays$RNA)]))
+  genesV2 = getLDS(attributes = c("mgi_symbol"), filters = "mgi_symbol", values = rownames(wt) , mart = useMart("ensembl", dataset = "mmusculus_gene_ensembl"), attributesL = c("hgnc_symbol"), martL = useMart("ensembl", dataset = "hsapiens_gene_ensembl"), uniqueRows=T)
+  rows <- data.frame(rownames(wt))
+  xx = merge(genesV2, rows, by.x = 'MGI.symbol', by.y = 'rownames.wt.', all = TRUE)
+  counts <- counts[rownames(counts) %in% xx$MGI.symbol,]
+  counts <- tibble::rownames_to_column(as.data.frame(counts), var = "MGI.symbol")
+  counts <- plyr::join(counts, xx)
+  counts$MGI.symbol <- NULL
+  counts <- cbind(counts[, which(colnames(counts) == "HGNC.symbol")], counts)
+  colnames(counts)[1] <- "Gene"
+  counts$HGNC.symbol <- NULL
+  counts <- counts[complete.cases(counts), ]
+  rownames(counts) <- NULL
+  #counts = unique(counts)
+  counts
+  metadata <- data.frame(Cell = rownames(wt@meta.data),cell_type = wt$global.cluster)
+  cellcols <- colnames(counts)
+  cellrows <- metadata$Cell
+  setdiff(cellcols, cellrows)
+  #(counts)
+  #dim(metadata)
+  write.table(counts, file = "counts.txt", quote = F, col.names = T, row.names = F, sep = "\t")
+  write.table(metadata, file = "metadata.txt", quote = F, col.names = T, row.names = F, sep = "\t")
+  #cat("cellphonedb method statistical_analysis metadata.txt counts.txt --threads=4")
+  #cat("cellphonedb plot dot-plot")
+  #cat("cellphonedb plot heatmap-plot metadata.txt")
+```
+```{r Mouse gene to human genes ko}
+ musGenes <- rownames(ko)
+  
+#Basic function to convert mouse to human gene names
+convertMouseGeneList <- function(x){
+
+require("biomaRt")
+human = useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+mouse = useMart("ensembl", dataset = "mmusculus_gene_ensembl")
+
+genesV2 = getLDS(attributes = c("mgi_symbol"), filters = "mgi_symbol", values = x , mart = mouse, attributesL = c("hgnc_symbol"), martL = human, uniqueRows=T)
+
+convertMouseGeneList(musGenes)}
+```
+```{r Cellphone DB ko}
+counts <- as.data.frame(as.matrix(ko@assays$RNA[,1:ncol(ko@assays$RNA)]))
+  genesV2 = getLDS(attributes = c("mgi_symbol"), filters = "mgi_symbol", values = rownames(ko) , mart = useMart("ensembl", dataset = "mmusculus_gene_ensembl"), attributesL = c("hgnc_symbol"), martL = useMart("ensembl", dataset = "hsapiens_gene_ensembl"), uniqueRows=T)
+  rows <- data.frame(rownames(ko))
+  xx = merge(genesV2, rows, by.x = 'MGI.symbol', by.y = 'rownames.ko.', all = TRUE)
+  counts <- counts[rownames(counts) %in% xx$MGI.symbol,]
+  counts <- tibble::rownames_to_column(as.data.frame(counts), var = "MGI.symbol")
+  counts <- plyr::join(counts, xx)
+  counts$MGI.symbol <- NULL
+  counts <- cbind(counts[, which(colnames(counts) == "HGNC.symbol")], counts)
+  colnames(counts)[1] <- "Gene"
+  counts$HGNC.symbol <- NULL
+  counts <- counts[complete.cases(counts), ]
+  rownames(counts) <- NULL
+  #counts = unique(counts)
+  counts
+  metadata <- data.frame(Cell = rownames(ko@meta.data),cell_type = ko$global.cluster)
+  cellcols <- colnames(counts)
+  cellrows <- metadata$Cell
+  setdiff(cellcols, cellrows)
+  #(counts)
+  #dim(metadata)
+  write.table(counts, file = "counts.txt", quote = F, col.names = T, row.names = F, sep = "\t")
+  write.table(metadata, file = "metadata.txt", quote = F, col.names = T, row.names = F, sep = "\t")
+  #cat("cellphonedb method statistical_analysis metadata.txt counts.txt --threads=4")
+  #cat("cellphonedb plot dot-plot")
+  #cat("cellphonedb plot heatmap-plot metadata.txt")
+```
+
+```{r TNK subset/PCA}
+tnk <- subset(x = seurat, idents = c('CD4', 'CD8', 'NKs', 'Treg'))
+tnk <- RunPCA(tnk, features = VariableFeatures(object = tnk))
+#ElbowPlot(tnk)
+```
+```{r TNK neighbors + clustering}
+tnk <- FindNeighbors(tnk, dims = 1:8)
+tnk <- FindClusters(tnk, resolution = 1)
+tnk <- RunUMAP(tnk, dims = 1:8)
+DimPlot(tnk, reduction = 'umap')
+```
+```{r TNK Feature plot}
+features <- c('Tcf7', 'Ccr7', 'Cd8a', 'Pdcd1', 'Tnfrsf9', 'Tnfrsf4', 'Gzmk', 'Ctla4', 'Lag3', 'Tigit', 'Havcr2', 'Tox', 'Gzmb', 'Ifngr1', 'Fasl', 'Cxcr5', 'Slamf6', 'Foxp3', 'Cd4', 'Cd3e', 'Eomes', 'Cxcr3', 'Stat4', 'Stat1', 'Ccr4', 'Ncr1')
+FeaturePlot(tnk, features = features)
+DotPlot(tnk, features = features) + theme(axis.text.x = element_text(angle=90, hjust=0.95))
+VlnPlot(tnk, features = features)
+```
+
+```{r TNK cluster IDs and annotation}
+tnk.cluster.ids <- c('CD8','NK','CD8','CD4','Treg','CD8', 'CD4', 'Treg', 'NK','NK', 'CD8', 'Mono.Macro','CD8','NK','CD8')
+current.cluster.ids <- c(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14)
+names(tnk.cluster.ids) <- levels(tnk)
+tnk@active.ident <- plyr::mapvalues (x = tnk@active.ident, from = current.cluster.ids, to = tnk.cluster.ids)
+DimPlot(tnk, reduction ='umap', label=TRUE, pt.size = 0.5)
+```
+```{r TNK Subset NKs and T cells}
+nk <- subset(tnk, idents = c('NKs'))
+tcells <- subset(tnk, idents = c('Treg', 'CD4', 'CD8'))
+```
+```{r T Violin Plot}
+featurestfh = c('Cxcr5', 'Tox', 'Slamf6')
+featuresexh = c('Pdcd1', 'Tigit', 'Lag3', 'Ctla4', 'Havcr2', 'Tox')
+
+t.subcluster.ids <- c('Tex CD8', 'Treg', 'Tfh CD4', 'Naive CD4', 'Effector memory CD8', 'Early activated CD8', 'Th1-like CD4')
+current.cluster.ids <- c(0, 1, 2, 3, 4, 5, 6)
+names(t.subcluster.ids) <- levels(t)
+tcells@active.ident <- plyr::mapvalues (x = tcells@active.ident, from = current.cluster.ids, to = t.subcluster.ids)
+
+
+VlnPlot(tcells, features = featurestfh, split.by = 'tissue')
+VlnPlot(tcells, features = featuresexh, split.by = 'tissue' )
+```
+```{r T cell neighbors}
+tcells <- RunPCA(tcells, features = VariableFeatures(object = tcells))
+#ElbowPlot(tcells)
+tcells <- FindNeighbors(tcells, dims = 1:10)
+tcells <- FindClusters(tcells, resolution = 0.3)
+tcells <- RunUMAP(tcells, dims = 1:10)
+DimPlot(tcells, reduction = 'umap', split.by = 'tissue')
+```
+```{r T cell clustree}
+for (res in c(0.1, 0.2, 0.3, 0.4, 0.5)) {
+    tcells <- FindClusters(tcells, graph.name = "RNA_snn", resolution = res, algorithm = 1)}
+clustree(tcells)
+```
+```{r T cell DE}
+tcells0.markers <- FindMarkers(tcells, ident.1 = 0, ident.2 = c(1, 2, 3, 4, 5, 6), min.pct = 0.25, only.pos = TRUE)
+tcells0.ordered <- tcells0.markers[order(-tcells0.markers$avg_log2FC, tcells0.markers$p_val_adj),]
+
+tcells1.markers <- FindMarkers(tcells, ident.1 = 1, ident.2 = c(0, 2, 3, 4, 5, 6), min.pct = 0.25, only.pos = TRUE)
+tcells1.ordered <- tcells1.markers[order(-tcells1.markers$avg_log2FC, tcells1.markers$p_val_adj),]
+
+tcells2.markers <- FindMarkers(tcells, ident.1 = 2, ident.2 = c(0, 1, 3, 4, 5, 6), min.pct = 0.25, only.pos = TRUE)
+tcells2.ordered <- tcells2.markers[order(-tcells2.markers$avg_log2FC, tcells2.markers$p_val_adj),]
+
+tcells3.markers <- FindMarkers(tcells, ident.1 = 3, ident.2 = c(0, 1, 2, 4, 5, 6), min.pct = 0.25, only.pos = TRUE)
+tcells3.ordered <- tcells3.markers[order(-tcells3.markers$avg_log2FC, tcells3.markers$p_val_adj),]
+
+tcells4.markers <- FindMarkers(tcells, ident.1 = 4, ident.2 = c(0, 1, 2, 3, 5, 6), min.pct = 0.25, only.pos = TRUE)
+tcells4.ordered <- tcells4.markers[order(-tcells4.markers$avg_log2FC, tcells4.markers$p_val_adj),]
+
+tcells5.markers <- FindMarkers(tcells, ident.1 = 5, ident.2 = c(0, 1, 2, 3, 4, 6), min.pct = 0.25, only.pos = TRUE)
+tcells5.ordered <- tcells5.markers[order(-tcells5.markers$avg_log2FC, tcells5.markers$p_val_adj),]
+
+tcells6.markers <- FindMarkers(tcells, ident.1 = 6, ident.2 = c(0, 1, 2, 3, 4, 5), min.pct = 0.25, only.pos = TRUE)
+tcells6.ordered <- tcells6.markers[order(-tcells6.markers$avg_log2FC, tcells6.markers$p_val_adj),]
+```
+```{r T cell dotplot of DE genes}
+tcells0de <- row.names(tcells0.ordered[1:10,])
+tcells1de <- row.names(tcells1.ordered[1:10,])
+tcells2de <- row.names(tcells2.ordered[1:10,])
+tcells3de <- row.names(tcells3.ordered[1:10,])
+tcells4de <- row.names(tcells4.ordered[1:10,])
+tcells5de <- row.names(tcells5.ordered[1:10,])
+tcells6de <- row.names(tcells6.ordered[1:10,])
+
+tcellsde <- c(tcells0de, tcells1de, tcells2de, tcells3de, tcells4de, tcells5de, tcells6de)
+tcellsde <- unique(tcellsde)
+
+t.cluster.ids <- c('Tex CD8', 'Treg', 'Tfh effector CD4', 'Naive CD4', 'Effector memory CD8', 'Ki67+ CD8', 'Th1-like CD4')
+#current.cluster.ids <- c(0, 1, 2, 3, 4, 5, 6)
+#names(t.cluster.ids) <- levels(t)
+#tcells@active.ident <- plyr::mapvalues (x = tcells@active.ident, from = current.cluster.ids, to = t.cluster.ids)
+
+tiff('tcelldots.tiff', units= 'in', 'width' =12, height = 8, res = 700)
+
+DotPlot(tcells, features = tcellsde) + theme(axis.text.x = element_text(angle=90, hjust=0.95))
+```
+```{r T cell heatmap of DE genes}
+tiff('tcellheat.tiff', units= 'in', 'width' =12, height = 8, res = 700)
+tcells1 <- ScaleData(object = tcells, features = rownames(tcells))
+
+DoHeatmap(tcells1, features = tcellsde, angle = 0, label=FALSE) + theme(axis.text.x = element_text(angle = 0, hjust=0.95)) 
+```
+
+```{r T cell plots}
+FeaturePlot(tcells, features = features)
+DotPlot(tcells, features = features)
+VlnPlot(tcells, features = features)
+```
+```{r T cell cluster ID and annotation}
+t.cluster.ids <- c('CD8', 'Treg', 'CD4', 'CD4', 'CD8', 'CD8', 'CD4')
+current.cluster.ids <- c(0, 1, 2, 3, 4, 5, 6)
+names(t.cluster.ids) <- levels(t)
+tcells@active.ident <- plyr::mapvalues (x = tcells@active.ident, from = current.cluster.ids, to = t.cluster.ids)
+DimPlot(tcells, reduction ='umap', label=TRUE, pt.size = 0.5)
+```
+```{r T cell subcluster ID using marker genes}
+tfeatures <- c('Tcf7', 'Ccr7', 'Pdcd1', 'Tnfrsf9', 'Tnfrsf4', 'Gzmk', 'Gzmb', 'Ctla4', 'Lag3', 'Tigit', 'Havcr2', 'Tox', 'Ifngr1', 'Fasl', 'Cxcr5', 'Slamf6', 'Foxp3')
+DotPlot(tcells, features = tfeatures) + theme(axis.text.x = element_text(angle=90, hjust=0.95))
+VlnPlot(tcells, features = tfeatures)
+```
+```{r T cell subcluster annotation}
+#t.subcluster.ids <- c('Tex CD8', 'Treg', 'Tfh effector CD4', 'Naive CD4', 'Effector memory CD8', 'Ki67+ CD8', 'Th1-like CD4')
+#current.cluster.ids <- c(0, 1, 2, 3, 4, 5, 6)
+#names(t.subcluster.ids) <- levels(t)
+#meta <-  plyr::mapvalues (x = tcells@active.ident, from = current.cluster.ids, to = t.subcluster.ids)
+#meta
+#tcells <- AddMetaData(tcells, meta, col.name = 'annotations')
+  
+#tcells@active.ident <- plyr::mapvalues (x = tcells@active.ident, from = current.cluster.ids, to = t.subcluster.ids)
+tiff('splitumap.tiff', units= 'in', 'width' =12, height = 8, res = 700)
+DimPlot(tcells, reduction ='umap', label=TRUE, pt.size = 0.5, split.by = 'tissue')
+```
+```{r compute T cell %s b/t batches (out of all T cells)}
+counts <- table(tcells@meta.data$orig.ident, tcells@active.ident)
+counts
+
+countstexwt1 <- counts[1,1]/sum(counts[1,])
+countstexwt2 <- counts[2,1]/sum(counts[2,])
+countstexko1 <- counts[3,1]/sum(counts[3,])
+countstexko2 <- counts[4,1]/sum(counts[4,])
+
+countstregwt1 <- counts[1,2]/sum(counts[1,])
+countstregwt2 <- counts[2,2]/sum(counts[2,])
+countstregko1 <- counts[3,2]/sum(counts[3,])
+countstregko2 <- counts[4,2]/sum(counts[4,])
+
+countstfhwt1 <- counts[1,3]/sum(counts[1,])
+countstfhwt2 <- counts[2,3]/sum(counts[2,])
+countstfhko1 <- counts[3,3]/sum(counts[3,])
+countstfhko2 <- counts[4,3]/sum(counts[4,])
+
+countsnaivewt1 <- counts[1,4]/sum(counts[1,])
+countsnaivewt2 <- counts[2,4]/sum(counts[2,])
+countsnaiveko1 <- counts[3,4]/sum(counts[3,])
+countsnaiveko2 <- counts[4,4]/sum(counts[4,])
+
+countscd8emwt1 <- counts[1,5]/sum(counts[1,])
+countscd8emwt2 <- counts[2,5]/sum(counts[2,])
+countscd8emko1 <- counts[3,5]/sum(counts[3,])
+countscd8emko2 <- counts[4,5]/sum(counts[4,])
+
+countscd8eawt1 <- counts[1,6]/sum(counts[1,])
+countscd8eawt2 <- counts[2,6]/sum(counts[2,])
+countscd8eako1 <- counts[3,6]/sum(counts[3,])
+countscd8eako2 <- counts[4,6]/sum(counts[4,])
+
+countsth1cd4wt1 <- counts[1,7]/sum(counts[1,])
+countsth1cd4wt2 <- counts[2,7]/sum(counts[2,])
+countsth1cd4ko1 <- counts[3,7]/sum(counts[3,])
+countsth1cd4ko2 <- counts[4,7]/sum(counts[4,])
+ 
+```
+```{r T boxplot (out of all T cells)}
+tiff('tex.tiff', units= 'in', 'width' = 10, height = 25, res = 250)
+
+texsample <- c('1', '2', '1', '2')
+texgroups <- c('MOC2', 'MOC2', 'K17KOMOC2', 'K17KOMOC2')
+texcluster <- c('Terminally exhausted CD8', 'Terminally exhausted CD8', 'Terminally exhausted CD8', 'Terminally exhausted CD8')
+texfreqs <- c(countstexwt1, countstexwt2, countstexko1, countstexko2)
+tex <- data.frame(texsample, texgroups, texcluster, texfreqs)
+
+
+ggplot(tex) +
+  geom_boxplot(aes(x = texgroups, y = texfreqs, color = texgroups, fill = texgroups), position = position_dodge(), alpha = 0.5, outlier.color = NA) + geom_point(aes(x = texgroups, y = texfreqs, color = texgroups), size = 6, alpha = 0.8, position = position_jitterdodge()) + theme_bw() + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(), strip.text = element_text(size =35, face = "bold" ), axis.title.y = element_blank(), axis.title = element_text( size = 55, face = "bold" )) + scale_shape_manual(values = rep(1, 4)) + facet_wrap(~ texcluster, scales = "free", nrow = 1)  + theme(axis.text.y = element_text(size = 40)) 
+
+dev.off()
+
+tiff('treg.tiff', units= 'in', 'width' = 10, height = 25, res = 250)
+tregsample <- c('1', '2', '1', '2')
+treggroups <- c('MOC2', 'MOC2', 'K17KOMOC2', 'K17KOMOC2')
+tregcluster <- c('Tregs', 'Tregs', 'Tregs', 'Tregs')
+tregfreqs <- c(countstregwt1, countstregwt2, countstregko1, countstregko2)
+treg <- data.frame(tregsample, treggroups, tregcluster, tregfreqs)
+
+ggplot(treg) +
+  geom_boxplot(aes(x = treggroups, y = tregfreqs, color = treggroups, fill = treggroups), position = position_dodge(), alpha = 0.5, outlier.color = NA) + geom_point(aes(x = treggroups, y = tregfreqs, color = treggroups), size = 6, alpha = 0.8, position = position_jitterdodge()) + theme_bw() + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(), strip.text = element_text(size =35, face = "bold" ), axis.title.y = element_blank(), axis.title = element_text( size = 55, face = "bold" )) + scale_shape_manual(values = rep(1, 4)) + facet_wrap(~ tregcluster, scales = "free", nrow = 1)  + theme(axis.text.y = element_text(size = 40))    
+dev.off()
+
+tiff('tfh.tiff', units= 'in', 'width' = 10, height = 25, res = 250)
+tfhsample <- c('1', '2', '1', '2')
+tfhgroups <- c('MOC2', 'MOC2', 'K17KOMOC2', 'K17KOMOC2')
+tfhcluster <- c('T Follicular Helper cells', 'T Follicular Helper cells', 'T Follicular Helper cells', 'T Follicular Helper cells')
+tfhfreqs <- c(countstfhwt1, countstfhwt2, countstfhko1, countstfhko2)
+tfh <- data.frame(tfhsample, tfhgroups, tfhcluster, tfhfreqs)
+
+ggplot(tfh) +
+  geom_boxplot(aes(x = tfhgroups, y = tfhfreqs, color = tfhgroups, fill = tfhgroups), position = position_dodge(), alpha = 0.5, outlier.color = NA) + geom_point(aes(x = tfhgroups, y = tfhfreqs, color = tfhgroups), size = 6, alpha = 0.8, position = position_jitterdodge()) + theme_bw() + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(), strip.text = element_text(size =35, face = "bold" ), axis.title.y = element_blank(), axis.title = element_text( size = 55, face = "bold" )) + scale_shape_manual(values = rep(1, 4)) + facet_wrap(~ tfhcluster, scales = "free", nrow = 1)  + theme(axis.text.y = element_text(size = 40)) 
+dev.off()
+
+tiff('naive.tiff', units= 'in', 'width' = 10, height = 25, res = 250)
+naivesample <- c('1', '2', '1', '2')
+naivegroups <- c('MOC2', 'MOC2', 'K17KOMOC2', 'K17KOMOC2')
+naivecluster <- c('Naive CD4 T cells', 'Naive CD4 T cells', 'Naive CD4 T cells', 'Naive CD4 T cells')
+naivefreqs <- c(countsnaivewt1, countsnaivewt2, countsnaiveko1, countsnaiveko2)
+naive <- data.frame(naivesample, naivegroups, naivecluster, naivefreqs)
+
+ggplot(naive) +
+   geom_boxplot(aes(x = naivegroups, y = naivefreqs, color = naivegroups, fill = naivegroups), position = position_dodge(), alpha = 0.5, outlier.color = NA) + geom_point(aes(x = naivegroups, y = naivefreqs, color = naivegroups), size = 6, alpha = 0.8, position = position_jitterdodge()) + theme_bw() + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(), strip.text = element_text(size =35, face = "bold" ), axis.title.y = element_blank(), axis.title = element_text( size = 55, face = "bold" )) + scale_shape_manual(values = rep(1, 4)) + facet_wrap(~ naivecluster, scales = "free", nrow = 1)  + theme(axis.text.y = element_text(size = 40)) 
+dev.off()
+
+
+tiff('cd8em.tiff', units= 'in', 'width' = 10, height = 25, res = 250)
+cd8emsample <- c('1', '2', '1', '2')
+cd8emgroups <- c('MOC2', 'MOC2', 'K17KOMOC2', 'K17KOMOC2')
+cd8emcluster <- c('Effector Memory CD8 T cells', 'Effector Memory CD8 T cells', 'Effector Memory CD8 T cells', 'Effector Memory CD8 T cells')
+cd8emfreqs <- c(countscd8emwt1, countscd8emwt2, countscd8emko1, countscd8emko2)
+cd8em <- data.frame(cd8emsample, cd8emgroups, cd8emcluster, cd8emfreqs)
+
+ggplot(cd8em) +
+    geom_boxplot(aes(x = cd8emgroups, y = cd8emfreqs, color = cd8emgroups, fill = cd8emgroups), position = position_dodge(), alpha = 0.5, outlier.color = NA) + geom_point(aes(x = cd8emgroups, y = cd8emfreqs, color = cd8emgroups), size = 6, alpha = 0.8, position = position_jitterdodge()) + theme_bw() + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(), strip.text = element_text(size =35, face = "bold" ), axis.title.y = element_blank(), axis.title = element_text( size = 55, face = "bold" )) + scale_shape_manual(values = rep(1, 4)) + facet_wrap(~ cd8emcluster, scales = "free", nrow = 1)  + theme(axis.text.y = element_text(size = 40)) 
+dev.off()
+
+tiff('cd8ki67.tiff', units= 'in', 'width' = 10, height = 25, res = 250)
+cd8easample <- c('1', '2', '1', '2')
+cd8eagroups <- c('MOC2', 'MOC2', 'K17KOMOC2', 'K17KOMOC2')
+cd8eacluster <- c('Ki67+ CD8 T cells', 'Ki67+ CD8 T cells', 'Ki67+ CD8 T cells', 'Ki67+ CD8 T cells')
+cd8eafreqs <- c(countscd8eawt1, countscd8eawt2, countscd8eako1, countscd8eako2)
+cd8ea <- data.frame(cd8easample, cd8eagroups, cd8eacluster, cd8eafreqs)
+
+ggplot(cd8ea) +
+    geom_boxplot(aes(x = cd8eagroups, y = cd8eafreqs, color = cd8eagroups, fill = cd8eagroups), position = position_dodge(), alpha = 0.5, outlier.color = NA) + geom_point(aes(x = cd8eagroups, y = cd8eafreqs, color = cd8eagroups), size = 6, alpha = 0.8, position = position_jitterdodge()) + theme_bw() + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(), strip.text = element_text(size =35, face = "bold" ), axis.title.y = element_blank(), axis.title = element_text( size = 55, face = "bold" )) + scale_shape_manual(values = rep(1, 4)) + facet_wrap(~ cd8eacluster, scales = "free", nrow = 1)  + theme(axis.text.y = element_text(size = 40)) 
+dev.off()
+
+tiff('th1cd4.tiff', units= 'in', 'width' = 10, height = 25, res = 250)
+th1cd4sample <- c('1', '2', '1', '2')
+th1cd4groups <- c('MOC2', 'MOC2', 'K17KOMOC2', 'K17KOMOC2')
+th1cd4cluster <- c('Th1-like CD4 T cells', 'Th1-like CD4 T cells', 'Th1-like CD4 T cells', 'Th1-like CD4 T cells')
+th1cd4freqs <- c(countsth1cd4wt1, countsth1cd4wt2, countsth1cd4ko1, countsth1cd4ko2)
+th1cd4 <- data.frame(th1cd4sample, th1cd4groups, th1cd4cluster, th1cd4freqs)
+
+ggplot(th1cd4) +
+  geom_boxplot(aes(x = th1cd4groups, y = th1cd4freqs, color = th1cd4groups, fill = th1cd4groups), position = position_dodge(), alpha = 0.5, outlier.color = NA) + geom_point(aes(x = th1cd4groups, y = th1cd4freqs, color = th1cd4groups), size = 6, alpha = 0.8, position = position_jitterdodge()) + theme_bw() + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(), strip.text = element_text(size =35, face = "bold" ), axis.title.y = element_blank(), axis.title = element_text( size = 55, face = "bold" )) + scale_shape_manual(values = rep(1, 4)) + facet_wrap(~ th1cd4cluster, scales = "free", nrow = 1)  + theme(axis.text.y = element_text(size = 40)) 
+```
+```{r compute T cell %s b/t batches (out of ALL cells) }
+counts <- table(tcells@meta.data$orig.ident, tcells@active.ident)
+countsall <- table(seurat@meta.data$orig.ident, seurat@active.ident)
+counts
+countsall
+
+countstexwt1 <- counts[1,1]/sum(countsall[1,])
+countstexwt2 <- counts[2,1]/sum(countsall[2,])
+countstexko1 <- counts[3,1]/sum(countsall[3,])
+countstexko2 <- counts[4,1]/sum(countsall[4,])
+countstregwt1 <- counts[1,2]/sum(countsall[1,])
+countstregwt2 <- counts[2,2]/sum(countsall[2,])
+countstregko1 <- counts[3,2]/sum(countsall[3,])
+countstregko2 <- counts[4,2]/sum(countsall[4,])
+
+countstfhwt1 <- counts[1,3]/sum(countsall[1,])
+countstfhwt2 <- counts[2,3]/sum(countsall[2,])
+countstfhko1 <- counts[3,3]/sum(countsall[3,])
+countstfhko2 <- counts[4,3]/sum(countsall[4,])
+
+countsnaivewt1 <- counts[1,4]/sum(countsall[1,])
+countsnaivewt2 <- counts[2,4]/sum(countsall[2,])
+countsnaiveko1 <- counts[3,4]/sum(countsall[3,])
+countsnaiveko2 <- counts[4,4]/sum(countsall[4,])
+
+countscd8emwt1 <- counts[1,5]/sum(countsall[1,])
+countscd8emwt2 <- counts[2,5]/sum(countsall[2,])
+countscd8emko1 <- counts[3,5]/sum(countsall[3,])
+countscd8emko2 <- counts[4,5]/sum(countsall[4,])
+
+countscd8eawt1 <- counts[1,6]/sum(countsall[1,])
+countscd8eawt2 <- counts[2,6]/sum(countsall[2,])
+countscd8eako1 <- counts[3,6]/sum(countsall[3,])
+countscd8eako2 <- counts[4,6]/sum(countsall[4,])
+
+countsth1cd4wt1 <- counts[1,7]/sum(countsall[1,])
+countsth1cd4wt2 <- counts[2,7]/sum(countsall[2,])
+countsth1cd4ko1 <- counts[3,7]/sum(countsall[3,])
+countsth1cd4ko2 <- counts[4,7]/sum(countsall[4,])
+```
+```{r T boxplot (out of ALL cells)}
+tiff('tex.tiff', units= 'in', 'width' = 10, height = 25, res = 250)
+
+texsample <- c('1', '2', '1', '2')
+texgroups <- c('MOC2', 'MOC2', 'K17KOMOC2', 'K17KOMOC2')
+texcluster <- c('Terminally exhausted CD8', 'Terminally exhausted CD8', 'Terminally exhausted CD8', 'Terminally exhausted CD8')
+texfreqs <- c(countstexwt1, countstexwt2, countstexko1, countstexko2)
+tex <- data.frame(texsample, texgroups, texcluster, texfreqs)
+
+
+ggplot(tex) +
+  geom_boxplot(aes(x = texgroups, y = texfreqs, color = texgroups, fill = texgroups), position = position_dodge(), alpha = 0.5, outlier.color = NA) + geom_point(aes(x = texgroups, y = texfreqs, color = texgroups), size = 6, alpha = 0.8, position = position_jitterdodge()) + theme_bw() + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(), strip.text = element_text(size =35, face = "bold" ), axis.title.y = element_blank(), axis.title = element_text( size = 55, face = "bold" )) + scale_shape_manual(values = rep(1, 4)) + facet_wrap(~ texcluster, scales = "free", nrow = 1)  + theme(axis.text.y = element_text(size = 40)) 
+
+dev.off()
+
+tiff('treg.tiff', units= 'in', 'width' = 10, height = 25, res = 250)
+tregsample <- c('1', '2', '1', '2')
+treggroups <- c('MOC2', 'MOC2', 'K17KOMOC2', 'K17KOMOC2')
+tregcluster <- c('Tregs', 'Tregs', 'Tregs', 'Tregs')
+tregfreqs <- c(countstregwt1, countstregwt2, countstregko1, countstregko2)
+treg <- data.frame(tregsample, treggroups, tregcluster, tregfreqs)
+
+ggplot(treg) +
+  geom_boxplot(aes(x = treggroups, y = tregfreqs, color = treggroups, fill = treggroups), position = position_dodge(), alpha = 0.5, outlier.color = NA) + geom_point(aes(x = treggroups, y = tregfreqs, color = treggroups), size = 6, alpha = 0.8, position = position_jitterdodge()) + theme_bw() + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(), strip.text = element_text(size =35, face = "bold" ), axis.title.y = element_blank(), axis.title = element_text( size = 55, face = "bold" )) + scale_shape_manual(values = rep(1, 4)) + facet_wrap(~ tregcluster, scales = "free", nrow = 1)  + theme(axis.text.y = element_text(size = 40))    
+dev.off()
+
+tiff('tfh.tiff', units= 'in', 'width' = 10, height = 25, res = 250)
+tfhsample <- c('1', '2', '1', '2')
+tfhgroups <- c('MOC2', 'MOC2', 'K17KOMOC2', 'K17KOMOC2')
+tfhcluster <- c('T Follicular Helper cells', 'T Follicular Helper cells', 'T Follicular Helper cells', 'T Follicular Helper cells')
+tfhfreqs <- c(countstfhwt1, countstfhwt2, countstfhko1, countstfhko2)
+tfh <- data.frame(tfhsample, tfhgroups, tfhcluster, tfhfreqs)
+
+ggplot(tfh) +
+  geom_boxplot(aes(x = tfhgroups, y = tfhfreqs, color = tfhgroups, fill = tfhgroups), position = position_dodge(), alpha = 0.5, outlier.color = NA) + geom_point(aes(x = tfhgroups, y = tfhfreqs, color = tfhgroups), size = 6, alpha = 0.8, position = position_jitterdodge()) + theme_bw() + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(), strip.text = element_text(size =35, face = "bold" ), axis.title.y = element_blank(), axis.title = element_text( size = 55, face = "bold" )) + scale_shape_manual(values = rep(1, 4)) + facet_wrap(~ tfhcluster, scales = "free", nrow = 1)  + theme(axis.text.y = element_text(size = 40)) 
+dev.off()
+
+tiff('naive.tiff', units= 'in', 'width' = 10, height = 25, res = 250)
+naivesample <- c('1', '2', '1', '2')
+naivegroups <- c('MOC2', 'MOC2', 'K17KOMOC2', 'K17KOMOC2')
+naivecluster <- c('Naive CD4 T cells', 'Naive CD4 T cells', 'Naive CD4 T cells', 'Naive CD4 T cells')
+naivefreqs <- c(countsnaivewt1, countsnaivewt2, countsnaiveko1, countsnaiveko2)
+naive <- data.frame(naivesample, naivegroups, naivecluster, naivefreqs)
+
+ggplot(naive) +
+   geom_boxplot(aes(x = naivegroups, y = naivefreqs, color = naivegroups, fill = naivegroups), position = position_dodge(), alpha = 0.5, outlier.color = NA) + geom_point(aes(x = naivegroups, y = naivefreqs, color = naivegroups), size = 6, alpha = 0.8, position = position_jitterdodge()) + theme_bw() + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(), strip.text = element_text(size =35, face = "bold" ), axis.title.y = element_blank(), axis.title = element_text( size = 55, face = "bold" )) + scale_shape_manual(values = rep(1, 4)) + facet_wrap(~ naivecluster, scales = "free", nrow = 1)  + theme(axis.text.y = element_text(size = 40)) 
+dev.off()
+
+
+tiff('cd8em.tiff', units= 'in', 'width' = 10, height = 25, res = 250)
+cd8emsample <- c('1', '2', '1', '2')
+cd8emgroups <- c('MOC2', 'MOC2', 'K17KOMOC2', 'K17KOMOC2')
+cd8emcluster <- c('Effector Memory CD8 T cells', 'Effector Memory CD8 T cells', 'Effector Memory CD8 T cells', 'Effector Memory CD8 T cells')
+cd8emfreqs <- c(countscd8emwt1, countscd8emwt2, countscd8emko1, countscd8emko2)
+cd8em <- data.frame(cd8emsample, cd8emgroups, cd8emcluster, cd8emfreqs)
+
+ggplot(cd8em) +
+    geom_boxplot(aes(x = cd8emgroups, y = cd8emfreqs, color = cd8emgroups, fill = cd8emgroups), position = position_dodge(), alpha = 0.5, outlier.color = NA) + geom_point(aes(x = cd8emgroups, y = cd8emfreqs, color = cd8emgroups), size = 6, alpha = 0.8, position = position_jitterdodge()) + theme_bw() + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(), strip.text = element_text(size =35, face = "bold" ), axis.title.y = element_blank(), axis.title = element_text( size = 55, face = "bold" )) + scale_shape_manual(values = rep(1, 4)) + facet_wrap(~ cd8emcluster, scales = "free", nrow = 1)  + theme(axis.text.y = element_text(size = 40)) 
+dev.off()
+
+tiff('cd8ki67.tiff', units= 'in', 'width' = 10, height = 25, res = 250)
+cd8easample <- c('1', '2', '1', '2')
+cd8eagroups <- c('MOC2', 'MOC2', 'K17KOMOC2', 'K17KOMOC2')
+cd8eacluster <- c('Ki67+ CD8 T cells', 'Ki67+ CD8 T cells', 'Ki67+ CD8 T cells', 'Ki67+ CD8 T cells')
+cd8eafreqs <- c(countscd8eawt1, countscd8eawt2, countscd8eako1, countscd8eako2)
+cd8ea <- data.frame(cd8easample, cd8eagroups, cd8eacluster, cd8eafreqs)
+
+ggplot(cd8ea) +
+    geom_boxplot(aes(x = cd8eagroups, y = cd8eafreqs, color = cd8eagroups, fill = cd8eagroups), position = position_dodge(), alpha = 0.5, outlier.color = NA) + geom_point(aes(x = cd8eagroups, y = cd8eafreqs, color = cd8eagroups), size = 6, alpha = 0.8, position = position_jitterdodge()) + theme_bw() + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(), strip.text = element_text(size =35, face = "bold" ), axis.title.y = element_blank(), axis.title = element_text( size = 55, face = "bold" )) + scale_shape_manual(values = rep(1, 4)) + facet_wrap(~ cd8eacluster, scales = "free", nrow = 1)  + theme(axis.text.y = element_text(size = 40)) 
+dev.off()
+
+tiff('th1cd4.tiff', units= 'in', 'width' = 10, height = 25, res = 250)
+th1cd4sample <- c('1', '2', '1', '2')
+th1cd4groups <- c('MOC2', 'MOC2', 'K17KOMOC2', 'K17KOMOC2')
+th1cd4cluster <- c('Th1-like CD4 T cells', 'Th1-like CD4 T cells', 'Th1-like CD4 T cells', 'Th1-like CD4 T cells')
+th1cd4freqs <- c(countsth1cd4wt1, countsth1cd4wt2, countsth1cd4ko1, countsth1cd4ko2)
+th1cd4 <- data.frame(th1cd4sample, th1cd4groups, th1cd4cluster, th1cd4freqs)
+
+ggplot(th1cd4) +
+  geom_boxplot(aes(x = th1cd4groups, y = th1cd4freqs, color = th1cd4groups, fill = th1cd4groups), position = position_dodge(), alpha = 0.5, outlier.color = NA) + geom_point(aes(x = th1cd4groups, y = th1cd4freqs, color = th1cd4groups), size = 6, alpha = 0.8, position = position_jitterdodge()) + theme_bw() + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(), strip.text = element_text(size =35, face = "bold" ), axis.title.y = element_blank(), axis.title = element_text( size = 55, face = "bold" )) + scale_shape_manual(values = rep(1, 4)) + facet_wrap(~ th1cd4cluster, scales = "free", nrow = 1)  + theme(axis.text.y = element_text(size = 40))  
+```
+```{r compute T cell % /Treg freq}
+counts
+countstexwt1 <- counts[1,1]/counts[1,2]
+countstexwt2 <- counts[2,1]/counts[2,2]
+countstexko1 <- counts[3,1]/counts[3,2]
+countstexko2 <- counts[4,1]/counts[4,2]
+
+countstregwt1 <- counts[1,2]/counts[1,2]
+countstregwt2 <- counts[2,2]/counts[2,2]
+countstregko1 <- counts[3,2]/counts[3,2]
+countstregko2 <- counts[4,2]/counts[4,2]
+
+countstfhwt1 <- counts[1,3]/counts[1,2]
+countstfhwt2 <- counts[2,3]/counts[2,2]
+countstfhko1 <- counts[3,3]/counts[3,2]
+countstfhko2 <- counts[4,3]/counts[4,2]
+
+countsnaivewt1 <- counts[1,4]/counts[1,2]
+countsnaivewt2 <- counts[2,4]/counts[2,2]
+countsnaiveko1 <- counts[3,4]/counts[3,2]
+countsnaiveko2 <- counts[4,4]/counts[4,2]
+
+countscd8emwt1 <- counts[1,5]/counts[1,2]
+countscd8emwt2 <- counts[2,5]/counts[2,2]
+countscd8emko1 <- counts[3,5]/counts[3,2]
+countscd8emko2 <- counts[4,5]/counts[4,2]
+
+countscd8eawt1 <- counts[1,6]/counts[1,2]
+countscd8eawt2 <- counts[2,6]/counts[2,2]
+countscd8eako1 <- counts[3,6]/counts[3,2]
+countscd8eako2 <- counts[4,6]/counts[4,2]
+
+countsth1cd4wt1 <- counts[1,7]/counts[1,2]
+countsth1cd4wt2 <- counts[2,7]/counts[2,2]
+countsth1cd4ko1 <- counts[3,7]/counts[3,2]
+countsth1cd4ko2 <- counts[4,7]/counts[4,2]
+```
+```{r T boxplot(subset/Treg freq)}
+tiff('tex.tiff', units= 'in', 'width' = 10, height = 25, res = 250)
+
+texsample <- c('1', '2', '1', '2')
+texgroups <- c('MOC2', 'MOC2', 'K17KOMOC2', 'K17KOMOC2')
+texcluster <- c('Terminally exhausted CD8', 'Terminally exhausted CD8', 'Terminally exhausted CD8', 'Terminally exhausted CD8')
+texfreqs <- c(countstexwt1, countstexwt2, countstexko1, countstexko2)
+tex <- data.frame(texsample, texgroups, texcluster, texfreqs)
+
+
+ggplot(tex) +
+  geom_boxplot(aes(x = texgroups, y = texfreqs, color = texgroups, fill = texgroups), position = position_dodge(), alpha = 0.5, outlier.color = NA) + geom_point(aes(x = texgroups, y = texfreqs, color = texgroups), size = 6, alpha = 0.8, position = position_jitterdodge()) + theme_bw() + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(), strip.text = element_text(size =35, face = "bold" ), axis.title.y = element_blank(), axis.title = element_text( size = 55, face = "bold" )) + scale_shape_manual(values = rep(1, 4)) + facet_wrap(~ texcluster, scales = "free", nrow = 1)  + theme(axis.text.y = element_text(size = 40)) 
+
+dev.off()
+
+tiff('treg.tiff', units= 'in', 'width' = 10, height = 25, res = 250)
+tregsample <- c('1', '2', '1', '2')
+treggroups <- c('MOC2', 'MOC2', 'K17KOMOC2', 'K17KOMOC2')
+tregcluster <- c('Tregs', 'Tregs', 'Tregs', 'Tregs')
+tregfreqs <- c(countstregwt1, countstregwt2, countstregko1, countstregko2)
+treg <- data.frame(tregsample, treggroups, tregcluster, tregfreqs)
+
+ggplot(treg) +
+  geom_boxplot(aes(x = treggroups, y = tregfreqs, color = treggroups, fill = treggroups), position = position_dodge(), alpha = 0.5, outlier.color = NA) + geom_point(aes(x = treggroups, y = tregfreqs, color = treggroups), size = 6, alpha = 0.8, position = position_jitterdodge()) + theme_bw() + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(), strip.text = element_text(size =35, face = "bold" ), axis.title.y = element_blank(), axis.title = element_text( size = 55, face = "bold" )) + scale_shape_manual(values = rep(1, 4)) + facet_wrap(~ tregcluster, scales = "free", nrow = 1)  + theme(axis.text.y = element_text(size = 40))    
+dev.off()
+
+tiff('tfh.tiff', units= 'in', 'width' = 10, height = 25, res = 250)
+tfhsample <- c('1', '2', '1', '2')
+tfhgroups <- c('MOC2', 'MOC2', 'K17KOMOC2', 'K17KOMOC2')
+tfhcluster <- c('T Follicular Helper cells', 'T Follicular Helper cells', 'T Follicular Helper cells', 'T Follicular Helper cells')
+tfhfreqs <- c(countstfhwt1, countstfhwt2, countstfhko1, countstfhko2)
+tfh <- data.frame(tfhsample, tfhgroups, tfhcluster, tfhfreqs)
+
+ggplot(tfh) +
+  geom_boxplot(aes(x = tfhgroups, y = tfhfreqs, color = tfhgroups, fill = tfhgroups), position = position_dodge(), alpha = 0.5, outlier.color = NA) + geom_point(aes(x = tfhgroups, y = tfhfreqs, color = tfhgroups), size = 6, alpha = 0.8, position = position_jitterdodge()) + theme_bw() + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(), strip.text = element_text(size =35, face = "bold" ), axis.title.y = element_blank(), axis.title = element_text( size = 55, face = "bold" )) + scale_shape_manual(values = rep(1, 4)) + facet_wrap(~ tfhcluster, scales = "free", nrow = 1)  + theme(axis.text.y = element_text(size = 40)) 
+dev.off()
+
+tiff('naive.tiff', units= 'in', 'width' = 10, height = 25, res = 250)
+naivesample <- c('1', '2', '1', '2')
+naivegroups <- c('MOC2', 'MOC2', 'K17KOMOC2', 'K17KOMOC2')
+naivecluster <- c('Naive CD4 T cells', 'Naive CD4 T cells', 'Naive CD4 T cells', 'Naive CD4 T cells')
+naivefreqs <- c(countsnaivewt1, countsnaivewt2, countsnaiveko1, countsnaiveko2)
+naive <- data.frame(naivesample, naivegroups, naivecluster, naivefreqs)
+
+ggplot(naive) +
+   geom_boxplot(aes(x = naivegroups, y = naivefreqs, color = naivegroups, fill = naivegroups), position = position_dodge(), alpha = 0.5, outlier.color = NA) + geom_point(aes(x = naivegroups, y = naivefreqs, color = naivegroups), size = 6, alpha = 0.8, position = position_jitterdodge()) + theme_bw() + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(), strip.text = element_text(size =35, face = "bold" ), axis.title.y = element_blank(), axis.title = element_text( size = 55, face = "bold" )) + scale_shape_manual(values = rep(1, 4)) + facet_wrap(~ naivecluster, scales = "free", nrow = 1)  + theme(axis.text.y = element_text(size = 40)) 
+dev.off()
+
+
+tiff('cd8em.tiff', units= 'in', 'width' = 10, height = 25, res = 250)
+cd8emsample <- c('1', '2', '1', '2')
+cd8emgroups <- c('MOC2', 'MOC2', 'K17KOMOC2', 'K17KOMOC2')
+cd8emcluster <- c('Effector Memory CD8 T cells', 'Effector Memory CD8 T cells', 'Effector Memory CD8 T cells', 'Effector Memory CD8 T cells')
+cd8emfreqs <- c(countscd8emwt1, countscd8emwt2, countscd8emko1, countscd8emko2)
+cd8em <- data.frame(cd8emsample, cd8emgroups, cd8emcluster, cd8emfreqs)
+
+ggplot(cd8em) +
+    geom_boxplot(aes(x = cd8emgroups, y = cd8emfreqs, color = cd8emgroups, fill = cd8emgroups), position = position_dodge(), alpha = 0.5, outlier.color = NA) + geom_point(aes(x = cd8emgroups, y = cd8emfreqs, color = cd8emgroups), size = 6, alpha = 0.8, position = position_jitterdodge()) + theme_bw() + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(), strip.text = element_text(size =35, face = "bold" ), axis.title.y = element_blank(), axis.title = element_text( size = 55, face = "bold" )) + scale_shape_manual(values = rep(1, 4)) + facet_wrap(~ cd8emcluster, scales = "free", nrow = 1)  + theme(axis.text.y = element_text(size = 40)) 
+dev.off()
+
+tiff('cd8ki67.tiff', units= 'in', 'width' = 10, height = 25, res = 250)
+cd8easample <- c('1', '2', '1', '2')
+cd8eagroups <- c('MOC2', 'MOC2', 'K17KOMOC2', 'K17KOMOC2')
+cd8eacluster <- c('Ki67+ CD8 T cells', 'Ki67+ CD8 T cells', 'Ki67+ CD8 T cells', 'Ki67+ CD8 T cells')
+cd8eafreqs <- c(countscd8eawt1, countscd8eawt2, countscd8eako1, countscd8eako2)
+cd8ea <- data.frame(cd8easample, cd8eagroups, cd8eacluster, cd8eafreqs)
+
+ggplot(cd8ea) +
+    geom_boxplot(aes(x = cd8eagroups, y = cd8eafreqs, color = cd8eagroups, fill = cd8eagroups), position = position_dodge(), alpha = 0.5, outlier.color = NA) + geom_point(aes(x = cd8eagroups, y = cd8eafreqs, color = cd8eagroups), size = 6, alpha = 0.8, position = position_jitterdodge()) + theme_bw() + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(), strip.text = element_text(size =35, face = "bold" ), axis.title.y = element_blank(), axis.title = element_text( size = 55, face = "bold" )) + scale_shape_manual(values = rep(1, 4)) + facet_wrap(~ cd8eacluster, scales = "free", nrow = 1)  + theme(axis.text.y = element_text(size = 40)) 
+dev.off()
+
+tiff('th1cd4.tiff', units= 'in', 'width' = 10, height = 25, res = 250)
+th1cd4sample <- c('1', '2', '1', '2')
+th1cd4groups <- c('MOC2', 'MOC2', 'K17KOMOC2', 'K17KOMOC2')
+th1cd4cluster <- c('Th1-like CD4 T cells', 'Th1-like CD4 T cells', 'Th1-like CD4 T cells', 'Th1-like CD4 T cells')
+th1cd4freqs <- c(countsth1cd4wt1, countsth1cd4wt2, countsth1cd4ko1, countsth1cd4ko2)
+th1cd4 <- data.frame(th1cd4sample, th1cd4groups, th1cd4cluster, th1cd4freqs)
+
+ggplot(th1cd4) +
+  geom_boxplot(aes(x = th1cd4groups, y = th1cd4freqs, color = th1cd4groups, fill = th1cd4groups), position = position_dodge(), alpha = 0.5, outlier.color = NA) + geom_point(aes(x = th1cd4groups, y = th1cd4freqs, color = th1cd4groups), size = 6, alpha = 0.8, position = position_jitterdodge()) + theme_bw() + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(), strip.text = element_text(size =35, face = "bold" ), axis.title.y = element_blank(), axis.title = element_text( size = 55, face = "bold" )) + scale_shape_manual(values = rep(1, 4)) + facet_wrap(~ th1cd4cluster, scales = "free", nrow = 1)  + theme(axis.text.y = element_text(size = 40))  
+```
+```{r T violin plot of Tfh marker genes}
+tfh <- subset(x = tcells, idents = c('Tfh effector CD4'))
+featurestfh = c('Pdcd1', 'Cxcl13', 'Tigit', 'Maf', 'Tox', 'Cxcr5', 'Cd40lg', 'Il6st')
+
+tiff('vlntfh.tiff', units= 'in', 'width' =25, height = 25, res = 700)
+ VlnPlot(tfh, features = featurestfh, split.by = 'tissue', group.by = 'tissue', combine = TRUE)
+ dev.off()
+```
+
+```{r Gene Ontology of T cells}
+tcells0de <- row.names(tcells0.ordered[1:10,])
+tcells0p <- tcells0.ordered[1:10,5]
+tcells1de <- row.names(tcells1.ordered[1:10,])
+tcells1p <- tcells1.ordered[1:10,5]
+tcells2de <- row.names(tcells2.ordered[1:10,])
+tcells2p <- tcells2.ordered[1:10,5]
+tcells3de <- row.names(tcells3.ordered[1:10,])
+tcells3p <- tcells3.ordered[1:10,5]
+tcells4de <- row.names(tcells4.ordered[1:10,])
+tcells4p <- tcells4.ordered[1:10,5]
+tcells5de <- row.names(tcells5.ordered[1:10,])
+tcells5p <- tcells5.ordered[1:10,5]
+tcells6de <- row.names(tcells6.ordered[1:10,])
+tcells6p <- tcells6.ordered[1:10,5]
+
+tcellsde <- c(tcells0de, tcells1de, tcells2de, tcells3de, tcells4de, tcells5de, tcells6de)
+tcellsp <- c(tcells0p, tcells1p, tcells2p, tcells3p, tcells4p, tcells5p, tcells6p)
+
+names(tcellsde) <- tcellsp
+
+tgenes <- as.vector(rownames(tcells))
+GOdata <- new("topGOdata", description = 'Simple session', ontology = 'BP', allGenes = tcellsde, geneSel = tcellsde, nodeSize = 10, annot = annFUN.db, affyLib = affyLib)
+```
+
+```{r NK neighbors}
+nk <- RunPCA(nk, features = VariableFeatures(object = nk))
+#ElbowPlot(nk)
+nk <- FindNeighbors(nk, dims = 1:10)
+nk <- FindClusters(nk, resolution = 0.1)
+nk <- RunUMAP(nk, dims = 1:10)
+DimPlot(nk, reduction = 'umap', split.by = 'tissue')
+```
+```{r NK clustree}
+for (res in c(0.1, 0.2, 0.3, 0.4, 0.5)) {
+    nk <- FindClusters(nk, graph.name = "RNA_snn", resolution = res, algorithm = 1)}
+clustree(nk)
+```
+```{r NK testing resolutions}
+nk <- FindClusters(nk, resolution = 0.05)
+nk <- RunUMAP(nk, dims = 1:10)
+DimPlot(nk, reduction = 'umap', split.by = 'tissue')
+```
+```{r NK DE}
+nk0.markers <- FindMarkers(nk, ident.1 = 0, ident.2 = c(1), min.pct = 0.25, only.pos = TRUE)
+nk0.ordered <- nk0.markers[order(-nk0.markers$avg_log2FC, nk0.markers$p_val_adj),]
+
+nk1.markers <- FindMarkers(nk, ident.1 = 1, ident.2 = c(0), min.pct = 0.25, only.pos = TRUE)
+nk1.ordered <- nk1.markers[order(-nk1.markers$avg_log2FC, nk1.markers$p_val_adj),]
+```
+```{r NK dotplot of DE genes}
+nk0de <- row.names(nk0.ordered[1:10,])
+nk1de <- row.names(nk1.ordered[1:10,])
+
+nkde <- c(nk0de, nk1de)
+nkde <- unique(nkde)
+
+DotPlot(nk, features = nkde) + theme(axis.text.x = element_text(angle=90, hjust=0.95))
+```
+```{r NK dotplot of marker genes}
+featuresnk <- c('Cd27', 'Ltb', 'Thy1', 'Klrc1', 'Cd3g', 'Cd3d', 'Socs2', 'Nme1', 'Eif5a', 'Mif', 'Ranbp1', 'Nfkbia', 'Ccl4', 'Pim1', 'Irf8', 'Nfkbiz', 'Ccl3', 'Gzma', 'Lgals1', 'Vim', 'Klrg1', 'Cma1', 'Zeb2')
+DotPlot(nk, features = featuresnk)
+```
+```{r NK heatmap of marker genes}
+tiff('nkcellheat.tiff', units= 'in', 'width' =12, height = 8, res = 700)
+nk1 <- ScaleData(object = nk, features = rownames(nk))
+
+DoHeatmap(nk1, features = nkde, angle = 0, label=FALSE) + theme(axis.text.x = element_text(angle = 0, hjust=0.95)) 
+
+```
+
+```{r NK cell annotations}
+tiff('nkumap.tiff', units= 'in', 'width' = 10, 'height' = 5, res = 250)
+
+#nk.subcluster.ids <- c('Mature NK', 'Immature NK')
+#nkcurrent.cluster.ids <- c(0, 1)
+#names(nk.subcluster.ids) <- levels(t)
+#nk@active.ident <- plyr::mapvalues (x = nk@active.ident, from = nkcurrent.cluster.ids, to = nk.subcluster.ids)
+DimPlot(nk, reduction ='umap', pt.size = 0.5, split.by = 'tissue')
+```
+```{r NK cell freq between batches (NK cells only)}
+nkcounts <- table(nk@meta.data$orig.ident, nk@active.ident)
+nkcounts
+
+nkcountsmatwt1 <- nkcounts[1,1]/sum(nkcounts[1,])
+nkcountsmatwt2 <- nkcounts[2,1]/sum(nkcounts[2,])
+nkcountsmatko1 <- nkcounts[3,1]/sum(nkcounts[3,]) 
+nkcountsmatko2 <- nkcounts[4,1]/sum(nkcounts[4,]) 
+
+nkcountsimmatwt1 <- nkcounts[1,2]/sum(nkcounts[1,]) 
+nkcountsimmatwt2 <- nkcounts[2,2]/sum(nkcounts[2,])
+nkcountsimmatko1 <- nkcounts[3,2]/sum(nkcounts[3,]) 
+nkcountsimmatko2 <- nkcounts[4,2]/sum(nkcounts[4,]) 
+```
+```{r Boxplots of NK cell subsets between batches}
+tiff('matnk.tiff', units= 'in', 'width' = 10, height = 25, res = 250)
+
+nk0sample <- c('1', '2', '1', '2')
+nk0groups <- c('MOC2', 'MOC2', 'K17KOMOC2', 'K17KOMOC2')
+nk0cluster <- c('Mature NK cells', 'Mature NK cells', 'Mature NK cells', 'Mature NK cells')
+nk0freqs <- c(nkcountsmatwt1, nkcountsmatwt2, nkcountsmatko1, nkcountsmatko2)
+nk0 <- data.frame(nk0sample, nk0groups, nk0cluster, nk0freqs)
+
+
+ggplot(nk0) +
+  geom_boxplot(aes(x = nk0groups, y = nk0freqs, color = nk0groups, fill = nk0groups), position = position_dodge(), alpha = 0.5, outlier.color = NA) + geom_point(aes(x = nk0groups, y = nk0freqs, color = nk0groups), size = 6, alpha = 0.8, position = position_jitterdodge()) + theme_bw() + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(), strip.text = element_text(size =35, face = "bold" ), axis.title.y = element_blank(), axis.title = element_text( size = 55, face = "bold" )) + scale_shape_manual(values = rep(1, 4)) + facet_wrap(~ nk0cluster, scales = "free", nrow = 1)  + theme(axis.text.y = element_text(size = 40)) 
+
+dev.off()
+
+tiff('immatnk.tiff', units= 'in', 'width' = 10, height = 25, res = 250)
+
+nk1sample <- c('1', '2', '1', '2')
+nk1groups <- c('MOC2', 'MOC2', 'K17KOMOC2', 'K17KOMOC2')
+nk1cluster <- c('Immature NK cells', 'Immature NK cells', 'Immature NK cells', 'Immature NK cells')
+nk1freqs <- c(nkcountsimmatwt1, nkcountsimmatwt2, nkcountsimmatko1, nkcountsimmatko2)
+nk1 <- data.frame(nk1sample, nk1groups, nk1cluster, nk1freqs)
+
+
+ggplot(nk1) +
+  geom_boxplot(aes(x = nk1groups, y = nk1freqs, color = nk1groups, fill = nk1groups), position = position_dodge(), alpha = 0.5, outlier.color = NA) + geom_point(aes(x = nk1groups, y = nk1freqs, color = nk1groups), size = 6, alpha = 0.8, position = position_jitterdodge()) + theme_bw() + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(), strip.text = element_text(size =35, face = "bold" ), axis.title.y = element_blank(), axis.title = element_text( size = 55, face = "bold" )) + scale_shape_manual(values = rep(1, 4)) + facet_wrap(~ nk1cluster, scales = "free", nrow = 1)  + theme(axis.text.y = element_text(size = 40)) 
+
+dev.off()
+
+```
+```{r compute NK cell freq out of all cells}
+countsall <- table(seurat@meta.data$orig.ident, seurat@active.ident)
+countsall
+
+nkcountsmatwt1 <- nkcounts[1,1]/sum(countsall[1,])
+nkcountsmatwt2 <- nkcounts[2,1]/sum(countsall[2,])
+nkcountsmatko1 <- nkcounts[3,1]/sum(countsall[3,]) 
+nkcountsmatko2 <- nkcounts[4,1]/sum(countsall[4,]) 
+
+nkcountsimmatwt1 <- nkcounts[1,2]/sum(countsall[1,]) 
+nkcountsimmatwt2 <- nkcounts[2,2]/sum(countsall[2,])
+nkcountsimmatko1 <- nkcounts[3,2]/sum(countsall[3,]) 
+nkcountsimmatko2 <- nkcounts[4,2]/sum(countsall[4,]) 
+```
+```{r Boxplots of NK cell subsets (out of all cells)}
+tiff('matnk.tiff', units= 'in', 'width' = 10, height = 25, res = 250)
+
+nk0sample <- c('1', '2', '1', '2')
+nk0groups <- c('MOC2', 'MOC2', 'K17KOMOC2', 'K17KOMOC2')
+nk0cluster <- c('Mature NK cells', 'Mature NK cells', 'Mature NK cells', 'Mature NK cells')
+nk0freqs <- c(nkcountsmatwt1, nkcountsmatwt2, nkcountsmatko1, nkcountsmatko2)
+nk0 <- data.frame(nk0sample, nk0groups, nk0cluster, nk0freqs)
+
+
+ggplot(nk0) +
+  geom_boxplot(aes(x = nk0groups, y = nk0freqs, color = nk0groups, fill = nk0groups), position = position_dodge(), alpha = 0.5, outlier.color = NA) + geom_point(aes(x = nk0groups, y = nk0freqs, color = nk0groups), size = 6, alpha = 0.8, position = position_jitterdodge()) + theme_bw() + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(), strip.text = element_text(size =35, face = "bold" ), axis.title.y = element_blank(), axis.title = element_text( size = 55, face = "bold" )) + scale_shape_manual(values = rep(1, 4)) + facet_wrap(~ nk0cluster, scales = "free", nrow = 1)  + theme(axis.text.y = element_text(size = 40)) 
+
+dev.off()
+
+tiff('immatnk.tiff', units= 'in', 'width' = 10, height = 25, res = 250)
+
+nk1sample <- c('1', '2', '1', '2')
+nk1groups <- c('MOC2', 'MOC2', 'K17KOMOC2', 'K17KOMOC2')
+nk1cluster <- c('Immature NK cells', 'Immature NK cells', 'Immature NK cells', 'Immature NK cells')
+nk1freqs <- c(nkcountsimmatwt1, nkcountsimmatwt2, nkcountsimmatko1, nkcountsimmatko2)
+nk1 <- data.frame(nk1sample, nk1groups, nk1cluster, nk1freqs)
+
+
+ggplot(nk1) +
+  geom_boxplot(aes(x = nk1groups, y = nk1freqs, color = nk1groups, fill = nk1groups), position = position_dodge(), alpha = 0.5, outlier.color = NA) + geom_point(aes(x = nk1groups, y = nk1freqs, color = nk1groups), size = 6, alpha = 0.8, position = position_jitterdodge()) + theme_bw() + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(), strip.text = element_text(size =35, face = "bold" ), axis.title.y = element_blank(), axis.title = element_text( size = 55, face = "bold" )) + scale_shape_manual(values = rep(1, 4)) + facet_wrap(~ nk1cluster, scales = "free", nrow = 1)  + theme(axis.text.y = element_text(size = 40)) 
+
+dev.off()
+```
+```{r compute NK cell freq/Tregs}
+countsall <- table(seurat@meta.data$orig.ident, seurat@active.ident)
+countsall
+
+nkcountsmatwt1 <- nkcounts[1,1]/(countsall[1,10])
+nkcountsmatwt2 <- nkcounts[2,1]/(countsall[2,10])
+nkcountsmatko1 <- nkcounts[3,1]/(countsall[3,10]) 
+nkcountsmatko2 <- nkcounts[4,1]/(countsall[4,10]) 
+
+nkcountsimmatwt1 <- nkcounts[1,2]/(countsall[1,10]) 
+nkcountsimmatwt2 <- nkcounts[2,2]/(countsall[2,10])
+nkcountsimmatko1 <- nkcounts[3,2]/(countsall[3,10]) 
+nkcountsimmatko2 <- nkcounts[4,2]/(countsall[4,10])
+```
+```{r boxplots of NK cell freqs/Tregs}
+tiff('matnk.tiff', units= 'in', 'width' = 10, height = 25, res = 250)
+
+nk0sample <- c('1', '2', '1', '2')
+nk0groups <- c('MOC2', 'MOC2', 'K17KOMOC2', 'K17KOMOC2')
+nk0cluster <- c('Mature NK cells', 'Mature NK cells', 'Mature NK cells', 'Mature NK cells')
+nk0freqs <- c(nkcountsmatwt1, nkcountsmatwt2, nkcountsmatko1, nkcountsmatko2)
+nk0 <- data.frame(nk0sample, nk0groups, nk0cluster, nk0freqs)
+
+
+ggplot(nk0) +
+  geom_boxplot(aes(x = nk0groups, y = nk0freqs, color = nk0groups, fill = nk0groups), position = position_dodge(), alpha = 0.5, outlier.color = NA) + geom_point(aes(x = nk0groups, y = nk0freqs, color = nk0groups), size = 6, alpha = 0.8, position = position_jitterdodge()) + theme_bw() + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(), strip.text = element_text(size =35, face = "bold" ), axis.title.y = element_blank(), axis.title = element_text( size = 55, face = "bold" )) + scale_shape_manual(values = rep(1, 4)) + facet_wrap(~ nk0cluster, scales = "free", nrow = 1)  + theme(axis.text.y = element_text(size = 40)) 
+
+dev.off()
+
+tiff('immatnk.tiff', units= 'in', 'width' = 10, height = 25, res = 250)
+
+nk1sample <- c('1', '2', '1', '2')
+nk1groups <- c('MOC2', 'MOC2', 'K17KOMOC2', 'K17KOMOC2')
+nk1cluster <- c('Immature NK cells', 'Immature NK cells', 'Immature NK cells', 'Immature NK cells')
+nk1freqs <- c(nkcountsimmatwt1, nkcountsimmatwt2, nkcountsimmatko1, nkcountsimmatko2)
+nk1 <- data.frame(nk1sample, nk1groups, nk1cluster, nk1freqs)
+
+
+ggplot(nk1) +
+  geom_boxplot(aes(x = nk1groups, y = nk1freqs, color = nk1groups, fill = nk1groups), position = position_dodge(), alpha = 0.5, outlier.color = NA) + geom_point(aes(x = nk1groups, y = nk1freqs, color = nk1groups), size = 6, alpha = 0.8, position = position_jitterdodge()) + theme_bw() + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(), strip.text = element_text(size =35, face = "bold" ), axis.title.y = element_blank(), axis.title = element_text( size = 55, face = "bold" )) + scale_shape_manual(values = rep(1, 4)) + facet_wrap(~ nk1cluster, scales = "free", nrow = 1)  + theme(axis.text.y = element_text(size = 40)) 
+
+dev.off()
+```
+
+
+
+
+
+

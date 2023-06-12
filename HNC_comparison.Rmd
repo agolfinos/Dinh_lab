@@ -1,0 +1,330 @@
+---
+title: "HNC_human_mouse_comparison"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r Getting mouse marker genes for each cluster DONE}
+#reading in our libraries
+library(Seurat)
+
+#reading in our files
+load('/Volumes/hdlab/Projects/HNC_SPORE/Seurat_Objs/MOC2_mouse/Seurat_MOC2_K17KO_2021-11-01**.rda')
+mm <- seurat
+
+load('/Volumes/hdlab/Projects/HNC_SPORE/Seurat_Objs/HNC_human/hnc_all_annot_2021-09-20.rda')
+hs <- hnc
+
+#dimplot to visualize the current identities
+DimPlot(mm, group.by = 'global.cluster2')
+Idents(object = mm) <- 'global.cluster2'
+DimPlot(hs)
+DimPlot(mm)
+
+#getting a list of the top 50 marker genes for each mouse cluster
+genes = vector(mode = 'list')
+for (x in unique(mm@active.ident)) {
+  marks <- FindMarkers(mm, ident.1 = x, min.pct = 0.25, only.pos = TRUE)
+  marks1 <- marks[order(-marks$avg_log2FC, -marks$p_val_adj),]
+  marks2 <- filter(marks1, marks1$avg_log2FC > 1 & marks1$p_val_adj < 0.01)
+  if (length(row.names(marks2) > 75)) {
+    genes[[x]] <- row.names(marks2[1:75,])
+  } else {
+  genes[[x]] <- row.names(marks2)
+    
+  }
+  
+ 
+}
+
+save(genes, file = '/Volumes/hdlab/Projects/HNC_SPORE/Mouse_to_human_comparsion/mouse_marker_genes_per_cluster.RData')
+```
+```{r Calculating our comparison rankings DONE}
+library(biomaRt)
+#getting our biomart datasets so we can easily convert the mouse to human genes
+human = useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+mouse = useMart("ensembl", dataset = "mmusculus_gene_ensembl")
+
+#now making a new list that converts all the mouse homologues to human
+genes_human = vector(mode = 'list')
+
+#looping through each cluster and the 50 genes most highly differentially expressed in that particular cluster from mice
+for (x in 1:length(genes)){
+  
+  print(paste('Starting', x, 'of', length(genes)))
+  #getting the name of the cluster
+  cluster <- names(genes)[x]
+  
+  #getting the list of genes associated with that cluster (in mouse form)
+  cluster_genes <- unlist(genes[x])
+  
+  #need to convert these genes to human homologues so we can subset the human dataset 
+  genesV2 = getLDS(attributes = c("mgi_symbol"), filters = "mgi_symbol", values = cluster_genes, mart = mouse, attributesL = c("hgnc_symbol"), martL = human, uniqueRows=T)
+  
+  genes_human[[cluster]] <- genesV2[,2]
+}
+save(genes_human, file = '/Volumes/hdlab/Projects/HNC_SPORE/Mouse_to_human_comparsion/HUMAN_marker_genes_per_cluster.RData')
+```
+```{r Test dense ranking calculation DON'T USE}
+#loading in the output from the last two sections so we don't have to rerun them every time
+load('/Volumes/hdlab/Projects/HNC_SPORE/Mouse_to_human_comparsion/Zilionis_comparison/mouse_marker_genes_per_cluster.RData')
+load('/Volumes/hdlab/Projects/HNC_SPORE/Mouse_to_human_comparsion/Zilionis_comparison/HUMAN_marker_genes_per_cluster.RData')
+
+load('/Volumes/hdlab/Projects/HNC_SPORE/Seurat_Objs/MOC2_mouse/Seurat_MOC2_K17KO_2021-11-01**.rda')
+mm <- seurat[sample(rownames(seurat), size = 100, replace = F), sample(colnames(seurat), size = 100, replace=F)]
+seurat <- NULL
+
+load('/Volumes/hdlab/Projects/HNC_SPORE/Seurat_Objs/HNC_human/hnc_all_annot_2021-09-20**.rda')
+hs <- hnc[sample(rownames(hnc), size = 100, replace = F), sample(colnames(hnc), size = 100, replace=F)]
+hnc <- NULL
+
+library(tidyverse)
+
+path <- '/Volumes/hdlab/Projects/HNC_SPORE/Mouse_to_human_comparsion/Zilionis_comparison/'
+
+#this object is named genes_human, and it's a list object
+load(paste(path, "HUMAN_marker_genes_per_cluster.RData", sep = ''))
+
+#now filtering the genes from each cluster subset to ONLY include those in the myeloid compartment
+genes_human_myeloid <- genes_human[grepl('Mac|Mon|N0|N1|N2|N3|DC', names(genes_human))]
+
+#craeting a list of our human myeloid subsets so we can use these names to subset the seurat object
+human_myeloid_subsets <- as.character(unique(hs@active.ident)[grepl('pDC|DC1|DC2|DC3|Mac|Mono', unique(hs@active.ident))])
+
+#also filtering the human object to also just contain those cells that belong to a myeloid cluster
+hs_myeloid <- subset(hs, idents = human_myeloid_subsets)
+
+#first, we are going through the genes from each mouse subset
+for (x in unique(mm@active.ident)){
+  l <- genes_human_myeloid[[x]]
+  for (y in unique(hs_myeloid@active.ident)) {
+    print(paste('Calculating for cluster', y, sep = ' '))
+    delta = 0
+    current_human_seurat_cluster <- subset(hs_myeloid, idents = y)
+    current_human_df <- as.data.frame(Seurat::GetAssayData(object = current_human_seurat_cluster, slot = 'counts'))
+    for (z in colnames(current_human_df)){
+      current_cell_df <- current_human_df[c(z)]
+      current_cell_df$genes <- rownames(current_cell_df)
+      s <- as.data.frame(current_cell_df[order(-current_cell_df[,1]),])
+      s$rank <- seq.int(nrow(s))
+      t <- 0
+      for (j in l) {
+        rank <- as.numeric(s$rank[s$genes == l])
+        t <- t + rank
+      }
+    }
+  }
+}
+
+```
+```{r Dense ranking calculation DONE}
+load('/Volumes/hdlab/Projects/HNC_SPORE/Seurat_Objs/MOC2_mouse/Seurat_MOC2_K17KO_2021-11-01**.rda')
+mm <- seurat[, sample(colnames(seurat), size = 1000, replace=F)]
+#seurat <- NULL
+
+load('/Volumes/hdlab/Projects/HNC_SPORE/Seurat_Objs/HNC_human/hnc_all_annot_2021-09-20.rda')
+#hs <- hnc
+hs <- hnc[, sample(colnames(hnc), size = 10000, replace=F)]
+
+#hs <- hnc[, base::sample(colnames(hnc), size = 1000, replace=F)]
+#hnc <- NULL
+
+load('/Volumes/hdlab/Projects/HNC_SPORE/Mouse_to_human_comparsion/Zilionis_comparison/HUMAN_marker_genes_per_cluster.RData')
+
+#now filtering the genes from each cluster subset to ONLY include those in the myeloid compartment
+genes_human_myeloid <- genes_human[grepl('Mac|Mon|N0|N1|N2|N3|DC', names(genes_human))]
+
+#craeting a list of our human myeloid subsets so we can use these names to subset the seurat object
+human_myeloid_subsets <- as.character(unique(hs@active.ident)[grepl('pDC|DC1|DC2|DC3|Mac|Mono', unique(hs@active.ident))])
+
+hs_myeloid <- hs
+hs_myeloid <- subset(hs, idents = human_myeloid_subsets)
+
+all_ranks <- NULL
+all_ranks <- as.data.frame(paste('MOUSE', unique(hs_myeloid@active.ident), sep = '.'))
+
+for (x in unique(mm@active.ident)){
+  l <- genes_human_myeloid[[x]]
+  
+  #now, creating a list that will contain all rankings for human clusters for this one mouse cluster
+  current_mouse_cluster_ranks_df <- as.data.frame(paste('MOUSE', unique(hs_myeloid@active.ident), sep = '.'))
+  rownames(current_mouse_cluster_ranks_df) <- current_mouse_cluster_ranks_df[,1]
+  current_mouse_cluster_ranks <- list()
+  
+  for (y in unique(hs_myeloid@active.ident)) {
+    print(paste('~~~~~~Now starting cluster~~~~~~', y, sep = ' '))
+    current_human_seurat_cluster <- subset(hs_myeloid, idents = y)
+    current_human_df <- as.data.frame(Seurat::GetAssayData(object = current_human_seurat_cluster, slot = 'counts'))
+    
+    print(paste('the # of cells in this cluster is', ncol(current_human_df)))
+    
+    #this will be the total rank for all cells in this cluster 
+    all_cells <- c()
+    
+    #this is the total delta for all cells in this cluster
+    delta = 0
+    
+    #finding TOTAL RANK for EACH CELL
+    for (z in colnames(current_human_df)){
+      current_cell_df <- current_human_df[c(z)]
+      current_cell_df$genes <- rownames(current_cell_df)
+      s <- as.data.frame(current_cell_df[order(-current_cell_df[,1]),])
+      s$rank <- seq.int(nrow(s))
+      
+      #this is our total rank for all genes for a SINGLE CELL
+      t <- 0
+      for (j in l) {
+        print(rank)
+        rank <- as.numeric(s$rank[s$genes == j])
+        #print(rank)
+        t <- sum(t,rank)
+      }
+      #print(paste('our total rank for cell', z, 'is', t))
+      #print(paste('this cells delta value is', t/length(l)))
+      delta = sum(delta, t/length(l))
+      all_cells <- append(all_cells, t)
+    }
+    print(paste('our delta for all cells in this cluster is', delta))
+    all_cell_avg <- mean(all_cells, na.rm = TRUE)
+    #print(paste('our average ranking for all cells in this cluster is', all_cell_avg))
+    #element_name <- paste('MM', x, 'HS', y, sep = '.')
+    current_mouse_cluster_ranks[[y]] <- c(current_mouse_cluster_ranks[[y]], delta)
+    
+  temp <- stack(current_mouse_cluster_ranks)
+  temp <- unique(temp)
+  rownames(temp) <- paste('MOUSE', temp$ind, sep = '.')
+  temp$ind <- NULL
+  colnames(temp) <- c(paste('HUMAN', x, sep = '.'))
+  #missing <- setdiff(rownames(current_mouse_cluster_ranks_df), rownames(temp))
+  
+  #og_rows <- length(rownames(temp))
+  
+  #temp[length(rownames(temp)):length(rownames(current_mouse_cluster_ranks_df)), ] <- 0
+  
+  #if (length(missing) != 0) {
+      #rownames(temp)[(as.numeric(og_rows)+ 1):length(rownames(current_mouse_cluster_ranks_df))] <- missing
+  }
+  current_mouse_cluster_ranks_df <- cbind(current_mouse_cluster_ranks_df, temp)
+  all_ranks <- cbind(all_ranks, temp)  
+}
+  
+#}
+
+write.csv(all_ranks, file = '/Volumes/hdlab/Projects/HNC_SPORE/Mouse_to_human_comparsion/Zilionis_comparison/all_dense_ranks.csv')
+```
+```{r Dense ranking calculation TEST}
+load('/Volumes/hdlab/Projects/HNC_SPORE/Seurat_Objs/MOC2_mouse/Seurat_MOC2_K17KO_2021-11-01**.rda')
+mm <- seurat[, sample(colnames(seurat), size = 1000, replace=F)]
+#seurat <- NULL
+
+load('/Volumes/hdlab/Projects/HNC_SPORE/Seurat_Objs/HNC_human/hnc_all_annot_2021-09-20.rda')
+#hs <- hnc
+hs <- hnc[, sample(colnames(hnc), size = 10000, replace=F)]
+
+#hs <- hnc[, base::sample(colnames(hnc), size = 1000, replace=F)]
+#hnc <- NULL
+
+load('/Volumes/hdlab/Projects/HNC_SPORE/Mouse_to_human_comparsion/Zilionis_comparison/HUMAN_marker_genes_per_cluster.RData')
+
+#now filtering the genes from each cluster subset to ONLY include those in the myeloid compartment
+genes_human_myeloid <- genes_human[grepl('Mac|Mon|N0|N1|N2|N3|DC', names(genes_human))]
+
+#craeting a list of our human myeloid subsets so we can use these names to subset the seurat object
+human_myeloid_subsets <- as.character(unique(hs@active.ident)[grepl('pDC|DC1|DC2|DC3|Mac|Mono', unique(hs@active.ident))])
+
+hs_myeloid <- hs
+hs_myeloid <- subset(hs, idents = human_myeloid_subsets)
+
+all_ranks <- NULL
+all_ranks <- as.data.frame(paste('MOUSE', unique(hs_myeloid@active.ident), sep = '.'))
+
+for (x in unique(mm@active.ident)){
+  print(paste('Now starting cluster', x, sep = ' '))
+  l <- genes_human_myeloid[[x]]
+  
+  #now, creating a list that will contain all rankings for human clusters for this one mouse cluster
+  current_mouse_cluster_ranks_df <- as.data.frame(paste('MOUSE', unique(hs_myeloid@active.ident), sep = '.'))
+  rownames(current_mouse_cluster_ranks_df) <- current_mouse_cluster_ranks_df[,1]
+  current_mouse_cluster_ranks <- list()
+  
+  for (y in unique(hs_myeloid@active.ident)) {
+    #print(paste('~~~~~~Now starting cluster~~~~~~', y, sep = ' '))
+    current_human_seurat_cluster <- subset(hs_myeloid, idents = y)
+    current_human_df <- as.data.frame(Seurat::GetAssayData(object = current_human_seurat_cluster, slot = 'counts'))
+    
+    print(paste('the # of cells in this cluster is', ncol(current_human_df)))
+    
+    #this will be the total rank for all cells in this cluster 
+    all_cells <- c()
+    
+    #this is the total delta for all cells in this cluster
+    delta = 0
+    
+    #finding TOTAL RANK for EACH CELL
+    for (z in colnames(current_human_df)){
+      current_cell_df <- current_human_df[c(z)]
+      current_cell_df$genes <- rownames(current_cell_df)
+      s <- as.data.frame(current_cell_df[order(-current_cell_df[,1]),])
+      s$rank <- seq.int(nrow(s))
+      
+      #this is our total rank for all genes for a SINGLE CELL
+      t <- 0
+      for (j in l) {
+        #print(rank)
+        rank <- as.numeric(s$rank[s$genes == j])
+        #print(rank)
+        t <- sum(t,rank)
+      }
+      #print(paste('our total rank for cell', z, 'is', t))
+      #print(paste('this cells delta value is', t/length(l)))
+      delta = sum(delta, t/length(l))
+      all_cells <- append(all_cells, t)
+    }
+    delta_test <- delta/ncol(current_human_df)
+    #print(paste('our delta for all cells in this cluster is', delta))
+    all_cell_avg <- mean(all_cells, na.rm = TRUE)
+    #print(paste('our average ranking for all cells in this cluster is', all_cell_avg))
+    #element_name <- paste('MM', x, 'HS', y, sep = '.')
+    current_mouse_cluster_ranks[[y]] <- c(current_mouse_cluster_ranks[[y]], delta_test)
+    
+  temp <- stack(current_mouse_cluster_ranks)
+  temp <- unique(temp)
+  rownames(temp) <- paste('HUMAN', temp$ind, sep = '.')
+  temp$ind <- NULL
+  colnames(temp) <- c(paste('MOUSE', x, sep = '.'))
+  #missing <- setdiff(rownames(current_mouse_cluster_ranks_df), rownames(temp))
+  
+  #og_rows <- length(rownames(temp))
+  
+  #temp[length(rownames(temp)):length(rownames(current_mouse_cluster_ranks_df)), ] <- 0
+  
+  #if (length(missing) != 0) {
+      #rownames(temp)[(as.numeric(og_rows)+ 1):length(rownames(current_mouse_cluster_ranks_df))] <- missing
+  }
+  current_mouse_cluster_ranks_df <- cbind(current_mouse_cluster_ranks_df, temp)
+  all_ranks <- cbind(all_ranks, temp)  
+}
+  
+#}
+
+write.csv(all_ranks, file = '/Volumes/hdlab/Projects/HNC_SPORE/Mouse_to_human_comparsion/Zilionis_comparison/all_dense_ranks_V3.csv')
+```
+
+```{r heatmap of dense ranking calculations DONE}
+all_ranks <- all_ranks[,colSums(is.na(all_ranks))<nrow(all_ranks)]
+all_ranks <- all_ranks[-c(1)]
+all_ranks_mtx <- as.matrix(all_ranks)
+pheatmap::pheatmap(all_ranks_mtx)
+```
+
+```{r adding metadata about the most similar clusters DONE}
+all_ranks$Most_similar <- colnames(all_ranks)[apply(all_ranks, 1, which.min)]
+
+similar_clusters <- all_ranks['Most_similar']
+
+write.csv(similar_clusters, file = '/Volumes/hdlab/Projects/HNC_SPORE/Mouse_to_human_comparsion/Zilionis_comparison/most_similar_clusters_V2.csv')
+```
+

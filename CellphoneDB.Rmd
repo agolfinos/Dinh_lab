@@ -1,0 +1,661 @@
+---
+title: "CellphoneDB_MOC2"
+author: "Athena Golfinos"
+date: "9/14/2021"
+output: html_document
+---
+```{r load packages}
+library(Seurat)
+library(patchwork)
+library(dplyr)
+library(ggplot2)
+library(clustree)
+#library(biomaRt)
+library(DescTools)
+```
+```{r read in}
+hnc <- readRDS(file = "/Volumes/hdlab/Projects/HNC_SPORE/Seurat_Objs/HNC_human/hnc_all_annot_2022-05-19***.RDS")
+```
+
+```{r Mouse gene to human genes seurat}
+#the name of your seurat object 
+ser <- hnc[, sample(colnames(hnc), size = 15000, replace=F)]
+
+# string version of your seurat object name
+rns <- 'hnc'
+
+# provide the path to the metadata column
+cluster <- ser$AEG_global.cluster
+
+path <- '/Users/agolfinos/Desktop/'
+
+musGenes <- rownames(ser)
+  
+#Basic function to convert mouse to human gene names
+require("biomaRt")
+human = useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+mouse = useMart("ensembl", dataset = "mmusculus_gene_ensembl")
+
+genesV2 = getLDS(attributes = c("mgi_symbol"), filters = "mgi_symbol", values = musGenes , mart = mouse, attributesL = c("hgnc_symbol"), martL = human, uniqueRows=T)
+```
+```{r Cellphone DB ser--converting mouse to human}
+  counts <- as.data.frame(as.matrix(ser@assays$RNA[,1:ncol(ser@assays$RNA)]))
+  rows <- data.frame(rownames(ser))
+  xx = merge(genesV2, rows, by.x = 'MGI.symbol', by.y = 'rownames.ser.', all = TRUE)
+  counts <- counts[rownames(counts) %in% xx$MGI.symbol,]
+  counts <- tibble::rownames_to_column(as.data.frame(counts), var = "MGI.symbol")
+  counts <- plyr::join(counts, xx)
+  counts$MGI.symbol <- NULL
+  counts <- cbind(counts[, which(colnames(counts) == "HGNC.symbol")], counts)
+  colnames(counts)[1] <- "Gene"
+  counts$HGNC.symbol <- NULL
+  counts <- counts[complete.cases(counts), ]
+  rownames(counts) <- NULL
+  counts
+  metadata <- data.frame(Cell = rownames(ser@meta.data),cell_type = cluster)
+  cellcols <- colnames(counts)
+  cellcols <- cellcols[-1]
+  cellrows <- metadata$Cell
+  setdiff(cellcols, cellrows)
+  write.table(counts, file = paste(path, "counts.txt", sep = ''), quote = F, col.names = T, row.names = F, sep = "\t")
+  write.table(metadata, file = paste(path, "metadata.txt", sep = ''), quote = F, col.names = T, row.names = F, sep = "\t")
+```
+
+```{r Cellphone DB ser--for human only!!}
+##################################################################################################
+cellphonedb_counts <- function(ser, meta, out){
+
+  Idents(ser) <- meta
+
+  musGenes <- rownames(ser)
+
+  counts <- as.data.frame(as.matrix(ser@assays$RNA[,1:ncol(ser@assays$RNA)]))
+  rows <- data.frame(rownames(ser))
+  #write.table(counts, file = paste(out, "/counts.txt", sep = ''), quote = F, col.names = T, row.names = T, sep = "\t")
+  counts
+  
+}
+################################################################################################################
+cellphonedb_meta <- function(ser, meta, out){
+
+  Idents(ser) <- meta
+
+  musGenes <- rownames(ser)
+
+  rows <- data.frame(rownames(ser))
+
+  metadata <- data.frame(Cell = rownames(ser@meta.data),cell_type = Idents(ser))
+  #write.table(metadata, file = paste(out, "/metadata.txt", sep = ''), quote = F, col.names = T, row.names = F, sep = "\t")
+  metadata
+}
+
+##################################################################################################
+#05/25/2022
+
+#DCs to T cells --splitting mregDCs into two separate clusters (CXCL9hi and CXCL9lo)
+hnc_til <- hnc[,hnc$tissue %in% c('TIL', 'PBMC') & hnc$is_HD == 'HNSCC' & hnc$global.cluster4 %in% c('CD4', 'CD8', 'Treg', 'cDC2_CD1C', 'DC3_LAMP3', 'cDC2_CD33', 'cDC1_CLEC9A')]
+hnc_til <- hnc_til[!rownames(hnc_til) %like any% c('%^RPL%', '%^RPS%', '%^MT-%'),]
+
+counts <- cellphonedb_counts(hnc_til, 'mreg_cxcl9_globalcluster4')
+write.table(counts, file = paste('/Volumes/hdlab/Projects/HNC_SPORE/CellphoneDB/05252022_HNC_HPVstatusCombined_PBMC.TIL_DCstoTsubsets_out', "/counts.txt", sep = ''), quote = F, col.names = T, row.names = T, sep = "\t")
+
+meta <- cellphonedb_meta(hnc_til, 'mreg_cxcl9_globalcluster4')
+write.table(meta, file = paste('/Volumes/hdlab/Projects/HNC_SPORE/CellphoneDB/05252022_HNC_HPVstatusCombined_PBMC.TIL_DCstoTsubsets_out', "/metadata.txt", sep = ''), quote = F, col.names = T, row.names = T, sep = "\t")
+###################################################################################################
+#05/04/2022
+
+#both combined
+hnc_til1 <- hnc[,hnc$tissue == 'TIL' & hnc$global.cluster4 %in% c('CD4', 'CD8', 'Treg', 'cDC2_CD1C', 'DC3_LAMP3', 'cDC2_CD33', 'cDC1_CLEC9A')]
+hnc_til1$global.cluster5 <- Idents(hnc_til1)
+
+counts <- cellphonedb_counts(hnc_til1, 'global.cluster5')
+meta <- cellphonedb_meta(hnc_til1, 'global.cluster5')
+
+write.table(counts, file = paste('/Volumes/hdlab/Projects/HNC_SPORE/CellphoneDB/05042022_HNC_HPV+vsHPV-toTsubsets/', 'cillo_til_counts.txt', sep = ''), quote = F, col.names = T, row.names = T, sep = "\t")
+write.table(meta, file = paste('/Volumes/hdlab/Projects/HNC_SPORE/CellphoneDB/05042022_HNC_HPV+vsHPV-toTsubsets/', "/cillo_til_metadata.txt", sep = ''), quote = F, col.names = T, row.names = F, sep = "\t")
+
+### hpv positive only ######
+hnc_til1_hpvpos <- hnc_til1[,hnc_til1$hpv_status == 'HPV+']
+counts <- cellphonedb_counts(hnc_til1_hpvpos, 'global.cluster5')
+meta <- cellphonedb_meta(hnc_til1_hpvpos, 'global.cluster5')
+
+write.table(counts, file = paste('/Volumes/hdlab/Projects/HNC_SPORE/CellphoneDB/05042022_HNC_HPV+vsHPV-toTsubsets/', 'cillo_til_counts_hpvpos.txt', sep = ''), quote = F, col.names = T, row.names = T, sep = "\t")
+write.table(meta, file = paste('/Volumes/hdlab/Projects/HNC_SPORE/CellphoneDB/05042022_HNC_HPV+vsHPV-toTsubsets/', "/cillo_til_metadata_hpvpos.txt", sep = ''), quote = F, col.names = T, row.names = F, sep = "\t")
+
+#### hpv neg only #######
+hnc_til1_hpvneg <- hnc_til1[,hnc_til1$hpv_status == 'HPV-']
+counts <- cellphonedb_counts(hnc_til1_hpvneg, 'global.cluster5')
+meta <- cellphonedb_meta(hnc_til1_hpvneg, 'global.cluster5')
+
+write.table(counts, file = paste('/Volumes/hdlab/Projects/HNC_SPORE/CellphoneDB/05042022_HNC_HPV+vsHPV-toTsubsets/', 'cillo_til_counts_hpvneg.txt', sep = ''), quote = F, col.names = T, row.names = T, sep = "\t")
+write.table(meta, file = paste('/Volumes/hdlab/Projects/HNC_SPORE/CellphoneDB/05042022_HNC_HPV+vsHPV-toTsubsets/', "/cillo_til_metadata_hpvneg.txt", sep = ''), quote = F, col.names = T, row.names = F, sep = "\t")
+
+###################################################
+hnc_til1 <- hnc[,hnc$tissue == 'TIL']
+hnc_til1 <- hnc_til1[,hnc_til1$global.cluster4 %in% c('CD4', 'CD8', 'Treg', 'cDC2_CD1C', 'DC3_LAMP3', 'cDC2_CD33', 'cDC1_CLEC9A')]
+
+#02/17/2022
+counts <- cellphonedb_counts(hnc_til1, 'global.cluster4')
+meta <- cellphonedb_meta(hnc_til1, 'global.cluster4')
+
+write.table(counts, file = paste('/Volumes/hdlab/Projects/HNC_SPORE/CellphoneDB/02172022_HNC_alltumor/', 'cillo_til_counts.txt', sep = ''), quote = F, col.names = T, row.names = T, sep = "\t")
+write.table(meta, file = paste('/Volumes/hdlab/Projects/HNC_SPORE/CellphoneDB/02172022_HNC_alltumor/', "/cillo_til_metadata.txt", sep = ''), quote = F, col.names = T, row.names = F, sep = "\t")
+
+#since this isn't working (it says there's cells in metadata that do not match the counts), I'm checking the data here to see if there's any discrepancies 
+#counts <- read.table('/Users/agolfinos/Desktop/counts.txt', header = TRUE)
+#metadata <- read.table('/Users/agolfinos/Desktop/metadata.txt', header = TRUE)
+
+#see what's present in the metadata cells that aren't present in the colnames of the counts file
+setdiff(rownames(meta), colnames(counts))
+
+#see what's present in the colnames of the counts files that isn't present in the metadata cells
+setdiff(colnames(counts), rownames(meta))
+
+#checking the first entries and the length of the two to see if they match
+head(rownames(meta))
+head(colnames(counts))
+
+length(rownames(meta))
+length(colnames(counts))
+```
+
+
+```{r cpdb Cillo hnc 03/28/2022 LAMP3 to AHMED CD8}
+hnc_mini <- hnc[,hnc@active.ident %in% c('DC3_LAMP3', 'Ahmed_Transitory', 'Ahmed_Stem', 'Ahmed_TD')]
+hnc_mini_hpvpos <- hnc_mini[,hnc_mini$hpv_status == 'HPV+']
+hnc_mini_hpvneg <- hnc_mini[,hnc_mini$hpv_status == 'HPV-']
+
+counts_pos <- cellphonedb_counts(hnc_mini_hpvpos, 'global.cluster4')
+meta_pos <- cellphonedb_meta(hnc_mini_hpvpos, 'global.cluster4')
+
+write.table(counts_pos, file = paste('/Volumes/hdlab/Projects/HNC_SPORE/CellphoneDB/03282022_HNC_LAMP3DC_RafiAhmedHPVCD8s/', 'cillo_til_counts_hpvpos.txt', sep = ''), quote = F, col.names = T, row.names = T, sep = "\t")
+write.table(meta_pos, file = paste('/Volumes/hdlab/Projects/HNC_SPORE/CellphoneDB/03282022_HNC_LAMP3DC_RafiAhmedHPVCD8s/', "/cillo_til_metadata_hpvpos.txt", sep = ''), quote = F, col.names = T, row.names = F, sep = "\t")
+
+counts_neg <- cellphonedb_counts(hnc_mini_hpvneg, 'global.cluster4')
+meta_neg <- cellphonedb_meta(hnc_mini_hpvneg, 'global.cluster4')
+
+write.table(counts_neg, file = paste('/Volumes/hdlab/Projects/HNC_SPORE/CellphoneDB/03282022_HNC_LAMP3DC_RafiAhmedHPVCD8s/', 'cillo_til_counts_hpvneg.txt', sep = ''), quote = F, col.names = T, row.names = T, sep = "\t")
+write.table(meta_neg, file = paste('/Volumes/hdlab/Projects/HNC_SPORE/CellphoneDB/03282022_HNC_LAMP3DC_RafiAhmedHPVCD8s/', "/cillo_til_metadata_hpvneg.txt", sep = ''), quote = F, col.names = T, row.names = F, sep = "\t")
+
+```
+
+
+#HNC tumor HPV+ vs. HPV- Feb 2022
+```{r}
+gp1 <- read.delim('/Volumes/hdlab/Projects/HNC_SPORE/CellphoneDB/01242022_HNC_HPV+vsHPV-_PBMCvsTIL/HPV+/significant_means.txt')
+gp2 <- read.delim('/Volumes/hdlab/Projects/HNC_SPORE/CellphoneDB/01242022_HNC_HPV+vsHPV-_PBMCvsTIL/HPV-/significant_means.txt')
+
+gp1_uniq <- gp1[!grepl('complex', gp1$interacting_pair),]
+gp1_uniq <- gp1[!grepl('complex', gp1$partner_a),]
+gp1_uniq <- gp1[!grepl('complex', gp1$partner_b),]
+
+#removing all complexes from our moc2 file
+gp2_uniq <- gp2[!grepl('complex', gp2$interacting_pair),]
+gp2_uniq <- gp2[!grepl('complex', gp2$partner_a),]
+gp2_uniq <- gp2[!grepl('complex', gp2$partner_b),]
+
+for (x in 1:nrow(gp1_uniq)){
+  if (gp1_uniq$receptor_a[x,] == TRUE) {
+  gp1_uniq$ligand[x,] = gp1_uniq$gene_b[x]
+}
+}
+
+```
+
+#analysis for Huy's grant in October 2021
+```{r Chord diagram ALL interactions}
+int <- read.delim('/Users/agolfinos/Desktop/out/count_network.txt')
+int1 <- int[str_detect(int$SOURCE, 'N0|N1|N2|N3'), ]
+int2 <- int1[str_detect(int1$TARGET, 'Mac|CD8|Treg|CD4|Mon|NKs'),]
+
+int_MOC2 <- int2[str_detect(int2$SOURCE, '_MOC2'),]
+int_MOC2 <- int_MOC2[str_detect(int_MOC2$TARGET, '_MOC2'),]
+
+int_K17KO <- int2[str_detect(int2$SOURCE, 'K17KO'),]
+int_K17KO <- int_K17KO[str_detect(int_K17KO$TARGET, 'K17KO'),]
+int_K17KO$SOURCE <- vapply(str_split(int_K17KO$SOURCE, '_'), `[`, 1, FUN.VALUE=character(1))
+int_K17KO$TARGET <- vapply(str_split(int_K17KO$TARGET, '_'), `[`, 1, FUN.VALUE=character(1))
+int_K17KO_final <- ddply(int_K17KO, c('SOURCE', 'TARGET'), numcolwise(sum))
+int_K17KO_final$SOURCE <- paste(int_K17KO_final$SOURCE, 'KO', sep = '_')
+int_K17KO_final$TARGET <- paste(int_K17KO_final$TARGET, 'KO', sep = "_")
+int_K17KO_final$normalized <- int_K17KO_final$count/sum(int_K17KO_final$count) * 100
+int_K17KO_final$count <- NULL
+
+int_MOC2 <- int2[str_detect(int2$SOURCE, 'MOC2'),]
+int_MOC2 <- int_MOC2[str_detect(int_MOC2$TARGET, 'MOC2'),]
+int_MOC2$SOURCE <- vapply(str_split(int_MOC2$SOURCE, '_'), `[`, 1, FUN.VALUE=character(1))
+int_MOC2$TARGET <- vapply(str_split(int_MOC2$TARGET, '_'), `[`, 1, FUN.VALUE=character(1))
+int_MOC2_final <- ddply(int_MOC2, c('SOURCE', 'TARGET'), numcolwise(sum))
+int_MOC2_final$SOURCE <- paste(int_MOC2_final$SOURCE, 'WT', sep = '_')
+int_MOC2_final$TARGET <- paste(int_MOC2_final$TARGET, 'WT', sep = "_")
+int_MOC2_final$normalized <- int_MOC2_final$count/sum(int_MOC2_final$count) * 100
+int_MOC2_final$count <- NULL
+
+all <- rbind(int_K17KO_final, int_MOC2_final)
+
+#int1 <- as.data.frame(t(int))
+#library(circlize)
+grid.col = c(CD4_WT = 'red', CD8_WT = 'red', Treg_WT = 'red', NKs_WT = 'red', Mon_WT = 'red', Mac_WT = 'red', N0_WT = 'red', N1_WT = 'red', N2_WT = 'red', N3_WT = 'red', CD4_KO = 'blue', CD8_KO = 'blue', Treg_KO = 'blue', NKs_KO = 'blue', Mon_KO = 'blue', Mac_KO = 'blue', N0_KO = 'blue', N1_KO = 'blue', N2_KO = 'blue', N3_KO = 'blue')
+chordDiagram(all, grid.col = grid.col, annotationTrack =  'grid', preAllocateTracks = list(track.height = min(strwidth(unlist(dimnames(all))))), 
+order = c('N0_WT', 'N0_KO', 'N1_WT', 'N1_KO', 'N2_WT', 'N2_KO', 'N3_WT', 'N3_KO', 'CD4_WT', 'CD4_KO', 'CD8_WT', 'CD8_KO', 'Treg_WT', 'Treg_KO', 'NKs_WT', 'NKs_KO', 'Mon_WT', 'Mon_KO', 'Mac_WT', 'Mac_KO'))
+circos.trackPlotRegion(track.index = 1, panel.fun = function(x, y) {
+  xlim = get.cell.meta.data("xlim")
+  ylim = get.cell.meta.data("ylim")
+  sector.name = get.cell.meta.data("sector.index")
+  circos.text(mean(xlim), ylim[1] + .3, sector.name, facing = "clockwise", niceFacing = TRUE, adj = c(0, 0.5))
+}, bg.border = NA)
+```
+```{r Defining unique interactions for MOC2 COMPLETE 09/21/21}
+sigmean <- read.delim('/Users/agolfinos/Desktop/HNC_vs_MOC2/MOC2/cpdb_out/cpdb/significant_means.txt')
+names <- colnames(sigmean)
+
+#creating empty dataframes to feed our corresponding columns to. We only want interactions from MOC2-MOC2, and from K17KO to K17KO. This is our way of re-binning the relevant interactions. 
+moc2 <- sigmean[c('id_cp_interaction', 'interacting_pair', 'partner_a', 'partner_b', 'gene_a', 'gene_b', 'receptor_a', 'receptor_b', 'annotation_strategy', 'is_integrin', 'rank')]
+k17ko <- sigmean[c('id_cp_interaction', 'interacting_pair', 'partner_a', 'partner_b', 'gene_a', 'gene_b', 'receptor_a', 'receptor_b', 'annotation_strategy', 'is_integrin', 'rank')]
+
+#now, going through each column and seeing if it has matches of group names for K17KO and K17KO
+for (name in names) {
+  split <- strsplit(name, '.', fixed = TRUE)
+  one <- sapply(split, `[`, 1)
+  two <- sapply(split, `[`, 2)
+  one_split <- as.list(strsplit(one, '_'))
+  two_split <- as.list(strsplit(two, '_'))
+  one_moc2 <- grepl('K17KOMOC2', one_split)
+  two_moc2 <- grepl('K17KOMOC2', two_split)
+  
+#if we do end up having a match of MOC2 with MOC2
+  if(one_moc2 & two_moc2 == TRUE) {
+    k17ko$temp <- sigmean[name]
+    names(k17ko)[names(k17ko) == 'temp'] <- name
+}
+}
+#let's rename our sigmean file so we don't overwrite the original
+moc2 <- sigmean
+
+#making a list of all the column names (interaction pairs) in the k17ko group so we can remove those columns from the MOC2 group
+temp <- colnames(k17ko)
+
+#we don't want to remove the index columns from our MOC2 dataframe, so we are going to amend the temp vector to keep these columns below
+keep <- c('id_cp_interaction', 'interacting_pair', 'partner_a', 'partner_b', 'gene_a', 'gene_b', 'receptor_a', 'receptor_b', 'annotation_strategy', 'is_integrin', 'rank')
+
+#now removing the 'keep' columns from temp so those aren't removed
+temp <- temp[!temp %in% c(keep)]
+
+#now removing the K17KO columns from the MOC2 dataframe
+moc2 <- moc2[,!(names(moc2) %in% c(temp))]
+
+#k17ko[k17ko=='NA'] <- 0
+write.csv(k17ko, file = '/Users/agolfinos/Desktop/HNC_vs_MOC2/MOC2/cpdb_out/k17ko_interactions.csv')
+
+#creating an empty character vector to save all of our columns to remove from the MOC2 file in
+moc2_remove <- sigmean[c('id_cp_interaction', 'interacting_pair', 'partner_a', 'partner_b', 'gene_a', 'gene_b', 'receptor_a', 'receptor_b', 'annotation_strategy', 'is_integrin', 'rank')]
+
+#now we want to remove everything from the MOC2 file that has K17 in it
+moc2_names <- colnames(moc2)
+for (moc2_name in moc2_names) {
+  temp1 <- grepl('K17', moc2_name)
+  if(temp1 == TRUE) {
+    moc2_remove$temp <- moc2[moc2_name]
+    names(moc2_remove)[names(moc2_remove) == 'temp'] <- moc2_name
+  }
+}
+
+#make a list of all the indexes we need to remove from the moc2 file
+temp2 <- colnames(moc2_remove)
+
+#now removing the 'keep' columns from temp so those aren't removed
+temp2 <- temp2[!temp2 %in% c(keep)]
+
+#now removing the mixed K17KO/MOC2 columns from the MOC2 dataframe
+moc2 <- moc2[,!(names(moc2) %in% c(temp2))]
+
+write.csv(moc2, file = '/Users/agolfinos/Desktop/HNC_vs_MOC2/MOC2/cpdb_out/moc2_interactions.csv')
+```
+```{r Identifying relevant interactions per group COMPLETE 09/22/21}
+#now we want to remove the empty rows from each of the two dataframes
+
+#making a list of all the column names (interaction pairs) in the k17ko group so we can remove those columns from the MOC2 group
+temp5 <- colnames(k17ko)
+
+#we don't want to remove the index columns from our MOC2 dataframe, so we are going to amend the temp vector to keep these columns below
+keep <- c('id_cp_interaction', 'interacting_pair', 'partner_a', 'partner_b', 'gene_a', 'gene_b', 'receptor_a', 'receptor_b', 'annotation_strategy', 'is_integrin', 'rank')
+
+#now removing the 'keep' columns from temp so those aren't removed
+temp5 <- temp5[!temp5 %in% c(keep)]
+
+#now removing the K17KO columns from the MOC2 dataframe
+moc2 <- moc2[,!(names(moc2) %in% c(temp))]
+
+######################################################################################
+
+#now, only keeping the interactions in the dataframe where at least one of the pair is a neutrophil (since our only receivers are neutrophils). We will filter other things out later
+k17ko <- k17ko[ , grepl('N', names(k17ko))]
+
+#making a list of all interaction pairs for the K17KO pairs so we can define the columns that we should look for NAs in
+temp3 <- colnames(k17ko)
+
+#we don't want to remove the index columns from our MOC2 dataframe, so we are going to amend the temp vector to keep these columns below
+keep <- c('id_cp_interaction', 'interacting_pair', 'partner_a', 'partner_b', 'gene_a', 'gene_b', 'receptor_a', 'receptor_b', 'annotation_strategy', 'is_integrin', 'rank')
+
+#now removing the 'keep' columns from temp so those aren't included
+temp3 <- temp3[!temp3 %in% c(keep)]
+
+#can use this to check and see how many rows should be left over without the character columns interfering in the calculation
+#diet_k17ko <- k17ko[!(names(k17ko) %in% keep)]
+#diet_k17ko[rowSums(is.na(diet_k17ko)) != ncol(diet_k17ko), ]
+
+lenko <- length(k17ko)
+lenko1 <- lenko - 11
+#removing all of the rows with NAs in all rows
+k17ko <- k17ko[rowSums(is.na(k17ko[,12:lenko]))!=lenko1,]
+
+moc2 <- moc2[ , grepl('N', names(moc2))]
+
+#making a list of all interaction pairs for the moc2 pairs so we can define the columns that we should look for NAs in
+temp4 <- colnames(moc2)
+
+#we don't want to remove the index columns from our MOC2 dataframe, so we are going to amend the temp vector to keep these columns below
+keep <- c('id_cp_interaction', 'interacting_pair', 'partner_a', 'partner_b', 'gene_a', 'gene_b', 'receptor_a', 'receptor_b', 'annotation_strategy', 'is_integrin', 'rank', 'secreted')
+
+#now removing the 'keep' columns from temp so those aren't included
+temp4 <- temp4[!temp4 %in% c(keep)]
+
+lenmoc2 <- length(moc2)
+lenmoc21 <- lenmoc2 - 11
+
+#only keeping rows that do not have NAs in all of the row values
+moc2 <- moc2[rowSums(is.na(moc2[,12:lenmoc2]))!=lenmoc21,]
+ 
+########################################################################################3
+
+#removing columns that have B cell data from both dataframes
+k17ko <- dplyr::select(k17ko_temp, -contains('Bcells'))
+moc2 <- dplyr::select(moc2_temp, -contains('Bcells'))
+
+#removing columns that have Mast cell data from both dataframes
+k17ko <- dplyr::select(k17ko, -contains('Mast'))
+moc2 <- dplyr::select(moc2, -contains('Mast'))
+
+#removing columns that have DC cell data from both dataframes
+k17ko <- dplyr::select(k17ko, -contains('DC'))
+moc2 <- dplyr::select(moc2, -contains('DC'))
+
+#removing columns that have neutrophils as a receptor (listed second, after the period)
+k17ko <- dplyr::select(k17ko, -contains('.N'))
+moc2 <- dplyr::select(moc2, -contains('.N'))
+
+#removing columns that have CD4s as a sender (listed first)
+k17ko <- dplyr::select(k17ko, -contains('CD4_K17KOMOC2.'))
+moc2 <- dplyr::select(moc2, -contains('CD4_MOC2.'))
+
+#removing columns that have CD8s as a sender (listed first)
+k17ko <- dplyr::select(k17ko, -contains('CD8_K17KOMOC2.'))
+moc2 <- dplyr::select(moc2, -contains('CD8_MOC2.'))
+
+#removing columns that have NK cells as a sender (listed first)
+k17ko <- dplyr::select(k17ko, -contains('NKs_K17KOMOC2.'))
+moc2 <- dplyr::select(moc2, -contains('NKs_MOC2.'))
+
+#removing columns that have macrophages as a sender (listed first)
+k17ko <- dplyr::select(k17ko, -contains('Mac_Cxcl9_K17KOMOC2.'))
+moc2 <- dplyr::select(moc2, -contains('Mac_Cxcl9_MOC2.'))
+
+k17ko <- dplyr::select(k17ko, -contains('Mac_Fn1_K17KOMOC2.'))
+moc2 <- dplyr::select(moc2, -contains('Mac_Fn1_MOC2.'))
+
+k17ko <- dplyr::select(k17ko, -contains('Mac_Lyve1_K17KOMOC2.'))
+moc2 <- dplyr::select(moc2, -contains('Mac_Lyve1_MOC2.'))
+
+k17ko <- dplyr::select(k17ko, -contains('Mac_Trem2_K17KOMOC2.'))
+moc2 <- dplyr::select(moc2, -contains('Mac_Trem2_MOC2.'))
+
+#removing columns that have monocytes as a sender (listed first)
+k17ko <- dplyr::select(k17ko, -contains('Mon_Ccr5_K17KOMOC2.'))
+moc2 <- dplyr::select(moc2, -contains('Mon_Ccr5_MOC2.'))
+
+k17ko <- dplyr::select(k17ko, -contains('Mon_Classical_K17KOMOC2.'))
+moc2 <- dplyr::select(moc2, -contains('Mon_Classical_MOC2.'))
+
+k17ko <- dplyr::select(k17ko, -contains('Mon_Intermediate_K17KOMOC2.'))
+moc2 <- dplyr::select(moc2, -contains('Mon_Intermediate_MOC2.'))
+
+k17ko <- dplyr::select(k17ko, -contains('Mon_NonClassical_K17KOMOC2.'))
+moc2 <- dplyr::select(moc2, -contains('Mon_NonClassical_MOC2.'))
+
+#removing columns that have Tregs as senders (listed first)
+k17ko <- dplyr::select(k17ko, -contains('Treg_K17KOMOC2.'))
+moc2 <- dplyr::select(moc2, -contains('Treg_MOC2.'))
+
+#################################################################################################3
+
+#making a list of all interaction pairs for the K17KO pairs so we can define the columns that we should look for NAs in
+temp6 <- colnames(k17ko)
+
+#we don't want to remove the index columns from our k17ko dataframe, so we are going to amend the temp vector to keep these columns below
+keep <- c('id_cp_interaction', 'interacting_pair', 'partner_a', 'partner_b', 'gene_a', 'gene_b', 'receptor_a', 'receptor_b', 'annotation_strategy', 'is_integrin', 'rank')
+
+#now removing the 'keep' columns from temp so those aren't included
+temp6 <- temp6[!temp6 %in% c(keep)]
+
+lenko <- length(k17ko)
+lenko1 <- lenko - 11
+#removing all of the rows with NAs in all rows
+k17ko_temp1 <- k17ko[rowSums(is.na(k17ko[,12:lenko]))!=lenko1,]
+
+lenwt <- length(moc2)
+lenwt1 <- lenwt - 12
+
+moc2_temp1 <- moc2[rowSums(is.na(moc2[,12:lenwt]))!=lenwt1,]
+
+```
+```{r Identifying unique interactions per group COMPLETE 09/22/21}
+ko <- readxl::read_xlsx('/Users/agolfinos/Desktop/HNC_vs_MOC2/MOC2/cpdb_out/k17ko_interactions.xlsx')
+wt <- read.csv('/Users/agolfinos/Desktop/HNC_vs_MOC2/MOC2/cpdb_out/moc2_interactions.csv')
+
+#getting a list of interactions for each of the two groups
+ko_int <- ko$interacting_pair
+wt_int <- wt$interacting_pair
+
+#finding the interactions unique to both the knockout and the wild type group
+ko_unique <- setdiff(ko_int, wt_int)
+wt_unique <- setdiff(wt_int, ko_int)
+
+#now, subsetting the ko and wt dataframes to only keep the 'unique' interactions in each
+ko_uniq <- ko[ko$interacting_pair %in% ko_unique, ]
+wt_uniq <- wt[wt$interacting_pair %in% wt_unique, ]
+
+#now, saving these files
+write.csv(ko_uniq, file = '/Users/agolfinos/Desktop/k17ko_unique_interactions.csv')
+write.csv(wt_uniq, file = '/Users/agolfinos/Desktop/moc2_unique_interactions.csv')
+```
+```{r Identifying unique simple interactions for violin plotting COMPLETE 09/22/21}
+
+#removing all complexes from our k17ko file 
+ko_uniq <- ko_uniq[!grepl('complex', ko_uniq$interacting_pair),]
+ko_uniq <- ko_uniq[!grepl('complex', ko_uniq$partner_a),]
+ko_uniq <- ko_uniq[!grepl('complex', ko_uniq$partner_b),]
+
+#removing all complexes from our moc2 file
+wt_uniq <- wt_uniq[!grepl('complex', wt_uniq$interacting_pair),]
+wt_uniq <- wt_uniq[!grepl('complex', wt_uniq$partner_a),]
+wt_uniq <- wt_uniq[!grepl('complex', wt_uniq$partner_b),]
+
+#saving the current version of the file
+write.csv(ko_uniq, file = '/Users/agolfinos/Desktop/HNC_vs_MOC2/MOC2/cpdb_out/k17ko_interactions_simpleonly.csv')
+write.csv(wt_uniq, file = '/Users/agolfinos/Desktop/HNC_vs_MOC2/MOC2/cpdb_out/moc2_interactions_simpleonly.csv')
+```
+
+```{r}
+ko_uniq_cc <- ko_uniq[grepl('CC', ko_uniq$interacting_pair),]
+ko_uniq_cx <- ko_uniq[grepl('CX', ko_uniq$interacting_pair),]
+```
+```{r Identifying ALL chemokine interactions for MOC2 vs. K17KO group}
+moc2.int <- read.csv('/Users/agolfinos/Desktop/HNC_vs_MOC2/MOC2/cpdb_out/moc2_interactions.csv')
+k17ko.int <- read.csv('/Users/agolfinos/Desktop/HNC_vs_MOC2/MOC2/cpdb_out/k17ko_interactions.csv')
+
+#now, only keeping interactions that are chemokines (cc/cxc)
+keep <- c('CXCR', 'CXCL', 'CCL', 'CCR')
+
+#now I'm saving a new dataframe that only has chemokine interactions
+moc2.chem <- moc2.int[grep(paste0(keep, collapse = '|'), moc2.int$interacting_pair), ]
+k17ko.chem <- k17ko.int[grep(paste0(keep, collapse = '|'), k17ko.int$interacting_pair), ]
+
+#now, making a list of all the moc2 senders and receivers 
+moc2.both <- as.vector(moc2.chem['interacting_pair'])
+moc2.both <- data.frame(do.call('rbind', strsplit(as.character(moc2.both$interacting_pair),'_',fixed=TRUE)))
+
+#now making a list of the moc2 senders (human orthologs)
+moc2.senders <- moc2.both$X1
+
+#now making a list of the moc2 receivers (human orthologs)
+moc2.r <- moc2.both$X2
+
+#now converting the moc2 senders and receivers to mouse orthologs for plotting
+require("biomaRt")
+
+#now getting the mouse orthologs from the human gene names
+moc2.senders.genes = getLDS(attributes = c("hgnc_symbol"), filters = "hgnc_symbol", values = moc2.senders , mart = useMart("ensembl", dataset = "hsapiens_gene_ensembl"), attributesL = c("mgi_symbol"), martL = useMart("ensembl", dataset = "mmusculus_gene_ensembl"), uniqueRows=T)
+moc2.senders.genes <- (moc2.senders.genes$MGI.symbol)
+moc2.senders.genes <- unique(moc2.senders.genes)
+
+#now getting the mouse orthologs from the human gene names
+moc2.receivers.genes = getLDS(attributes = c("hgnc_symbol"), filters = "hgnc_symbol", values = moc2.receivers , mart = useMart("ensembl", dataset = "hsapiens_gene_ensembl"), attributesL = c("mgi_symbol"), martL = useMart("ensembl", dataset = "mmusculus_gene_ensembl"), uniqueRows=T)
+moc2.receivers.genes <- moc2.receivers.genes$MGI.symbol
+moc2.receivers.genes <- unique(moc2.receivers.genes)
+
+#K17KO
+
+#now, making a list of all the k17ko senders and receivers 
+k17ko.both <- as.vector(k17ko.chem['interacting_pair'])
+k17ko.both <- data.frame(do.call('rbind', strsplit(as.character(k17ko.both$interacting_pair),'_',fixed=TRUE)))
+
+#now making a list of the k17ko senders (human orthologs)
+k17ko.senders <- k17ko.both$X1
+
+#now making a list of the k17ko receivers (human orthologs)
+k17ko.receivers <- k17ko.both$X2
+
+#now converting the k17ko senders and receivers to mouse orthologs for plotting
+require("biomaRt")
+
+#now getting the mouse orthologs from the human gene names
+k17ko.senders.genes = getLDS(attributes = c("hgnc_symbol"), filters = "hgnc_symbol", values = k17ko.senders , mart = useMart("ensembl", dataset = "hsapiens_gene_ensembl"), attributesL = c("mgi_symbol"), martL = useMart("ensembl", dataset = "mmusculus_gene_ensembl"), uniqueRows=T)
+k17ko.senders.genes <- (k17ko.senders.genes$MGI.symbol)
+k17ko.senders.genes <- unique(k17ko.senders.genes)
+
+#now getting the mouse orthologs from the human gene names
+k17ko.receivers.genes = getLDS(attributes = c("hgnc_symbol"), filters = "hgnc_symbol", values = k17ko.receivers , mart = useMart("ensembl", dataset = "hsapiens_gene_ensembl"), attributesL = c("mgi_symbol"), martL = useMart("ensembl", dataset = "mmusculus_gene_ensembl"), uniqueRows=T)
+k17ko.receivers.genes <- k17ko.receivers.genes$MGI.symbol
+k17ko.receivers.genes <- unique(k17ko.receivers.genes)
+```
+```{r Filtering chemokine interactions}
+#filtering out receptor chemokines from the sender genes list
+moc2.senders.genes <- moc2.senders.genes[moc2.senders.genes != 'Ccr1']
+moc2.senders.genes <- moc2.senders.genes[moc2.senders.genes != 'Ccr1l1']
+
+k17ko.senders.genes <- k17ko.senders.genes[k17ko.senders.genes != 'Ccr3']
+k17ko.senders.genes <- k17ko.senders.genes[k17ko.senders.genes != 'Ccr1']
+k17ko.senders.genes <- k17ko.senders.genes[k17ko.senders.genes != 'Ccr1l1']
+
+#filtering out ligand chemokines from the receiver genes list
+moc2.receivers.genes <- moc2.receivers.genes[moc2.receivers.genes != 'Cxcl9']
+moc2.receivers.genes <- moc2.receivers.genes[moc2.receivers.genes != 'Ccl12']
+moc2.receivers.genes <- moc2.receivers.genes[moc2.receivers.genes != 'Ccl8']
+moc2.receivers.genes <- moc2.receivers.genes[moc2.receivers.genes != 'Ccl7']
+moc2.receivers.genes <- moc2.receivers.genes[moc2.receivers.genes != 'Ccl9']
+moc2.receivers.genes <- moc2.receivers.genes[moc2.receivers.genes != 'Ccl6']
+moc2.receivers.genes <- moc2.receivers.genes[moc2.receivers.genes != 'Ccl3']
+moc2.receivers.genes <- moc2.receivers.genes[moc2.receivers.genes != 'Ccl4']
+
+k17ko.receivers.genes <- k17ko.receivers.genes[k17ko.receivers.genes != 'Ccl7']
+k17ko.receivers.genes <- k17ko.receivers.genes[k17ko.receivers.genes != 'Ccl12']
+k17ko.receivers.genes <- k17ko.receivers.genes[k17ko.receivers.genes != 'Ccl8']
+k17ko.receivers.genes <- k17ko.receivers.genes[k17ko.receivers.genes != 'Cxcl9']
+k17ko.receivers.genes <- k17ko.receivers.genes[k17ko.receivers.genes != 'Ccl9']
+k17ko.receivers.genes <- k17ko.receivers.genes[k17ko.receivers.genes != 'Ccl6']
+k17ko.receivers.genes <- k17ko.receivers.genes[k17ko.receivers.genes != 'Ccl4']
+k17ko.receivers.genes <- k17ko.receivers.genes[k17ko.receivers.genes != 'Ccl3']
+```
+```{r Manual picking of chemokine ligands and receptors}
+moc2.s <- c('CCL4L2', 'CCL8', 'CXCL10', 'CCL3', 'CCL4', 'CCL18', 'CCL7', 'CCL23', 'CCL15', 'CXCL9', 'CCL2')
+moc2.r <- c('FFAR2', 'CNR2', 'CCR1', 'CXCR3', 'DPP4', 'SLC7A1', 'CCR1', 'VSIR', 'IDE', 'FCGR2A', 'CCR2')
+
+k17ko.s <- c('CCL15', 'CXCL9', 'CCL8', 'CCL7', 'CCL3', 'CCL4', 'CCL18')
+k17ko.r <- c('CCR3', 'FCGR2A', 'CCR1', 'IDE', 'VSIR', 'CCR5', 'CCR3')
+
+#now getting the mouse orthologs from the human gene names
+moc2.s2 = getLDS(attributes = c("hgnc_symbol"), filters = "hgnc_symbol", values = moc2.s , mart = useMart("ensembl", dataset = "hsapiens_gene_ensembl"), attributesL = c("mgi_symbol"), martL = useMart("ensembl", dataset = "mmusculus_gene_ensembl"), uniqueRows=T)
+moc2.s2 <- (moc2.s2$MGI.symbol)
+moc2.s2 <- unique(moc2.s2)
+
+#now getting the mouse orthologs from the human gene names
+moc2.r2 = getLDS(attributes = c("hgnc_symbol"), filters = "hgnc_symbol", values = moc2.r, mart = useMart("ensembl", dataset = "hsapiens_gene_ensembl"), attributesL = c("mgi_symbol"), martL = useMart("ensembl", dataset = "mmusculus_gene_ensembl"), uniqueRows=T)
+moc2.r2 <- moc2.r2$MGI.symbol
+moc2.r2 <- unique(moc2.r2)
+
+#now getting the mouse orthologs from the human gene names
+k17ko.s2 = getLDS(attributes = c("hgnc_symbol"), filters = "hgnc_symbol", values = k17ko.s , mart = useMart("ensembl", dataset = "hsapiens_gene_ensembl"), attributesL = c("mgi_symbol"), martL = useMart("ensembl", dataset = "mmusculus_gene_ensembl"), uniqueRows=T)
+k17ko.s2 <- (k17ko.s2$MGI.symbol)
+k17ko.s2 <- unique(k17ko.s2)
+
+#now getting the mouse orthologs from the human gene names
+k17ko.r2 = getLDS(attributes = c("hgnc_symbol"), filters = "hgnc_symbol", values = k17ko.r, mart = useMart("ensembl", dataset = "hsapiens_gene_ensembl"), attributesL = c("mgi_symbol"), martL = useMart("ensembl", dataset = "mmusculus_gene_ensembl"), uniqueRows=T)
+k17ko.r2 <- k17ko.r2$MGI.symbol
+k17ko.r2 <- unique(k17ko.r2)
+```
+```{r Taking all chemokines from the seurat object}
+#first we want to convert all the genes in our seurat object to a vector
+g <- as.data.frame(rownames(seurat))
+g.ligand <- subset(g, grepl(paste(c('Cxcl', 'Ccl'), collapse='|'), rownames(seurat)))
+g.ligand <- g.ligand$`rownames(seurat)`
+g.receptors <- subset(g, grepl(paste(c('Cxcr', 'Ccr'), collapse='|'), rownames(seurat)))
+g.receptors <- g.receptors$`rownames(seurat)`
+```
+
+```{r Subsetting based on group for the dotplots}
+moc2 <- subset(x = seurat, subset = tissue == 'MOC2')
+k17ko <- subset(x = seurat, subset = tissue == 'K17KOMOC2')
+```
+
+```{r Dot plots}
+#WT senders
+DotPlot(moc2, features = c(g.ligand), idents = c('N0_Retnlg', 'N1_Tnf', 'N2_Isg', 'N3_Npm1'), col.min = 0) + ggtitle('MOC2 Sender Genes') + theme(plot.title = element_text(hjust = 0.5)) + theme(axis.text.x = element_text(angle = 90))
+ggsave('MOC2_senders', device = 'png', path = '/Users/agolfinos/Desktop/', width = 7, height = 5, units = 'in')
+
+#WT receivers
+DotPlot(moc2, features = c(g.receptors), col.min = 0, idents = c('Treg', 'CD4', 'CD8', 'Macrophages', 'Monocytes')) + ggtitle('MOC2 Receiver Genes') + theme(plot.title = element_text(hjust = 0.5)) + theme(axis.text.x = element_text(angle = 90))
+ggsave('MOC2_receivers', device = 'png', path = '/Users/agolfinos/Desktop/', width = 7, height = 5, units = 'in')
+
+library(stringr)
+
+#K17KO senders
+DotPlot(k17ko, features = c(g.ligand), idents = c('N0_Retnlg', 'N1_Tnf', 'N2_Isg', 'N3_Npm1'), col.min = 0) + ggtitle('K17KO Sender Genes') + theme(plot.title = element_text(hjust = 0.5)) + theme(axis.text.x = element_text(angle = 90))
+ggsave('K17KO_senders', device = 'png', path = '/Users/agolfinos/Desktop/', width = 7, height = 5, units = 'in') 
+
+#K17KO receivers
+DotPlot(k17ko, features = c(g.receptors), idents = c('CD4', 'CD8', 'Macrophages', 'Monocytes', 'Treg'), col.min = 0) + ggtitle('K17KO Receiver Genes') + theme(plot.title = element_text(hjust = 0.5)) + theme(axis.text.x = element_text(angle = 90))
+ggsave('K17KO_receivers', device = 'png', path = '/Users/agolfinos/Desktop/', width = 7, height = 5, units = 'in')
+```
+```{r reannotating clusters}
+
+#converting macrophage subsets into "macrophages"
+seurat@meta.data$global.cluster3[seurat@meta.data$global.cluster3 == 'Mac_Cxcl9'] <- 'Macrophages'
+seurat@meta.data$global.cluster3[seurat@meta.data$global.cluster3 == 'Mac_Lyve1'] <- 'Macrophages'
+seurat@meta.data$global.cluster3[seurat@meta.data$global.cluster3 == 'Mac_Trem2'] <- 'Macrophages'
+seurat@meta.data$global.cluster3[seurat@meta.data$global.cluster3 == 'Mac_Fn1'] <- 'Macrophages'
+
+#converting monocyte subsets into "monocytes"
+seurat@meta.data$global.cluster3[seurat@meta.data$global.cluster3 == 'Mon_Intermediate'] <- 'Monocytes'
+seurat@meta.data$global.cluster3[seurat@meta.data$global.cluster3 == 'Mon_NonClassical'] <- 'Monocytes'
+seurat@meta.data$global.cluster3[seurat@meta.data$global.cluster3 == 'Mon_Classical'] <- 'Monocytes'
+seurat@meta.data$global.cluster3[seurat@meta.data$global.cluster3 == 'Mon_Ccr5'] <- 'Monocytes'
+
+#converting DC subsets into "Dendritic cells"
+seurat@meta.data$global.cluster3[seurat@meta.data$global.cluster3 == 'pDC'] <- 'Dendritic cells'
+seurat@meta.data$global.cluster3[seurat@meta.data$global.cluster3 == 'DC_Ccr7'] <- 'Dendritic cells'
+seurat@meta.data$global.cluster3[seurat@meta.data$global.cluster3 == 'DC_cDC1'] <- 'Dendritic cells'
+seurat@meta.data$global.cluster3[seurat@meta.data$global.cluster3 == 'DC_moDC_cDC2'] <- 'Dendritic cells'
+```
+
+
+
