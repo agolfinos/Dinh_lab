@@ -149,6 +149,9 @@ saveRDS(seu, "Z:/Computational_Toxicology/Athena/Mouse_scRNAseq/Kimmel_et_al_201
 ```{r}
 # run this in the console!
 seu <- seu_pp1(seu, out="Z:/Computational_Toxicology/Athena/Mouse_scRNAseq/Kimmel_et_al_2019/Spleen/kimmel_seurat.RDS", remove_doublets = F, feature_subset = F, batch_id = 'orig.ident', reduction = 'pca', harmony = F, seurat_integration = F, normalize = T, test_npcs = 100, assay = 'RNA')
+
+seu <- seu[,seu$nCount_RNA < 20000]
+seu <- seu[,seu$nFeature_RNA < 3000]
 ```
 
 ## Identify clusters
@@ -191,6 +194,55 @@ seu <- seu[,!seu$global.cluster %in% c('10', '11')]
 de_dotplot(seu = seu, metadata = 'global.cluster', out = 'Z:/Computational_Toxicology/Athena/Mouse_scRNAseq/Kimmel_et_al_2019/Spleen/kimmel_seurat.RDS', n_marks = 10, min_pct = 0.1)
 
 ```
+
+# Myeloid cell clustering
+
+## Load and save objects
+```{r}
+myl <- readRDS("Z:/Computational_Toxicology/Athena/Mouse_scRNAseq/Kimmel_et_al_2019/Spleen/kimmel_myeloid.RDS")
+
+#saveRDS(myl, "Z:/Computational_Toxicology/Athena/Mouse_scRNAseq/Kimmel_et_al_2019/Spleen/kimmel_myeloid.RDS")
+```
+
+## Object generation
+```{r}
+myl <- seu[,seu$global.cluster2 == 'Myeloid cells']
+```
+
+## Processing scRNA-seq data
+```{r}
+# run this in the console!
+myl <- seu_pp1(myl, out="Z:/Computational_Toxicology/Athena/Mouse_scRNAseq/Kimmel_et_al_2019/Spleen/kimmel_myeloid", remove_doublets = F, feature_subset = T, batch_id = 'orig.ident', reduction = 'pca', harmony = F, seurat_integration = F, normalize = T, test_npcs = 100, assay = 'RNA')
+```
+
+## Identify clusters
+```{r}
+marker_plotting(seu = myl, group.by = 'RNA_snn_res.0.1', features = c('Cd68', 'Thbs1', 'Clec9a', 'Clec10a', 'Csf1r', 'Cd14', 'Fcgr3', 'Lyz2', 'Cd3e', 'Cd19', 'C1qa', 'C1qb', 'C1qc'))
+
+marks <- de_dotplot(myl, metadata = 'RNA_snn_res.0.1', out = "Z:/Computational_Toxicology/Athena/Mouse_scRNAseq/Kimmel_et_al_2019/Spleen/kimmel_myeloid")
+
+myl$global.cluster2 <- as.character(myl$RNA_snn_res.0.1)
+
+myl$global.cluster2[myl$global.cluster2 %in% c('0', '1', '4')] <- 'Mon/Macs'
+myl$global.cluster2[myl$global.cluster2 %in% c('2', '3')] <- 'Dendritic cells'
+
+DimPlot(myl, group.by = 'global.cluster2')
+```
+## Transfer myeloid annotations to global
+```{r}
+# assigning monocyte/macrophage populations
+monmac <- colnames(myl)[myl$global.cluster2 == 'Mon/Macs']
+
+seu$global.cluster2[colnames(seu) %in% monmac] <- 'Mon/Mac'
+
+# assigning dendritic cell populations
+dcs <- colnames(myl)[myl$global.cluster2 == 'Dendritic cells']
+
+seu$global.cluster2[colnames(seu) %in% dcs] <- 'Dendritic cells'
+
+table(seu$global.cluster2)
+```
+
 
 # T cell scRNA-seq prep
 
@@ -256,37 +308,133 @@ tcells$global.cluster2[tcells$global.cluster2 == c('9')] <- 'Unassigned T:9'
 tcell_marks <- de_dotplot(seu = tcells, metadata = 'global.cluster2', out = 'Z:/Computational_Toxicology/Athena/Mouse_scRNAseq/Kimmel_et_al_2019/Spleen/kimmel_tcells')
 ```
 
+## Transfer T annotations to global
+```{r}
+# remove high stress T cell cluster 6 from global.cluster2 from t cells and from seurat object
+t_remove <- colnames(tcells)[tcells$global.cluster2 == 'Unassigned T:6']
+seu <- seu[,!colnames(seu) %in% t_remove]
+tcells <- tcells[,!colnames(tcells) %in% t_remove]
+
+#seu$global.cluster2 <- seu$global.cluster
+
+# assigning Tregs
+tregs <- colnames(tcells)[tcells$global.cluster2 == 'Tregs']
+
+seu$global.cluster2[colnames(seu) %in% tregs] <- 'Tregs'
+
+
+# assigning CD4 T cells
+cd4 <- colnames(tcells)[tcells$global.cluster2 == 'CD4 T cells']
+
+seu$global.cluster2[colnames(seu) %in% cd4] <- 'CD4 T cells'
+
+# assigning CD8 T cells
+cd8 <- colnames(tcells)[tcells$global.cluster2 == 'CD8 T cells']
+
+seu$global.cluster2[colnames(seu) %in% cd8] <- 'CD8 T cells'
+
+# removing a high mitochondrial cell percentage population
+remove <- colnames(tcells)[tcells$global.cluster2 == 'Unassigned T:6'] 
+seu <- seu[,!colnames(seu) %in% remove]
+
+
+DimPlot(seu, group.by = 'global.cluster2')
+
+#seu$global.cluster2[seu$global.cluster2 == 'T cells'] <- 'Unassigned T cells'
+```
+
 
 # B cell scRNA-seq prep
+
+## Load and save objects
+```{r}
+bcells <- readRDS("Z:/Computational_Toxicology/Athena/Mouse_scRNAseq/Kimmel_et_al_2019/Spleen/kimmel_bcells.RDS")
+
+#saveRDS(bcells, "Z:/Computational_Toxicology/Athena/Mouse_scRNAseq/Kimmel_et_al_2019/Spleen/kimmel_bcells.RDS")
+```
+
+## Object generation
+```{r}
+bcells <- seu[,seu$global.cluster == 'B cells']
+```
+
+
+## Processing scRNA-seq data
+```{r}
+bcells <- seu_pp1(bcells, out="Z:/Computational_Toxicology/Athena/Mouse_scRNAseq/Kimmel_et_al_2019/Spleen/kimmel_bcells.RDS", remove_doublets = F, feature_subset = F, batch_id = 'orig.ident', reduction = 'pca', harmony = F, seurat_integration = F, normalize = T, test_npcs = 100, assay = 'RNA')
+```
+
 
 ## Identify clusters
 ```{r}
 
 # identifying follicular B cells
-marker_plotting(tcells, features = c('Cd45ra', 'Cd19', 'Ighd', 'Cd38', 'Cr2', 'Fcer2a', 'Cd22', 'Pax5'), group.by = 'RNA_snn_res.0.2') # cluster 7
+marker_plotting(bcells, features = c('Cd45ra', 'Cd19', 'Ighd', 'Cd38', 'Cr2', 'Fcer2a', 'Cd22', 'Pax5'), group.by = 'RNA_snn_res.0.2') 
 
 # identifying marginal zone B cells
-marker_plotting(tcells, features = c('Cd1d1', 'Ighm', 'Cd9', 'Cd22', 'Ebf1', 'E2A', 'Slc22a2'), group.by = 'RNA_snn_res.0.2') # cluster 7
+marker_plotting(bcells, features = c('Cd1d1', 'Ighm', 'Cd9', 'Cd22', 'Ebf1', 'E2A', 'Slc22a2'), group.by = 'RNA_snn_res.0.2') 
 
 # identifying B1 B cells
-marker_plotting(tcells, features = c('Cd5', 'Spn', 'Itgam', 'Sdc1'), group.by = 'RNA_snn_res.0.2') # cluster 4
+marker_plotting(bcells, features = c('Cd5', 'Spn', 'Itgam', 'Sdc1'), group.by = 'RNA_snn_res.0.2') # cluster 5
 
 # identifying transitional/immature B cells
-marker_plotting(tcells, features = c('Cd93', 'Cd24a', 'BR2', 'Tnfrsf13b'), group.by = 'RNA_snn_res.0.2') #cluster 7
+marker_plotting(bcells, features = c('Cd93', 'Cd24a', 'BR2', 'Tnfrsf13b'), group.by = 'RNA_snn_res.0.2')
 
 # germinal center b cells
-marker_plotting(tcells, features = c('Fas', 'PNA', 'Tnfrsf13c', 'Bcl6', 'Ebf1'), group.by = 'RNA_snn_res.0.2')
+marker_plotting(bcells, features = c('Fas', 'PNA', 'Tnfrsf13c', 'Bcl6', 'Ebf1'), group.by = 'RNA_snn_res.0.2')
 
 # memory B cells
 marker_plotting(tcells, features = c('Cd80', 'Nt5e', 'Pdcd1lg2', 'Cd38', 'Cd84', 'Cd86', 'Pbx1', 'Spib'), group.by = 'RNA_snn_res.0.2')
+
+bcells$global.cluster2[bcells$RNA_snn_res.2.1 == 28] <- 'Myeloid contamination'
+bcells$global.cluster2[bcells$RNA_snn_res.2.1 %in% c(24, 27)] <- 'T cell contamination'
+```
+
+## Transfer B annotations to global
+```{r}
+# assigning myeloid cells back to the proper 
+my_contam <- colnames(bcells)[bcells$global.cluster2 == 'Myeloid contamination']
+
+seu$global.cluster2[colnames(seu) %in% my_contam] <- 'Myeloid cells'
+
+t_contam <- colnames(bcells)[bcells$global.cluster2 == 'T cell contamination']
+seu$global.cluster2[colnames(seu) %in% t_contam] <- 'T cells'
+
+# removing clusters that seem to be T cells
+t_not_b <- colnames(bcells)[bcells$RNA_snn_res.3 %in% c(32, 35)]
+seu$global.cluster2[colnames(seu) %in% t_not_b] <- 'T cells'
+
+bcells <- bcells[, !bcells$RNA_snn_res.3 %in% c(32, 35)]
+```
+
+# Visium prep
+
+## Load and save objects
+```{r}
+st <- readRDS(file = "Z:\\Computational_Toxicology\\Athena\\SpaceRanger_testruns\\v2_athena_test\\Kidney_out\\kidney_visium_seurat.RDS")
+
+#saveRDS(st, file = "Z:\\Computational_Toxicology\\Athena\\SpaceRanger_testruns\\v2_athena_test\\Kidney_out\\kidney_visium_seurat.RDS")
+```
+
+## Pre-processing Visium
+```{r}
+seu <- visium_pp(in_dir = "Z:\\Computational_Toxicology\\Athena\\SpaceRanger_testruns\\v2_athena_test\\Kidney_out\\outs", h5_name = "filtered_feature_bc_matrix.h5", out_dir = "Z:\\Computational_Toxicology\\Athena\\SpaceRanger_testruns\\v2_athena_test\\Kidney_out\\")
 ```
 
 
 # SCDC load in
 ```{r}
+# single cell object load in
+seu <- readRDS("Z:/Computational_Toxicology/Athena/Mouse_scRNAseq/Kimmel_et_al_2019/Spleen/kimmel_seurat.RDS")
 
+st <- readRDS(file = "Z:\\Computational_Toxicology\\Athena\\SpaceRanger_testruns\\v2_athena_test\\Kidney_out\\kidney_visium_seurat.RDS")
 ```
 
+# Generating marker genes for scRNA-seq
+```{r}
+Idents(seu) <- 'global.cluster2'
+sc_markers <- FindAllMarkers(seu)
+```
 
 # SCDC
 
@@ -294,10 +442,24 @@ sc_ref: This is your single cell RNA-sequencing dataset that you want to use as 
 
 st_query: This is the spatial transcriptomics Seurat object that you would like to deconvolute. Assumes the count matrix you would like to use is located in the "Spatial" assay. 
 
-markers_sc: This is the output from the FindMarkers function from Seurat. It should have at least the following columns: gene (contains gene name), cluster (contains the cluster name for that DE gene), pct.1 (contains the % in the cluster from the cluster column), pct.2 (contains the average % in all the other clusters combined), p_val (the p-value when comparing pct.1 to pct.2)
-```{r}
-scdc_decon <- function(sc_ref, st_query, markers_sc){
+sc_meta: This should be a string; it should be a string that indicates the metadata column in the single-cell data that contains the appropriate metadata 
 
+out: This should be a string of the home directory you would like to store your object in
+
+```{r}
+sc_ref <- seu
+st_query <- st
+sc_meta <- 'global.cluster2'
+out <- 'C:\\Users\\GOLFIAX\\OneDrive - AbbVie Inc (O365)\\Desktop\\'
+
+scdc_decon <- function(sc_ref, st_query, sc_meta, out){
+
+  # setting scRNA-seq clusters based on the metadata
+  Idents(sc_ref) <- sc_meta
+  
+  # identifying all clusters
+  markers_sc <- FindAllMarkers(seu)
+  
   # Filter for genes that are also present in the ST data
   markers_sc <- markers_sc[markers_sc$gene %in% rownames(st_query), ]
   
@@ -315,7 +477,7 @@ scdc_decon <- function(sc_ref, st_query, markers_sc){
       ]), phenoData = AnnotatedDataFrame(st_query@meta.data))
   
   #running deconvolution
-  deconvolution <- SCDC::SCDC_prop(bulk.eset = eset_ST, sc.eset = eset_SC, ct.varname = "mreg_cxcl9_globalcluster4", ct.sub = as.character(unique(eset_SC$mreg_cxcl9_globalcluster4)))
+  deconvolution <- SCDC::SCDC_prop(bulk.eset = eset_ST, sc.eset = eset_SC, ct.varname = sc_meta, ct.sub = as.character(unique(eset_SC[[sc_meta]])))
   
   # now adding deconvolution output and adding it to the Seurat object as a new assay
   st_query@assays[['SCDC']] <- SeuratObject::CreateAssayObject(data = t(deconvolution$prop.est.mvw))
@@ -325,17 +487,19 @@ scdc_decon <- function(sc_ref, st_query, markers_sc){
   }
   
   DefaultAssay(st_query) <- 'SCDC'
-  st_query_test <- st_query
   
-  st_query_test <- Seurat::FindSpatiallyVariableFeatures(st_query_test, assay = "SCDC", selection.method = "markvariogram", features = rownames(st_query_test), r.metric = 5, slot = "data")
+  st_query <- Seurat::FindSpatiallyVariableFeatures(st_query, assay = "SCDC", selection.method = "markvariogram", features = rownames(st_query), r.metric = 5, slot = "data")
   
-  Seurat::SpatialPlot(st_query_test, feature = c('mregDC-CXCL9lo', 'Mac-C1QA', 'mregDC-CXCL9hi'))
-  ggsave('/Volumes/hdlab/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-5_analysis/st_query_mregDC_MacC1QA_proportions.png', width = 3000, height = 1200, units = 'px')
   
-  Seurat::SpatialPlot(st_query_test, feature = c('CD4-1', 'CD8-2', 'Treg-1'))
-  ggsave('/Volumes/hdlab/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-5_analysis/st_query_CD41_CD82_Treg1_proportions.png', width = 3000, height = 1200, units = 'px')
+  #Seurat::SpatialPlot(st_query_test, feature = c('CD4-1', 'CD8-2', 'Treg-1'))
   
-  saveRDS(st_query, '/Volumes/hdlab/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK17-7_analysis/st_query_seurat.RDS')
+  path <- paste(out, 'SCDC_deconvolution_', Sys.Date())
+  dir.create(path)
+
+  
+  saveRDS(st_query, paste(path, 'SCDC_deconvolution_', sc_meta, '_', Sys.Date(), sep = ''))
+  
+  save(sc_ref, st_query, markers_sc, eset_SC, eset_ST, file = paste(path, 'Workspace_Image_SCDC_deconvolution_', sc_meta, '_', Sys.Date(), sep = ''))
 }
 ```
 

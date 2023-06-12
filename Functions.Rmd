@@ -1315,6 +1315,64 @@ visium_pp <- function(in_dir, h5_name = "filtered_feature_bc_matrix.h5", out_dir
 ```
 
 
+## SCDC Deconvolution
+```{r}
+#sc_ref <- seu
+#st_query <- st
+#sc_meta <- 'global.cluster2'
+#out <- 'C:\\Users\\GOLFIAX\\OneDrive - AbbVie Inc (O365)\\Desktop\\'
+
+scdc_decon <- function(sc_ref, st_query, sc_meta, out){
+
+  # setting scRNA-seq clusters based on the metadata
+  Idents(sc_ref) <- sc_meta
+  
+  # identifying all clusters
+  markers_sc <- FindAllMarkers(seu)
+  
+  # Filter for genes that are also present in the ST data
+  markers_sc <- markers_sc[markers_sc$gene %in% rownames(st_query), ]
+  
+  # Select top 20 genes per cluster, select top by first p-value, then absolute
+  # diff in pct, then quota of pct.
+  markers_sc$pct.diff <- markers_sc$pct.1 - markers_sc$pct.2
+  markers_sc$log.pct.diff <- log2((markers_sc$pct.1 * 99 + 1)/(markers_sc$pct.2 * 99 + 1))
+  markers_sc %>% dplyr::group_by(cluster) %>% dplyr::top_n(-100, p_val) %>%
+      dplyr::top_n(50, pct.diff) %>% dplyr::top_n(20, log.pct.diff) -> top20
+  m_feats <- unique(as.character(top20$gene))
+  
+  eset_SC <- ExpressionSet(assayData = as.matrix(sc_ref@assays$RNA@counts[m_feats,
+      ]), phenoData = AnnotatedDataFrame(sc_ref@meta.data))
+  eset_ST <- ExpressionSet(assayData = as.matrix(st_query@assays$Spatial@counts[m_feats,
+      ]), phenoData = AnnotatedDataFrame(st_query@meta.data))
+  
+  #running deconvolution
+  deconvolution <- SCDC::SCDC_prop(bulk.eset = eset_ST, sc.eset = eset_SC, ct.varname = sc_meta, ct.sub = as.character(unique(eset_SC[[sc_meta]])))
+  
+  # now adding deconvolution output and adding it to the Seurat object as a new assay
+  st_query@assays[['SCDC']] <- SeuratObject::CreateAssayObject(data = t(deconvolution$prop.est.mvw))
+  
+  if (length(st_query@assays$SCDC@key) == 0) {
+      st_query@assays$SCDC@key = "scdc_"
+  }
+  
+  DefaultAssay(st_query) <- 'SCDC'
+  
+  st_query <- Seurat::FindSpatiallyVariableFeatures(st_query, assay = "SCDC", selection.method = "markvariogram", features = rownames(st_query), r.metric = 5, slot = "data")
+  
+  
+  #Seurat::SpatialPlot(st_query_test, feature = c('CD4-1', 'CD8-2', 'Treg-1'))
+  
+  path <- paste(out, 'SCDC_deconvolution_', Sys.Date())
+  dir.create(path)
+
+  
+  saveRDS(st_query, paste(path, 'SCDC_deconvolution_', sc_meta, '_', Sys.Date(), sep = ''))
+  
+  save(sc_ref, st_query, markers_sc, eset_SC, eset_ST, file = paste(path, 'Workspace_Image_SCDC_deconvolution_', sc_meta, '_', Sys.Date(), sep = ''))
+}
+```
+
 
 ## REGULAR HEATMAP Unweighted co-localization of L-R pairs
 
