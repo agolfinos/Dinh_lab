@@ -1236,11 +1236,16 @@ geomx_heatmap <- function(geomx, genes = 'all', gene_set = NULL, path, add_segme
 
 ## Pre-processing helper
 
-This function loads in the H5 file from your SpaceRanger output, normalizes with SCTransform, runs PCA using the SCT normalized counts using user-input PC values, finds nearest neighbors, finds clusters at resolutions ranging from 0.1 to 3, and runs UMAP. It additionally saves a log file of the parameters used for the pre-processing steps so it is documented and reproducible. 
+Summary: This function loads in the H5 file from your SpaceRanger output, normalizes with SCTransform, runs PCA using the SCT normalized counts using user-input PC values, finds nearest neighbors, finds clusters at resolutions ranging from 0.1 to 3, and runs UMAP. It additionally saves a log file of the parameters used for the pre-processing steps so it is documented and reproducible. 
+
+Output: Returns your pre-processed spatial seurat object. It also produces an output file that contains a log of all the parameters used during pre-processing
+
+
+Arguments
 
 in_dir: The directory that contains the output directory from Space Ranger. At the very least, you should have the filtered h5 file, the tiff image used in running space ranger, and the "spatial" output directory in this directory. 
 
-h5_name: This is the name of the h5 file within the directory. This name should match the argument listed unless you have changed the name following the Space Ranger run. 
+h5_name: This is the name of the h5 file within the directory. This name should match the default argument listed unless you have changed the name following the Space Ranger run. 
 
 out_dir: Where to save the pre-processing output that will be generated as part of the run
 ```{r}
@@ -1316,6 +1321,14 @@ visium_pp <- function(in_dir, h5_name = "filtered_feature_bc_matrix.h5", out_dir
 
 
 ## SCDC Deconvolution
+
+sc_ref: This is your single cell RNA-sequencing dataset that you want to use as a reference in the form of a Seurat object. Assumes the count matrix you would like to use is located in the "RNA" assay. 
+
+st_query: This is the spatial transcriptomics Seurat object that you would like to deconvolute. Assumes the count matrix you would like to use is located in the "Spatial" assay. 
+
+sc_meta: This should be a string; it should be a string that indicates the metadata column in the single-cell data that contains the appropriate metadata 
+
+out: This should be a string of the home directory you would like to store your object in. The function will create a folder within this directory to store the outputs and a workspace image to. 
 ```{r}
 #sc_ref <- seu
 #st_query <- st
@@ -1323,12 +1336,20 @@ visium_pp <- function(in_dir, h5_name = "filtered_feature_bc_matrix.h5", out_dir
 #out <- 'C:\\Users\\GOLFIAX\\OneDrive - AbbVie Inc (O365)\\Desktop\\'
 
 scdc_decon <- function(sc_ref, st_query, sc_meta, out){
+  
+  # load in required packages
+  require(Seurat)
+  require(SCDC)
+  require(dplyr)
+  require(Biobase)
 
   # setting scRNA-seq clusters based on the metadata
   Idents(sc_ref) <- sc_meta
   
+  print(paste('Now identifying markers for each cluster within the ', sc_meta, "metadata slot within your single cell Seurat object", sep = ''))
+  
   # identifying all clusters
-  markers_sc <- FindAllMarkers(seu)
+  markers_sc <- FindAllMarkers(sc_ref)
   
   # Filter for genes that are also present in the ST data
   markers_sc <- markers_sc[markers_sc$gene %in% rownames(st_query), ]
@@ -1345,6 +1366,8 @@ scdc_decon <- function(sc_ref, st_query, sc_meta, out){
       ]), phenoData = AnnotatedDataFrame(sc_ref@meta.data))
   eset_ST <- ExpressionSet(assayData = as.matrix(st_query@assays$Spatial@counts[m_feats,
       ]), phenoData = AnnotatedDataFrame(st_query@meta.data))
+  
+  print('Now running the deconvolution step')
   
   #running deconvolution
   deconvolution <- SCDC::SCDC_prop(bulk.eset = eset_ST, sc.eset = eset_SC, ct.varname = sc_meta, ct.sub = as.character(unique(eset_SC[[sc_meta]])))
@@ -1366,10 +1389,13 @@ scdc_decon <- function(sc_ref, st_query, sc_meta, out){
   path <- paste(out, 'SCDC_deconvolution_', Sys.Date())
   dir.create(path)
 
+  print(paste('Now saving your spatial seurat object and workspace image to ', path, sep = ''))
   
-  saveRDS(st_query, paste(path, 'SCDC_deconvolution_', sc_meta, '_', Sys.Date(), sep = ''))
+  saveRDS(st_query, paste(path, '/SCDC_deconvolution_', sc_meta, '_', Sys.Date(), '.RDS', sep = ''))
   
-  save(sc_ref, st_query, markers_sc, eset_SC, eset_ST, file = paste(path, 'Workspace_Image_SCDC_deconvolution_', sc_meta, '_', Sys.Date(), sep = ''))
+  save(sc_ref, st_query, markers_sc, eset_SC, eset_ST, file = paste(path, '/Workspace_Image_SCDC_deconvolution_', sc_meta, '_', Sys.Date(), '.rda', sep = ''))
+  
+  return(st_query)
 }
 ```
 
