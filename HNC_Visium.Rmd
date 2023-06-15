@@ -3136,7 +3136,8 @@ SpatialFeaturePlot(ck17_21, features = c('Epithelial cells', 'Fibroblasts', 'mre
 SpatialFeaturePlot(ck17_27, features = c('Epithelial cells', 'Fibroblasts', 'mregDC', 'Mac-C1QA', 'CD4-3', 'CD4-1', 'CD8-1', 'Treg-2'))
 ```
 
-# LOAD IN Co-occupancy
+# Co-occupancy
+## LOAD IN
 
 ```{r}
 library(DescTools)
@@ -3154,83 +3155,15 @@ ck17_21@project.name <- 'CK17-21'
 ck17_27@project.name <- 'CK17-27'
 ```
 
-# FUNCTION Co-occupancy scores (product of %) (2 cell types)
 
-```{r}
-out <- '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/Myeloid_to_T_Cooccupancy/All_immune_subsets_PDF/'
-seu <- c(ck17_5, ck17_7, ck17_21, ck17_27)
-cell1 <- rownames(ck17_5@assays$SCDC_onemreg)[!rownames(ck17_5@assays$SCDC_onemreg) %like% c('Fibroblasts', 'Epithelial cells', 'Endothelial cells', 'Pericytes')]
-norm <- 'z-score'
 
-# norm <- c('z-score', 'divide_by_max')
-co_occupancy <- function(out, seu, cell1, norm = c('z-score', 'divide_by_max')){  
-  pdf(file = paste(out, 'all_subsets_cooccupancy_matrix.pdf', sep = ''), height = 5, width = 12)
-  for (a in cell1){
-    ALL <- data.frame(matrix(ncol = 0, nrow = 4))
-    all <- data.frame(matrix(ncol = length(cell1), nrow = 0))
-    for (z in seu){
-      assay <- t(z@assays$SCDC_onemreg@data)
-      all_scores <- c()
-      for (y in cell1) {
-        total_cooc <- c()
-        for (x in 1:nrow(assay)){
-          percents <- assay[x,]
-          cooc <- as.numeric(percents[a] * percents[y])
-          total_cooc <- c(total_cooc, cooc)
-          spots <- as.numeric(nrow(assay))
-          score <- sum(total_cooc)/spots
-        }
-        names(score) <- paste(a, '_', y, sep = '')
-        all_scores <- c(all_scores, score)
-      }
-      row <- c(z@project.name, unname(all_scores))
-      all <- rbind(all, row)
-      colnames(all) <- c('Sample', names(all_scores))
-    }
-    rownames(all) <- all$Sample
-    all$Sample <- NULL
-    all <- mutate_all(all, function(x) as.numeric(as.character(x)))
-    #write.csv(all, file = paste(out, a, '_', y, 'unnormalized_cooccupancy_matrix.csv', sep = ''))
-    if (isTRUE('divide_by_max' %in% norm)){
-      all_norm <- all/do.call(pmax, all)
-      all_norm[is.na(all_norm)] <- 0
-      ALL <- cbind(ALL, all_norm)
-      test <- strsplit(colnames(ALL), split = '_')
-      indexes <- c()
-      for (i in 1:length(test)){
-        test1 <- as.numeric(i[test[[i]][1] != test[[i]][2]])
-        indexes <- c(indexes, test1)
-      }
-      ALL <- ALL[indexes]
-      pheatmap::pheatmap(ALL, main = paste(test[[i]][1], ': Divide by Max, Clustered', sep = ''))
-      pheatmap::pheatmap(ALL, cluster_cols = FALSE, cluster_rows = FALSE, main = paste(test[[i]][1], ': Divide by Max, Unclustered', sep = ''))
-    }
-    if (isTRUE('z-score' %in% norm)){
-      ALL <- as.data.frame(t(apply(all, 1, scale)))
-      colnames(ALL) <- colnames(all)
-      ALL[is.na(ALL)] <- 0
-      test <- strsplit(colnames(ALL), split = '_')
-      indexes <- c()
-      for (i in 1:length(test)){
-        test1 <- as.numeric(i[test[[i]][1] != test[[i]][2]])
-        indexes <- c(indexes, test1)
-      }
-      ALL <- ALL[indexes]
-      pheatmap::pheatmap(ALL, main = paste(test[[i]][1], ': Z-score Normalized, Clustered', sep = ''))
-      pheatmap::pheatmap(ALL, cluster_rows = FALSE, cluster_cols = FALSE, main = paste(test[[i]][1], ': Z-score Normalized, Unclustered', sep = ''))
-    }
-  }
-  dev.off()
-}  
-```
-
-# RUNNING Co-occupancy scores (product of %) (2 cell types)
+## Running Co-occupancy scores (product of %) (2 cell types)
 
 ```{r}
 co_occupancy(out <- '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/Myeloid_to_T_Cooccupancy/All_immune_subsets_PDF_ZandDividebyMax/', seu <- c(ck17_5, ck17_7, ck17_21, ck17_27), cell1 <- rownames(ck17_5@assays$SCDC_onemreg)[!rownames(ck17_5@assays$SCDC_onemreg) %like% c('Fibroblasts', 'Epithelial cells', 'Endothelial cells', 'Pericytes')], norm = c('z-score', 'divide_by_max'))
 ```
 
-# \*\*\*\*\*Create new assay
+##Create new assay
 
 ```{r}
 library(Seurat)
@@ -3257,7 +3190,7 @@ saveRDS('/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/CK
 
 ```
 
-# 2 cell type co-occupancy (Pearson correlation heatmap)
+## 2 cell type co-occupancy (Pearson correlation heatmap)
 
 ```{r}
 library(magrittr)
@@ -3347,7 +3280,7 @@ pheatmap::pheatmap(ALL, main = 'Non-Responders')
 dev.off()
 ```
 
-# 2 cell type co-occupancy (Pearson correlation w/ confidence interval)
+## 2 cell type co-occupancy (Pearson correlation w/ confidence interval)
 
 ```{r warning=FALSE}
 library(magrittr)

@@ -45,6 +45,7 @@ The output of this function is a processed seurat object
 ```{r}
 seu_pp1 <- function(seu, out, remove_doublets = TRUE, pct_doublets, feature_subset = TRUE, batch_id = 'orig.ident', reduction = 'pca', harmony = FALSE, seurat_integration = FALSE, normalize = TRUE, test_npcs = 100, assay = 'RNA'){
   
+  # loading in required packages
   require(dplyr)
   require(Seurat)
   require(harmony)
@@ -53,14 +54,27 @@ seu_pp1 <- function(seu, out, remove_doublets = TRUE, pct_doublets, feature_subs
   require(DescTools)
   require(dplyr)
   
+  # checking to see if there's a slash at the end of your directory name
+  # if not it adds it for you ;)
+  last_char <- substr(out, nchar(out), nchar(out))
+  if (nchar(out) > 0 && last_char != "/" && last_char != "\\") {
+    out <- paste0(out, "/")
+  }
+  
+  # add a directory within your out directory that will contain all of the outputs 
+  out <- paste(out, 'Seurat_preprocessing_outputs_', Sys.Date(), '/', sep = '')
+  
+  # this creates a log file where all of the pre-processing metrics will be saved for later referencing
   sink(paste(out, '_preprocessing_console_output.txt', sep = ''), append = T)
   
+  # adding parameters to the log file
   cat('\nNEW ANALYSIS\n')
   cat(paste('Date of analysis: ', Sys.Date(), "\n"))
   cat(paste("Output directory: ", out, "\n"))
   cat(paste("Batch_ID: ", batch_id, "\n"))
   cat(paste("Assay used: ", assay, "\n"))
   
+  # feature subsetting
   if (isTRUE(feature_subset)){
     
     seu[["percent.mt"]] <- PercentageFeatureSet(seu, pattern = "^MT-")
@@ -78,6 +92,7 @@ seu_pp1 <- function(seu, out, remove_doublets = TRUE, pct_doublets, feature_subs
   }
   
   
+  # seurat integration step
   if (isTRUE(seurat_integration)){
     print(paste('Now performing seurat integration based on the metadata column', batch_id))
     objects <- list()
@@ -93,61 +108,94 @@ seu_pp1 <- function(seu, out, remove_doublets = TRUE, pct_doublets, feature_subs
     #print(DimPlot(seu, group.by = batch_id))
     normalize = FALSE
   }  
+  
+  # normalization step, if indicated
   if (isTRUE(normalize)) {
     seu <- NormalizeData(seu, assay = assay)
   }
+  
+  # identify top 2000 variable features for your specified assay
   seu <- FindVariableFeatures(seu, assay = assay)
+  
+  # scaling the data within the specified assay
   seu <- ScaleData(seu, assay = assay)
+  
+  # run PCA so we can screen for the proper number of PCs based on variance
   seu <- RunPCA(seu, verbose = FALSE, npcs = test_npcs, assay = assay)
+  
+  # runs harmony to integrate all samples based on batch ID if desired
   if (isTRUE(harmony)){
     seu <- seu %>% harmony::RunHarmony(batch_id, plot_convergence = TRUE, reduction.save = paste('harmony', assay, sep = ''))
   }
+  
+  # plots the elbow plot if you ran harmony first (uses corrected PCs)
   if (isTRUE(harmony)){
     print(ElbowPlot(seu, ndims = test_npcs, reduction = paste('harmony', assay, sep = '')))
   }
+  
+  # plots the elbow plot if you did not run harmony (uses raw PCs)
   if (isFALSE(harmony)){
     print(ElbowPlot(seu, ndims = test_npcs))
   }
   
+  # requests user input as to the number of PCs to use
   npcs2 <- as.integer(readline("Enter the number of PCs to use: "))
   
+  # find neighbors based on the user input number of PCs and the desired reduction
   seu <- FindNeighbors(seu, dims = 1:npcs2, reduction = reduction, assay = assay)
+  
+  # runs UMAP and stores clustering information for every resolution from 0.1 to 3 by 0.1
   seu <- RunUMAP(seu, dims = 1:npcs2, reduction = reduction, assay = assay)
   for (x in seq.int(0.1, 3, by = 0.1)){
     seu <- FindClusters(seu, resolution = x, verbose = FALSE)
   }
   
+  # removing doublets
   if (isTRUE(remove_doublets)){
+    
+    # do a parameter sweep to help ID the correct value
     sweep.res <- DoubletFinder::paramSweep_v3(seu) 
     sweep.stats <-DoubletFinder::summarizeSweep(sweep.res, GT = FALSE) 
     bcmvn <- DoubletFinder::find.pK(sweep.stats)
+    
+    # writes an output file that contains your parameter sweep information
     write.csv(bcmvn, file = paste(out, 'DF_stats.csv', sep = ''))
     print(barplot(bcmvn$BCmetric, names.arg = bcmvn$pK, las=2))
     
+    # estimates the number of doublets based on your input
     nExp <- round(ncol(seu) * pct_doublets) 
     
+    # requests user input as to the pK value to use. This should be the pK value with the largest BCmetric
     pk <- as.numeric(readline("Enter the pK value to use: "))
   
+    # adds doublet finder info to the output log file
     cat(paste("Pre-defined pN value: 0.25", "\n"))
     cat(paste("Enter the pK value to use: ", pk, "\n"))
     
+    # detect doublets vs singlets
     seu <- DoubletFinder::doubletFinder_v3(seu, pN = 0.25, pK = pk, nExp = nExp, PCs = 1:npcs2)
   }
   sink()
   
+  # create a file that contains all of your preprocessing plots
   pdf(paste(out, 'preprocessing_plots.pdf'), width = 12, height = 7)
   
+  # print the output plots
     print(VlnPlot(seu, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, group.by = batch_id))
   
+  # prints an elbow plot based on the harmony reduction  
   if (isTRUE(harmony)){
     print(ElbowPlot(seu, ndims = test_npcs, reduction = paste('harmony', assay, sep = '')))
   }
+    
+  # prints an elbow plot based on the pca reduction  
   if (isFALSE(harmony)){
     print(ElbowPlot(seu, ndims = test_npcs))
   }
   
   dev.off()
   
+  # saves your seurat output to your out folder
   saveRDS(seu, file = paste(out, Sys.Date(), '.RDS', sep = ''))
   
   return(seu)
@@ -156,56 +204,78 @@ seu_pp1 <- function(seu, out, remove_doublets = TRUE, pct_doublets, feature_subs
 
 ## SoupX run
 
-This function runs the soupx tool for removing ambient RNA "soup" from your samples
+Purpose: This function runs the soupx tool for removing ambient RNA "soup" from your samples
 
-seu: Your seurat object
+seu: Your seurat object. This function will assume that your metadata column is called "global.cluster"
 
 tmpDir: The path to your original filtered (or raw if you want to use that) h5 file from running cellranger
 
-outdir: Provide the path to a folder that already exists (please make the folder if it's not already made) where you would like to store record-keeping related outputs. This is not the path that will be used to store the seurat object
+outdir: Provide the path to a folder that already exists (please make the folder if it's not already made) where you would like to store record-keeping related outputs as well as your seurat object output
 
-seuout: Provide the path to a folder that already exists (please make the folder if it's not already made) where you would like to store the post-processing seurat object
+sample: This is a string of the name you would like to give to the object. Will be added as a project name to the seurat object, as well as part of the object name when it is saved to the output directory. 
 
-Output: 
+Output: This function will save a workspace image (as an rda file), as well as a seurat object containing the corrected matrix in a folder generated within the output directory
 
 ```{r}
-soupX_run <- function(seu, tmpDir, outdir = './outputs/', seuout = './seurat_objs/', sample){
+soupX_run <- function(seu, tmpDir, outdir = './outputs/', sample){
   
+  # load required packages
   require(SoupX)
   require(Seurat)
   require(DescTools)
   require(dplyr)
   
+  # checking to see if there's a slash at the end of your directory name
+  # if not it adds it for you ;)
+  last_char <- substr(outdir, nchar(outdir), nchar(outdir))
+  if (nchar(outdir) > 0 && last_char != "/" && last_char != "\\") {
+    outdir <- paste0(outdir, "/")
+  }
+
+  # reading in the filtered barcode matrix and only keeping overlapping genes w seurat object
   toc1 = Seurat::Read10X_h5(paste(tmpDir, "sample_filtered_feature_bc_matrix.h5", sep = ''))
   toc1 = toc1[rownames(toc1) %in% rownames(seu),colnames(toc1) %in% colnames(seu)]
   
+  # reading in the raw barcode matrix and only keeping overlapping genes w seurat object
   tod1 = Seurat::Read10X_h5(paste(tmpDir, "sample_raw_feature_bc_matrix.h5", sep = ''))
   tod1 <- tod1[rownames(tod1) %in% rownames(toc1),colnames(tod1) %in% colnames(toc1)]
   tod1 = tod1[rownames(tod1) %in% rownames(seu),colnames(tod1) %in% colnames(seu)]
   
+  # calculating the "soup"
   v1t_counts = SoupChannel(tod1, toc1, calcSoupProfile = F)
   
+  # helper to make it easier to pick the range of UMIs to consider "empty" droplets
+  # default is 0-100 but that is not always sufficient
+  # if you have high background (lots of soup), this value will be on the higher end!
   for (x in seq(100, 2000, by = 100)){
     print(paste("Range of UMI: 0-", as.character(x), sep = ''))
     print(length(v1t_counts$nDropUMIs[v1t_counts$nDropUMIs < x]))
   }
   
+  # requests user input for the upper range of "empty" droplets
   input <- readline("Enter upper range value: ")
   
+  # now calculating the soup using the user input range of "empty" droplets
   v1t_counts <- estimateSoup(v1t_counts, soupRange = c(0, input))
   
+  # here gathering cluster names and setting them within the object
   clusters <- seu$global.cluster
   clusters <- clusters[names(clusters) %in% colnames(v1t_counts$toc)]
-  
   v1t_counts = setClusters(v1t_counts, clusters)
   v1t_counts = autoEstCont(v1t_counts)
   v1t_soupx = adjustCounts(v1t_counts)
   
+  # creating anew version of your seurat object
   v1t <- CreateSeuratObject(v1t_soupx, project = sample, assay = "RNA", names.field = 1, names.delim = "_",meta.data = NULL)
   
-  save(toc1, tod1, v1t, v1t_counts, v1t_soupx, clusters, tmpDir, file = paste(outdir, 'SoupX_env_', sample, '.rda', sep = ''))
+  # creating the out directory where we will store the workspace image as well as the seurat object
+  path <- paste(outdir, 'Soup_X_outputs_', Sys.Date(), '/', sep = '')
   
-  saveRDS(v1t, paste(seuout, sample, '_', Sys.Date(), '.RDS', sep = ''))
+  # saving your workspace image to an output folder
+  save(toc1, tod1, v1t, v1t_counts, v1t_soupx, clusters, tmpDir, file = paste(path, 'SoupX_env_', sample, '.rda', sep = ''))
+  
+  # saving your seurat object as an output
+  saveRDS(v1t, paste(path, sample, '_', Sys.Date(), '.RDS', sep = ''))
 }
 ```
 
@@ -213,6 +283,10 @@ soupX_run <- function(seu, tmpDir, outdir = './outputs/', seuout = './seurat_obj
 
 ```{r}
 add_cluster_res <- function(seu, start = 0.1, end = 3){
+  
+  # loading in required packages
+  require(Seurat)
+  
   # getting clustering resolutions from 0.1-3
   for (x in seq.int(start, end, by = 0.1)){
     seu <- FindClusters(seu, resolution = x, verbose = FALSE)
@@ -228,7 +302,8 @@ add_cluster_res <- function(seu, start = 0.1, end = 3){
 ```{r}
 marker_plotting <- function(seu, features, group.by){
   
-  color_clusters <- c("#DC050C", "#FB8072", "#1965B0", "#7BAFDE", "#882E72", "#B17BA6", "#FF7F00", "#FDB462", "#E7298A", "#E78AC3","#33A02C", "#B2DF8A", "#55A1B1", "#8DD3C7", "#A6761D", "#E6AB02", "#7570B3", "#BEAED4", "#666666", "#999999", "#AA8282", "#D4B7B7", "#8600BF", "#BA5CE3", "#808000","#AEAE5C", "#1E90FF", "#00BFFF", "#56FF0D", "#FFFF00")
+  # loading in colors for the plotting functions
+  color_clusters <- c("#DC050C", "#FB8072", "#1965B0", "#7BAFDE", "#882E72", "#B17BA6", "#FF7F00", "#FDB462", "#E7298A", "#E78AC3","#33A02C", "#B2DF8A", "#55A1B1", "#8DD3C7", "#A6761D", "#E6AB02", "#7570B3", "#BEAED4", "#666666", "#999999", "#AA8282", "#D4B7B7", "#8600BF", "#BA5CE3", "#808000","#AEAE5C", "#1E90FF", "#00BFFF", "#56FF0D", "#FFFF00", '#00CC99', '#006666', '#006600', '#330033', '#FFCCFF', '#FF00FF', '#663300')
   
   require(Seurat)
   require(cowplot)
@@ -251,12 +326,17 @@ marker_plotting <- function(seu, features, group.by){
 
 cluster_eval <- function(seu, group.by, batch.id){
   
+  # loading in required packages
   require(Seurat)
   require(ComplexHeatmap)
   require(grid)
   require(DescTools)
   require(dplyr)
+  
+    # loading in colors for the plotting functions
+  color_clusters <- c("#DC050C", "#FB8072", "#1965B0", "#7BAFDE", "#882E72", "#B17BA6", "#FF7F00", "#FDB462", "#E7298A", "#E78AC3","#33A02C", "#B2DF8A", "#55A1B1", "#8DD3C7", "#A6761D", "#E6AB02", "#7570B3", "#BEAED4", "#666666", "#999999", "#AA8282", "#D4B7B7", "#8600BF", "#BA5CE3", "#808000","#AEAE5C", "#1E90FF", "#00BFFF", "#56FF0D", "#FFFF00", '#00CC99', '#006666', '#006600', '#330033', '#FFCCFF', '#FF00FF', '#663300')
 
+  # generating and wrangling a matrix that contains information for the heatmap
   test <- as.data.frame(table(seu[[group.by]], 
         seu[[batch.id]])) %>% tidyr::pivot_wider(names_from = 'Var2', 
         values_from = 'Freq') 
@@ -264,7 +344,11 @@ cluster_eval <- function(seu, group.by, batch.id){
   test$Var1 <- NULL
   rownames(test) <- rnames
   total <- as.numeric(ncol(seu))
+  
+  # converting this matrix into a percent matrix
   pct_df <- as.matrix(test[,1:ncol(test)]/total * 100)
+  
+  # plotting the heatmap
   p1 <- ComplexHeatmap::Heatmap(pct_df, 
         name = 'Cluster %', 
         row_title = 'cluster ID', column_title = 'sample', 
@@ -273,20 +357,24 @@ cluster_eval <- function(seu, group.by, batch.id){
         {grid.text(sprintf("%.4f", pct_df[i, j]), x, y, gp = gpar(fontsize=10))
   })
   
+  #plotting a violin plot of nCount and nFeature values
   p2 <- VlnPlot(seu, features = c('nCount_RNA', 'nFeature_RNA'), 
-        group.by = group.by)
+        group.by = group.by, cols = color_clusters)
+  
+  # wrangling and plotting doublet scores
   df_meta <- as.vector(colnames(seu@meta.data)[colnames(seu@meta.data) 
                                               %like% 'pANN_%'])
-  p3 <- FeaturePlot(seu, features = df_meta)
-  #cowplot::plot_grid(p1, p2, p3, ncol = 2, nrow = 2)
+  p3 <- FeaturePlot(seu, features = df_meta, cols = color_clusters)
+
+  # generating a DimPlot as a nice reference 
+  p4 <- DimPlot(seu, group.by = group.by, cols = color_clusters)
   
-  p4 <- DimPlot(seu, group.by = group.by)
+  # wrangling all figures into a single panel
   figure1 <- multi_panel_figure(
   width = 180, height = 180,
   columns = 2, rows = 2)
   figure1 %<>% fill_panel(p1, row = 1, column = 1)
   figure1 %<>% fill_panel(p2, row = 1, column = 2)
-  #figure1 %<>% fill_panel(p4, row = 2, column = 1)
   figure1 %<>% fill_panel(p3, row = 2, column = 1:2)
   figure1
 }
@@ -296,16 +384,38 @@ cluster_eval <- function(seu, group.by, batch.id){
 
 ## DE genes DotPlot (all clusters)
 
+seu: This is the seurat object that contains the data you wish to find DE genes within
+
+metadata: This is a string indicating the metadata column to use as a grouping variable when calculating DE genes and plotting the dotplot
+
+out: This is a string to the directory where you would like a folder with all your results stored (the plot, the de genes list, and an RDS that has both of these in it)
+
+n_marks: This is how many markers will be used for each of your subsets for both DE gene identification, as well as plotting in the dotplot
+
+min_pct: This sets the minimum percent that the feature must be expressed to be considered differentially expressed. Matches the min.pct argument in FindMarkers function from Seurat
+
+
 ```{r}
 #de_dotplot(seu, 'global.cluster')
 #seu <- fbs[,fbs$RNA_snn_res.0.5 %in% c(0,1,2)]
 #metadata <- 'RNA_snn_res.0.5'
 #n_marks = 10
 
-de_dotplot <- function(seu, metadata, out = './figures/', n_marks = 10, min_pct = 0.1){
+
+de_dotplot <- function(seu, metadata, out = './figures/', n_marks = 10, min_pct = 0.1, dotplot_height = 12, dotplot_width = 7){
+  
+  # loading in required packages 
   require(Seurat)
   require(DescTools)
   require(ggplot2)
+  
+  # checking to make sure the out directory has a slash included at the end
+  # if not, it adds it for you :) 
+  last_char <- substr(out, nchar(out), nchar(out))
+  if (nchar(out) > 0 && last_char != "/" && last_char != "\\") {
+      out <- paste0(out, "/")
+  }
+  
   # getting differentially expressed genes for each subset
   all_g <- c()
   marker_df <- data.frame()
@@ -328,7 +438,18 @@ de_dotplot <- function(seu, metadata, out = './figures/', n_marks = 10, min_pct 
   }
   all_g <- unique(all_g)
   plot <- DotPlot(seu, features = rev(all_g), col.min = 0, group.by = metadata) + coord_flip() +  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1))
-  saveRDS(list(marker_df, plot), file = paste(out, Sys.Date(), '_de_dotplot_markers.RDS', sep = ''))
+  
+  # creating a new directory that will store these objects
+  path <- paste(out, metadata, '_DEgenes_', Sys.Date(), '/', sep = '')
+  dir.create(path)
+  
+  # saving the plot, the marker genes file, and the RDS with both in the set output file
+  saveRDS(list(marker_df, plot), file = paste(path, Sys.Date(), '_de_dotplot_markers.RDS', sep = ''))
+  write.csv(marker_df, file = paste(path, Sys.Date(), '_de_marker_list.csv', sep = ''))
+  plot
+  ggsave(filename = paste(path, Sys.Date(), 'de_marker_plot.png', sep = ''), width = dotplot_width, height = dotplot_height, units = 'in', dpi = 300)
+  
+  
   return(list(marker_df, plot))
 }
 ```
@@ -1000,6 +1121,18 @@ save_img <- function(outname, width, height, plot) {
   dev.off()
 }
 ```
+
+## Check and add slash to path (for functions)
+```{r}
+checkAndAddSlash <- function(directory) {
+  last_char <- substr(directory, nchar(directory), nchar(directory))
+  if (nchar(directory) > 0 && last_char != "/" && last_char != "\\") {
+    directory <- paste0(directory, "/")
+  }
+  return(directory)
+}
+```
+
 
 # ____________________________
 # Pseudotime
