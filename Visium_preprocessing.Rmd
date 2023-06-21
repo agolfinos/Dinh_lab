@@ -41,14 +41,33 @@ m1007 <- visium_pp(in_dir = "Z:\\Computational_Toxicology\\Athena\\Visium\\m1007
 
 m2007 <- visium_pp(in_dir = "Z:\\Computational_Toxicology\\Athena\\Visium\\m2007\\outs\\", h5_name = "filtered_feature_bc_matrix.h5", out_dir = "Z:\\Computational_Toxicology\\Athena\\Visium\\m2007\\")
 ```
+# Clustering samples
+```{r}
+m1001 <- RunPCA(m1001, assay = "SCT", verbose = FALSE)
+m1001 <- FindNeighbors(m1001, reduction = "pca", dims = 1:20)
+m1001 <- FindClusters(m1001, graph.name = 'SCT_snn')
+m1001 <- RunUMAP(m1001, reduction = "pca", dims = 1:20)
+
+
+m1001_marks <- de_dotplot(m1001, metadata = 'SCT_snn_res.2',  out = 'Z:\\Computational_Toxicology\\Athena\\Visium\\m1001\\')
+```
+
 
 # Mouse spleen SCDC 
 ## Load in
 ```{r}
 # single cell object load in
 seu <- readRDS("Z:/Computational_Toxicology/Athena/Mouse_scRNAseq/Kimmel_et_al_2019/Spleen/kimmel_seurat.RDS")
-```
 
+
+# Load in Visium Seurat objects
+m1001 <- readRDS( file = "Z:\\Computational_Toxicology\\Athena\\Visium\\m1001\\seurat_objs\\m1001.RDS")
+
+m1007 <- readRDS(file = 'Z:\\Computational_Toxicology\\Athena\\Visium\\m1007\\seurat_objs\\m1007.RDS')
+
+m2007 <- readRDS(file = 'Z:\\Computational_Toxicology\\Athena\\Visium\\m2007\\seurat_objs\\m2007.RDS')
+
+```
 ## SCDC run
 
 
@@ -58,26 +77,53 @@ seu <- readRDS("Z:/Computational_Toxicology/Athena/Mouse_scRNAseq/Kimmel_et_al_2
 #sc_meta <- 'global.cluster2'
 #out <- 'C:\\Users\\GOLFIAX\\OneDrive - AbbVie Inc (O365)\\Desktop\\'
 
+# sample m1001
 m1001 <- scdc_decon(sc_ref = seu, st_query = m1001, sc_meta = 'global.cluster2', out = 'Z:\\Computational_Toxicology\\Athena\\Visium\\m1001\\')
 
-DefaultAssay(m1001) <- 'SCDC'
 
-SpatialPlot(m1001, features = 'Tregs', pt.size.factor = 2)
-
-
+# sample m1007--does not work due to low # of detected genes
 m1007 <- scdc_decon(sc_ref = seu, st_query = m1007, sc_meta = 'global.cluster2', out = 'Z:\\Computational_Toxicology\\Athena\\Visium\\m1007\\')
 
 
-
+# sample m2007
 m2007 <- scdc_decon(sc_ref = seu, st_query = m2007, sc_meta = 'global.cluster2', out = 'Z:\\Computational_Toxicology\\Athena\\Visium\\m2007\\')
 ```
+
+## Deconvolution plotting
+```{r}
+# setting the default assay as the deconvolution
+
+DefaultAssay(m1001) <- 'SCDC'
+
+DefaultAssay(m2007) <- 'SCDC'
+
+# plotting Tregs, CD8 T cells, and B cells
+
+SpatialPlot(m1001, features = rownames(m1001)[1:3], pt.size.factor = 2.5)
+
+SpatialPlot(m2007, features = rownames(m2007)[1:3], pt.size.factor = 2.5)
+
+# plotting CD4 T cells, neutrophils, dendritic cells
+
+SpatialPlot(m1001, features = rownames(m1001)[4:6], pt.size.factor = 2.5)
+
+SpatialPlot(m2007, features = rownames(m2007)[4:6], pt.size.factor = 2.5)
+
+# plotting CD4 T cells, neutrophils, dendritic cells
+
+SpatialPlot(m1001, features = rownames(m1001)[7:9], pt.size.factor = 2.5)
+
+SpatialPlot(m2007, features = rownames(m2007)[7:9], pt.size.factor = 2.5)
+```
+
+
 
 # Global  scRNA-seq prep
 ## Load and save objects
 ```{r}
 seu <- readRDS("Z:/Computational_Toxicology/Athena/Mouse_scRNAseq/Kimmel_et_al_2019/Spleen/kimmel_seurat.RDS")
 
-#saveRDS(seu, "Z:/Computational_Toxicology/Athena/Mouse_scRNAseq/Kimmel_et_al_2019/Spleen/kimmel_seurat.RDS")
+#saveRDS(seu, "Z:/Computational_Toxicology/Athena/Mouse_scRNAseq/Kimmel_et_al_2019/Spleen/kimmel_seurat.RDS)
 ```
 
 

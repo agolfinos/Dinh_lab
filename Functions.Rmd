@@ -42,6 +42,9 @@ assay: Leave this as RNA unless you have a different assay you have added to the
 Output: 
 The output of this function is a processed seurat object
 
+Usage example: 
+seu <- seu_pp1(seu = seu, out="Z:/Computational_Toxicology/Athena/Mouse_scRNAseq/Kimmel_et_al_2019/Spleen/kimmel_seurat.RDS", remove_doublets = FALSE, feature_subset = FALSE, batch_id = 'orig.ident', reduction = 'pca', harmony = FALSE, seurat_integration = FALSE, normalize = TRUE, test_npcs = 100, assay = 'RNA')
+
 ```{r}
 seu_pp1 <- function(seu, out, remove_doublets = TRUE, pct_doublets, feature_subset = TRUE, batch_id = 'orig.ident', reduction = 'pca', harmony = FALSE, seurat_integration = FALSE, normalize = TRUE, test_npcs = 100, assay = 'RNA'){
   
@@ -77,6 +80,8 @@ seu_pp1 <- function(seu, out, remove_doublets = TRUE, pct_doublets, feature_subs
   # feature subsetting
   if (isTRUE(feature_subset)){
     
+    cat('Feature Subsetting: TRUE')
+    
     seu[["percent.mt"]] <- PercentageFeatureSet(seu, pattern = "^MT-")
     print(VlnPlot(seu, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3))
   
@@ -94,6 +99,9 @@ seu_pp1 <- function(seu, out, remove_doublets = TRUE, pct_doublets, feature_subs
   
   # seurat integration step
   if (isTRUE(seurat_integration)){
+    
+    cat('Seurat integration: TRUE')
+    
     print(paste('Now performing seurat integration based on the metadata column', batch_id))
     objects <- list()
     for (x in unique(seu[[c(batch_id)]][,1])){
@@ -111,6 +119,9 @@ seu_pp1 <- function(seu, out, remove_doublets = TRUE, pct_doublets, feature_subs
   
   # normalization step, if indicated
   if (isTRUE(normalize)) {
+    
+    cat('Normalization: TRUE')
+    
     seu <- NormalizeData(seu, assay = assay)
   }
   
@@ -216,6 +227,10 @@ sample: This is a string of the name you would like to give to the object. Will 
 
 Output: This function will save a workspace image (as an rda file), as well as a seurat object containing the corrected matrix in a folder generated within the output directory
 
+Usage: 
+
+my_output <- soupx_run(seu = seu, tmpDir = '/your/input/directory/10X/', outdir = '/your/output/directory/')
+
 ```{r}
 soupX_run <- function(seu, tmpDir, outdir = './outputs/', sample){
   
@@ -225,7 +240,14 @@ soupX_run <- function(seu, tmpDir, outdir = './outputs/', sample){
   require(DescTools)
   require(dplyr)
   
-  # checking to see if there's a slash at the end of your directory name
+  # checking to see if there's a slash at the end of your input directory name
+  # if not it adds it for you ;)
+  last_char <- substr(tmpDir, nchar(tmpDir), nchar(tmpDir))
+  if (nchar(tmpDir) > 0 && last_char != "/" && last_char != "\\") {
+    tmpDir <- paste0(tmpDir, "/")
+  }
+  
+  # checking to see if there's a slash at the end of your out directory name
   # if not it adds it for you ;)
   last_char <- substr(outdir, nchar(outdir), nchar(outdir))
   if (nchar(outdir) > 0 && last_char != "/" && last_char != "\\") {
@@ -276,10 +298,27 @@ soupX_run <- function(seu, tmpDir, outdir = './outputs/', sample){
   
   # saving your seurat object as an output
   saveRDS(v1t, paste(path, sample, '_', Sys.Date(), '.RDS', sep = ''))
+  
+  # returns the seurat object
+  return(v1t)
 }
 ```
 
 ## Add clustering resolutions 0.1-3
+
+What this function does: Given an input seurat object, this is a helper function that adds a metadata column to your seurat object for each clustering resolution (increasing by 0.1) from the start resolution to the end resolution. Simply a helper to make it easier to assess multiple resolutions of interest. This function is included in the seu_pp1 wrapper, so no need to use it except in an independent circumstance. 
+
+seu: Seurat object for which you would like to add metadata columns (in intervals of 0.1) for clustering resolutions ranging from your start argument to your end argument
+
+start: This is the starting resolution for adding clustering resolutions. Default is 0.1
+
+end: This is the ending resolution for adding clustering resolutions. Default is 3. 
+
+Output: Returns seurat object with the added metadata
+
+Usage: 
+
+seu_with_resolutions <- add_cluster_res(seu = seu_no_res, start = 0.5, end = 4)
 
 ```{r}
 add_cluster_res <- function(seu, start = 0.1, end = 3){
@@ -299,6 +338,17 @@ add_cluster_res <- function(seu, start = 0.1, end = 3){
 # Seurat cluster/marker evaluation
 
 ## Marker plotting (VlnPlot, DotPlot, DimPlot, FeaturePlot)
+
+What does this function do? This function is meant to be used to help holistically evaluate the expression of given features within a seurat object, grouped by your choice of metadata column. It will plot a violin plot, dotplot, dimplot, and featureplot of the gene expression of your indicated features grouped by your metadata column. Meant as an evaluation/diagnostic set of plots for exploratory analyses
+
+seu: Your seurat object
+
+features: A string of features to screen for within the data
+
+group.by = A string of the name of the metadata column to group by when plotting. 
+
+Output: Prints a cowplot grid of four plots showing gene expression of your given features grouped by your indicated metadata column. 
+
 ```{r}
 marker_plotting <- function(seu, features, group.by){
   
@@ -319,6 +369,19 @@ marker_plotting <- function(seu, features, group.by){
 ```
 
 ## Cluster evaluation (nCount, nFeature, doublet score)
+
+What does this function do? This function is meant as a tool to help you evaluate the potential doublets within a single cell RNA-seq data set. Given a seurat object, a metadata column to group by, and a batch specific ID, you can evaluate nCount_RNA, nFeature_RNA, and doublet scores from Doublet Finder outputs. 
+
+seu: Seurat object to evaluate
+
+group.by: A string that indicates the name of the metadata column that the data should be grouped by
+
+batch.id: A string that indicates the name of the metadata column that stores individual sample IDs or batch-specific indications. 
+
+Output: This function prints a multi-panel figure that consists of a heatmap, and evaluation figures for nCount, nFeature and doublet score. 
+
+Usage: 
+cluster_eval(seu = seu, group.by = 'global.cluster', batch.id = 'orig.ident')
 ```{r}
 #seu = my2
 #group.by = 'predicted.id'
@@ -384,6 +447,8 @@ cluster_eval <- function(seu, group.by, batch.id){
 
 ## DE genes DotPlot (all clusters)
 
+What does this function do? This function allows us to input a seurat object, a metadata column to group by, an output directory, a number of markers, and other arguments to generate a DE genes dotplot grouped by the metadata column and saved to the output directory of the given number of arguments. It also outputs a list of genes and the corresponding statistics to the same output folder. 
+
 seu: This is the seurat object that contains the data you wish to find DE genes within
 
 metadata: This is a string indicating the metadata column to use as a grouping variable when calculating DE genes and plotting the dotplot
@@ -393,6 +458,8 @@ out: This is a string to the directory where you would like a folder with all yo
 n_marks: This is how many markers will be used for each of your subsets for both DE gene identification, as well as plotting in the dotplot
 
 min_pct: This sets the minimum percent that the feature must be expressed to be considered differentially expressed. Matches the min.pct argument in FindMarkers function from Seurat
+
+Output: This function saves a csv of marker genes shown in the dotplot, as well as a png of the DE genes dotplot to the out directory. It also saves an RDS of both of these objects as a single list object, with [[1]] being the DE genes dataframe, and [[2]] being the marker genes dotplot. Lastly, it returns the list object, again with [[1]] being the DE genes dataframe, and [[2]] being the marker genes dotplot. 
 
 
 ```{r}
@@ -1382,9 +1449,9 @@ h5_name: This is the name of the h5 file within the directory. This name should 
 
 out_dir: Where to save the pre-processing output that will be generated as part of the run
 ```{r}
-#in_dir <- "Z:\\Computational_Toxicology\\Athena\\Test_visium\\"
-#h5_name <- "V1_Mouse_Brain_Sagittal_Anterior_Section_2_filtered_feature_bc_matrix.h5"
-#out_dir <- "Z:\\Computational_Toxicology\\Athena\\Test_visium\\"
+in_dir <- "Z:\\Computational_Toxicology\\Athena\\Visium\\m1001\\outs\\"
+h5_name <- "filtered_feature_bc_matrix.h5"
+out_dir <- "Z:\\Computational_Toxicology\\Athena\\Visium\\m1001\\"
 
 # if using RMarkdown, run this in the console or you will not see the required plots!
 seu <- visium_pp(in_dir = "Z:\\Computational_Toxicology\\Athena\\Test_visium\\", h5_name = "V1_Mouse_Brain_Sagittal_Anterior_Section_2_filtered_feature_bc_matrix.h5", out_dir = "Z:\\Computational_Toxicology\\Athena\\Test_visium\\")
@@ -1530,6 +1597,99 @@ scdc_decon <- function(sc_ref, st_query, sc_meta, out){
   
   return(st_query)
 }
+```
+
+
+## Co-occupancy score calculation
+
+What does this function do? Calculates co-occupancy scores as a product of the percentages of the two cell types. 
+
+out: This is where you will have an output consisting of a pdf heatmap showing the co-occupancy scores
+
+seu: Name of the seurat object (or multiple objects) for which you would like to calculate the co-occupancy scores. It is assumed that you have an assay within this seurat object that has deconvolution data in it (right now the slot has to be 'SCDC_onemreg'--need to change this in future versions)
+
+cell1: Which cell type(s) from your deconvolution that should be anchored as the one cell type present in all co-occupancy scores. Should be either a single string, or a character string with multiple entries separated by a comma. 
+
+norm: Choose either 'z-score' or 'divide by max'. Z-score will obviously calculate the z-scores, where divide by max divides each column by the largest score in that column. 
+```{r}
+#out <- '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/Myeloid_to_T_Cooccupancy/All_immune_subsets_PDF/'
+#seu <- c(ck17_5, ck17_7, ck17_21, ck17_27)
+#cell1 <- rownames(ck17_5@assays$SCDC_onemreg)[!rownames(ck17_5@assays$SCDC_onemreg) %like% c('Fibroblasts', 'Epithelial cells', 'Endothelial cells', 'Pericytes')]
+#norm <- 'z-score'
+
+co_occupancy <- function(out, seu, cell1, norm = c('z-score', 'divide_by_max')){  
+  
+  # initiating the creation of the pdf that will hold the heatmap 
+  pdf(file = paste(out, 'all_subsets_cooccupancy_matrix.pdf', sep = ''), height = 5, width = 12)
+  
+  # iterates through your 'cell1' cell types
+  for (a in cell1){
+    
+    #initiates the creation of empty dataframes
+    ALL <- data.frame(matrix(ncol = 0, nrow = 4))
+    all <- data.frame(matrix(ncol = length(cell1), nrow = 0))
+    
+    #iterates through your multiple objects
+    for (z in seu){
+      
+      # identifies and extracts the assay
+      assay <- t(z@assays$SCDC_onemreg@data)
+      
+      # initiates a vector that contains all of your scores
+      all_scores <- c()
+      
+      # 
+      for (y in cell1) {
+        total_cooc <- c()
+        for (x in 1:nrow(assay)){
+          percents <- assay[x,]
+          cooc <- as.numeric(percents[a] * percents[y])
+          total_cooc <- c(total_cooc, cooc)
+          spots <- as.numeric(nrow(assay))
+          score <- sum(total_cooc)/spots
+        }
+        names(score) <- paste(a, '_', y, sep = '')
+        all_scores <- c(all_scores, score)
+      }
+      row <- c(z@project.name, unname(all_scores))
+      all <- rbind(all, row)
+      colnames(all) <- c('Sample', names(all_scores))
+    }
+    rownames(all) <- all$Sample
+    all$Sample <- NULL
+    all <- mutate_all(all, function(x) as.numeric(as.character(x)))
+    #write.csv(all, file = paste(out, a, '_', y, 'unnormalized_cooccupancy_matrix.csv', sep = ''))
+    if (isTRUE('divide_by_max' %in% norm)){
+      all_norm <- all/do.call(pmax, all)
+      all_norm[is.na(all_norm)] <- 0
+      ALL <- cbind(ALL, all_norm)
+      test <- strsplit(colnames(ALL), split = '_')
+      indexes <- c()
+      for (i in 1:length(test)){
+        test1 <- as.numeric(i[test[[i]][1] != test[[i]][2]])
+        indexes <- c(indexes, test1)
+      }
+      ALL <- ALL[indexes]
+      pheatmap::pheatmap(ALL, main = paste(test[[i]][1], ': Divide by Max, Clustered', sep = ''))
+      pheatmap::pheatmap(ALL, cluster_cols = FALSE, cluster_rows = FALSE, main = paste(test[[i]][1], ': Divide by Max, Unclustered', sep = ''))
+    }
+    if (isTRUE('z-score' %in% norm)){
+      ALL <- as.data.frame(t(apply(all, 1, scale)))
+      colnames(ALL) <- colnames(all)
+      ALL[is.na(ALL)] <- 0
+      test <- strsplit(colnames(ALL), split = '_')
+      indexes <- c()
+      for (i in 1:length(test)){
+        test1 <- as.numeric(i[test[[i]][1] != test[[i]][2]])
+        indexes <- c(indexes, test1)
+      }
+      ALL <- ALL[indexes]
+      pheatmap::pheatmap(ALL, main = paste(test[[i]][1], ': Z-score Normalized, Clustered', sep = ''))
+      pheatmap::pheatmap(ALL, cluster_rows = FALSE, cluster_cols = FALSE, main = paste(test[[i]][1], ': Z-score Normalized, Unclustered', sep = ''))
+    }
+  }
+  dev.off()
+}  
 ```
 
 
