@@ -48,6 +48,8 @@ seu <- seu_pp1(seu = seu, out="Z:/Computational_Toxicology/Athena/Mouse_scRNAseq
 ```{r}
 seu_pp1 <- function(seu, out, remove_doublets = TRUE, pct_doublets, feature_subset = TRUE, batch_id = 'orig.ident', reduction = 'pca', harmony = FALSE, seurat_integration = FALSE, normalize = TRUE, test_npcs = 100, assay = 'RNA'){
   
+  set.seed(329)
+  
   # loading in required packages
   require(dplyr)
   require(Seurat)
@@ -234,6 +236,8 @@ my_output <- soupx_run(seu = seu, tmpDir = '/your/input/directory/10X/', outdir 
 ```{r}
 soupX_run <- function(seu, tmpDir, outdir = './outputs/', sample){
   
+  set.seed(329)
+  
   # load required packages
   require(SoupX)
   require(Seurat)
@@ -323,6 +327,8 @@ seu_with_resolutions <- add_cluster_res(seu = seu_no_res, start = 0.5, end = 4)
 ```{r}
 add_cluster_res <- function(seu, start = 0.1, end = 3){
   
+  set.seed(329)
+  
   # loading in required packages
   require(Seurat)
   
@@ -351,6 +357,8 @@ Output: Prints a cowplot grid of four plots showing gene expression of your give
 
 ```{r}
 marker_plotting <- function(seu, features, group.by){
+  
+  set.seed(329)
   
   # loading in colors for the plotting functions
   color_clusters <- c("#DC050C", "#FB8072", "#1965B0", "#7BAFDE", "#882E72", "#B17BA6", "#FF7F00", "#FDB462", "#E7298A", "#E78AC3","#33A02C", "#B2DF8A", "#55A1B1", "#8DD3C7", "#A6761D", "#E6AB02", "#7570B3", "#BEAED4", "#666666", "#999999", "#AA8282", "#D4B7B7", "#8600BF", "#BA5CE3", "#808000","#AEAE5C", "#1E90FF", "#00BFFF", "#56FF0D", "#FFFF00", '#00CC99', '#006666', '#006600', '#330033', '#FFCCFF', '#FF00FF', '#663300')
@@ -388,6 +396,8 @@ cluster_eval(seu = seu, group.by = 'global.cluster', batch.id = 'orig.ident')
 #batch.id = 'orig.ident'
 
 cluster_eval <- function(seu, group.by, batch.id){
+  
+  set.seed(329)
   
   # loading in required packages
   require(Seurat)
@@ -468,8 +478,19 @@ Output: This function saves a csv of marker genes shown in the dotplot, as well 
 #metadata <- 'RNA_snn_res.0.5'
 #n_marks = 10
 
+seu = m1001
+metadata = 'BayesSpace'
+out = 'Z:\\Computational_Toxicology\\Athena\\Visium\\m1001\\'
+min_pct = 0.05
+n_marks = 10
+dotplot_height = 12
+dotplot_width = 7
+
+
 
 de_dotplot <- function(seu, metadata, out = './figures/', n_marks = 10, min_pct = 0.1, dotplot_height = 12, dotplot_width = 7){
+  
+  set.seed(329)
   
   # loading in required packages 
   require(Seurat)
@@ -532,6 +553,8 @@ y = 2
 
 de_dotplot_1v1 <- function(seu, metadata, x, y){
   
+  set.seed(329)
+  
   seu <- seu[,which(seu[[metadata]][,1] %in% c(x, y))]
   
   # getting differentially expressed genes for each subset
@@ -561,19 +584,32 @@ de_dotplot_1v1 <- function(seu, metadata, x, y){
 ```{r}
 #freqs <- freq_plot(seu, metadata = 'global.cluster', split.meta = 'hpv_status', out = './figures/global_cluster_all_', out_width = 19, out_height = 10)
 
-SEU = epi_moc2
-metadata = 'RNA_snn_res.0.4'
-split.meta = 'K17.status'
-out = './figures/epi_moc2_'
-out_width = 8
+#SEU = epi_moc2
+#metadata = 'RNA_snn_res.0.4'
+#split.meta = 'K17.status'
+#out = './figures/epi_moc2_'
+#out_width = 8
+#out_height = 8
+#out_units = 'in'
+#out_res = 300
+#freq_plot(seurat, celltype = c('N0_Retnlg', 'N1_Tnf', 'N2_Isg', 'N3_Npm1'), metadata = 'global.cluster2', split.meta = 'tissue', out = '/Volumes/hqdinh2/Projects/HNC_SPORE/Golfinosetal2022/neut_freq_boxplot.png')
+
+SEU = m1001
+metadata = 'SCT_snn_res.0.5'
+split.meta = 'BayesSpace'
+graph_type = c('stacked_barplot')
+out = 'Z:\\Computational_Toxicology\\Athena\\Visium\\m1001\\'
+out_width = 12
 out_height = 8
 out_units = 'in'
 out_res = 300
-#freq_plot(seurat, celltype = c('N0_Retnlg', 'N1_Tnf', 'N2_Isg', 'N3_Npm1'), metadata = 'global.cluster2', split.meta = 'tissue', out = '/Volumes/hqdinh2/Projects/HNC_SPORE/Golfinosetal2022/neut_freq_boxplot.png')
+test_by_group = F
 
 ##################################################################
-freq_plot <- function(SEU, metadata, split.meta = 'tissue_hpv', graph_type = c('stacked_barplot', 'freq_boxplot'), out, out_width = 12, out_height = 8, out_units = 'in', out_res = 300){
+freq_plot <- function(SEU, metadata, split.meta = 'tissue_hpv', graph_type = c('stacked_barplot', 'freq_boxplot'), out, out_width = 12, out_height = 8, out_units = 'in', out_res = 300, test_by_group = TRUE){
 
+  set.seed(329)
+  
   require(ggplot2)
   require(DescTools)
   require(Seurat)
@@ -625,22 +661,25 @@ freq_plot <- function(SEU, metadata, split.meta = 'tissue_hpv', graph_type = c('
   df$Group <- as.character(df$Group)
   df$Freqs <- as.numeric(as.character(df$Freqs))
   
-  all_p <- data.frame(subset = character(), p = numeric())
+  if(isTRUE(test_by_group)){
+    all_p <- data.frame(subset = character(), p = numeric())
 
-  for (x in unique(df$Cluster)) {
-    f <- df[df$Cluster == x,]
-    groups <- unique(df$Group)
-    f1 <- f[f$Group == groups[1],]$Freqs
-    f2 <- f[f$Group == groups[2],]$Freqs
-    wcx <- wilcox.test(f1, f2, paired = FALSE)
-    row <- c(x, wcx$p.value)
-    all_p <- rbind(all_p, row)
-    all_p[,2] <- format(round(as.numeric(all_p[,2]), 2), nsmall = 2)
+    for (x in unique(df$Cluster)) {
+      f <- df[df$Cluster == x,]
+      groups <- unique(df$Group)
+      f1 <- f[f$Group == groups[1],]$Freqs
+      f2 <- f[f$Group == groups[2],]$Freqs
+      wcx <- wilcox.test(f1, f2, paired = FALSE)
+      row <- c(x, wcx$p.value)
+      all_p <- rbind(all_p, row)
+      all_p[,2] <- format(round(as.numeric(all_p[,2]), 2), nsmall = 2)
+    }
+    
+    p_filtered <- all_p
+    
+    sub_title <- paste(p_filtered[,1], p_filtered[,2], sep = '=')
   }
   
-  p_filtered <- all_p
-  
-  sub_title <- paste(p_filtered[,1], p_filtered[,2], sep = '=')
   
   if (graph_type == 'freq_boxplot'){
     png(paste(out, 'freq_boxplot.png', sep = ''), width = out_width, height = out_height, units = out_units, res = out_res)
@@ -674,6 +713,9 @@ Output: None. Only saves a file to the directory of your choice.
 
 ```{r}
 wilcox_by_condition <- function(df = df, out){
+  
+  set.seed(329)
+  
   group1 <- as.character(unique(df$Group))
   group2 <- group1
   
@@ -726,6 +768,8 @@ pcutoff = 0.05
 
 
 volcPlot <- function(seu, seu_name, meta, cell1, cell2, select_labs=NULL, out='/Volumes/hqdinh2/Projects/HNC_SPORE/Golfinosetal2022/', test.use = 'wilcox', logfc = 0.1, pval_adj = 0.05, fccutoff = 0.1, pcutoff = 0.05) {
+  
+  set.seed(329)
   
   require(EnhancedVolcano)
   require(Seurat)
@@ -795,6 +839,8 @@ out: Absolute or relative path to where you want the SCDC results saved
 
 scdc_decon <- function(seu, markers_sc, metadata, sp, out){
   
+  set.seed(329)
+  
   require(Seurat)
   require(DescTools)
   require(dplyr)
@@ -855,6 +901,9 @@ scdc_decon <- function(seu, markers_sc, metadata, sp, out){
 ## Create CellChat
 ```{r}
 creat_cellchat <- function(seurat) {
+  
+  set.seed(329)
+  
   data.input<-GetAssayData(seurat,assay = "RNA", slot = "data")
 
   #extract cell type labels
@@ -1599,6 +1648,169 @@ scdc_decon <- function(sc_ref, st_query, sc_meta, out){
 }
 ```
 
+## Spatial CellChat
+What does this function do? This function takes a seurat object with a grouping metadata column and scale factors, creates a CellChat object, and then calculates a communication network. 
+
+Required arguments: 
+
+seu: A seurat object of spatial transcriptomics data
+
+group.by: A string; the name of the metadata column to use for clustering information
+
+scale_factors: A string; the path to the outs/spatial/ folder from your Space Ranger outputs for this object
+
+out: A string; the path to the directory you would like a folder to be made in. The folder will contain all of the outputs for this run
+
+species: A string; The name of the species to be analyzed. Restricted to either mouse or human. 
+
+Output: 
+
+Saved outputs: 
+A folder containing three files
+1. A console log containing important information about how the analysis was done
+2. A saved RDS file that contains your cellchat object
+3. An rda file that contains the workspace image files
+
+Returned outputs: 
+Returns your cellchat object
+```{r}
+st_cellchat <- function(seu, group.by, scale_factors, out, species = c('mouse', 'human')){
+ 
+  # load in required packages
+  require(CellChat)
+  require(Seurat)
+  require(jsonlite)
+  require(future)
+  
+   # checks if there's a slash at the end of your directory name
+  # if not it adds it for you ;)
+  last_char <- substr(out, nchar(out), nchar(out))
+  if (nchar(out) > 0 && last_char != "/" && last_char != "\\") {
+    out <- paste0(out, "/")
+  }
+  
+  # add a directory within your out directory that will contain all of the outputs 
+  out <- paste(out, 'CellChat_outputs_', Sys.Date(), '/', sep = '')
+  dir.create(out)
+  
+  # this creates a log file where all of the pre-processing metrics will be saved for later referencing
+  sink(paste(out, 'CellChat_parameters.txt', sep = ''), append = T)
+  
+  # adding parameters to the log file
+  cat('\nNEW ANALYSIS\n')
+  cat(paste('Date of analysis: ', Sys.Date(), "\n"))
+  cat(paste("Output directory: ", out, "\n"))
+  cat(paste("Metadata column: ", group.by, "\n"))
+  cat(paste("Scale Factor inputs: ", scale_factors, "\n"))
+  cat(paste("Species: ", species, "\n"))
+  
+  print("Now collecting all required data for running CellChat")
+  
+  # setting the metadata as the identities
+  Idents(seu) <- group.by
+
+  # input data is the normalized data
+  data.input = GetAssayData(seu, slot = "data", assay = "SCT")
+  
+  # collect the necessary metadata 
+  meta = data.frame(labels = Idents(seu), 
+                    row.names = names(Idents(seu))) 
+  
+  # re-assigning the labels to be a character vector 
+  meta$labels <- as.character(meta$labels)
+  
+  # CellChat labels cannot have a zero in them, so re-assigning cluster zero to the largest cluster name
+  meta$labels[meta$labels == '0'] <- as.character(as.numeric(max(meta$labels)) + 1)
+  
+  # provide a note that shares how cluster zero will be renamed
+  print("IMPORTANT: If you had zero as one of your cluster IDs, at this point it will be renamed to have the largest value of all clusters")
+  
+  unique(meta$labels) # check the cell labels
+  
+  # extract the tissue coordinates
+  spatial.locs = GetTissueCoordinates(seu, scale = NULL, cols = c("imagerow", "imagecol")) 
+  
+  # Scale factors and spot diameters of the full res images 
+  scale.factors = jsonlite::fromJSON(txt = file.path(scale_factors, 'scalefactors_json.json'))
+  
+  scale.factors = list(spot.diameter = 65, 
+  spot = scale.factors$spot_diameter_fullres, 
+  fiducial = scale.factors$fiducial_diameter_fullres, 
+  hires = scale.factors$tissue_hires_scalef, 
+  lowres = scale.factors$tissue_lowres_scalef)
+  
+  print("Now creating the cellchat object")
+  
+  # create the cellchat object
+  cellchat <- createCellChat(object = data.input, meta = meta, group.by = "labels", datatype = "spatial", coordinates = spatial.locs, scale.factors = scale.factors) 
+  
+  print("Now preparing to calculate communication networks")
+  
+  # asserting the species as lowercase to prevent discrepancies
+  species <- tolower(species)
+  
+  # assigning the species-specific database
+  if (species == 'mouse'){
+    CellChatDB <- CellChatDB.mouse
+  }
+  
+  if (species == 'human'){
+    CellChatDB <- CellChatDB.human
+  }
+   
+  # using the default database that doesn't include subsetting
+  CellChatDB.use <- CellChatDB 
+  
+  # set the used database in the object
+  cellchat@DB <- CellChatDB.use
+   
+  # subset expression data to saving computation cost
+  cellchat <- subsetData(cellchat) # Necessary even if using the whole database
+  
+  future::plan("multisession", workers = 4) # do parallel
+  
+  print("Now identifying over expressed genes and interactions")
+  
+  # identify over expressed genes
+  cellchat <- identifyOverExpressedGenes(cellchat)
+  
+  # identify over expressed interactions
+  cellchat <- identifyOverExpressedInteractions(cellchat)
+  
+  print("Now calculating communication probability")
+  
+  # computing communication probability 
+  cellchat <- computeCommunProb(cellchat, type = "truncatedMean",
+              trim = 0.1, distance.use = TRUE, 
+              interaction.length = 200, scale.distance = 0.01)
+  
+  print("Now filtering the communication and calculating communication on a pathway level")
+  
+  # Filter out the cell-cell communication if there are only few number of cells in certain cell groups
+  cellchat <- filterCommunication(cellchat, min.cells = 10)
+  
+  # calculating communication probabilities at a pathway level
+  cellchat <- computeCommunProbPathway(cellchat)
+
+  # aggregating our communication network
+  cellchat <- aggregateNet(cellchat)
+  
+  # close the log file
+  sink()
+ 
+  print("Now saving the cellchat object and workspace image")
+   
+  # save the cellchat objects to the out directory
+  saveRDS(cellchat, file = paste(out, "CellChat_", Sys.Date(), '.RDS', sep = ''))
+  
+  # save the workspace image to the out directory
+  save(data.input, meta, spatial.locs, scale.factors, cellchat, file = paste(out, 'Workspace_Image_CellChat_', Sys.Date(), '.rda', sep = ''))
+  
+  
+  return(cellchat)
+}
+```
+
 
 ## Co-occupancy score calculation
 
@@ -1973,27 +2185,37 @@ weighted_visium_cooc_heatmap <- function(seu, seuname, meta = 'BayesSpace',  out
 }  
 ```
 
-## OVERLAY HEATMAP Weighted co-localization of L-R pairs
+## Unweighted co-localization of features
 
 ```{r}
-#weighted_colocalization(ck17_7, seu_name = 'ck17_7', marks = c('PLTP', 'SPP1'))
+seu <- m1001
+marks <- c('Cd8a', 'Cd4', 'Cd3e')
+default_assay <- 'SCT'
+num_features <- 'gene_set'
+gene_set_name <- 'NF_kappa_b'
+
+#unweighted_colocalization(ck17_7, seu_name = 'ck17_7', marks = c('PLTP', 'SPP1'))
 
 ###############################################
-weighted_colocalization <- function(seu, name, default_assay = 'SCT', marks, out = '/Volumes/hqdinh2/Projects/RawData_FromUWBiotech/HNCVisium_2022-05-05/'){
-
-  DefaultAssay(seu) <- 'SCT'
-  genes <- FetchData(seu, vars = c(marks[1], marks[2]))
-  genes[[paste(marks[1], marks[2], sep = '_')]] <- genes[,1] * genes[,2]
-  genes[,1] <- NULL
-  genes[,1] <- NULL
-  pct_immune <- seu@assays$SCDC_onemreg@data[!rownames(seu@assays$SCDC_onemreg@data) %like any% c('Endothelial cells', 'Fibroblasts', 'Epithelial cells', 'Pericytes'), ] %>% t() %>% rowSums() %>% as.data.frame()
-  df2 <- merge(genes, pct_immune, by = 0)
-  df2[[paste(marks[1], marks[2], sep = '_')]] <- df2[[paste(marks[1], marks[2], sep = '_')]] * df2$.
-  df2$. <- NULL
-  rownames(df2) <- df2$Row.names
-  df2$Row.names <- NULL
+unweighted_colocalization <- function(seu, name, default_assay = 'SCT', marks, num_features = c('gene_pair', 'gene_set'), gene_set_name, out){
   
-  genes <- df2
+  DefaultAssay(seu) <- default_assay
+  marks <- marks[marks %in% rownames(seu)]
+  genes <- FetchData(seu, vars = marks)
+  rnames <- rownames(genes)
+  
+  if (num_features == 'gene_pair'){
+    genes[[paste(marks[1], marks[2], sep = '_')]] <- rowSums(genes)/length(marks)
+  }
+  
+  if (num_features == 'gene_set'){
+    genes[gene_set_name] <- rowSums(genes)/length(marks)
+  }
+  
+  genes <- as.data.frame(genes[,ncol(genes)])
+  rownames(genes) <- rnames
+  colnames(genes) <- c('coexpression_score')
+  genes$coexpression_score <- scale(genes$coexpression_score)
   
   object = seu
   group.by = NULL
@@ -2015,7 +2237,7 @@ weighted_colocalization <- function(seu, name, default_assay = 'SCT', marks, out
   repel = FALSE
   ncol = NULL
   combine = TRUE
-  pt.size.factor = 1.6 
+  pt.size.factor = 2.5
   alpha = c(1, 1)
   stroke = 0.25
   interactive = FALSE
@@ -2026,7 +2248,15 @@ weighted_colocalization <- function(seu, name, default_assay = 'SCT', marks, out
   {
     images <- images %||% Images(object = object, assay = DefaultAssay(object = object))
     data <- genes
-    features <- paste(marks[1], marks[2], sep = '_')
+    
+    if (num_features == 'gene_pair'){
+      features <- paste(marks[1], marks[2], sep = '_')
+    }
+    
+    if (num_features == 'gene_set'){
+      features <- gene_set_name
+    }
+    
     min.cutoff <- 0
     max.cutoff <- 6
     check.lengths <- unique(x = vapply(X = list(features, min.cutoff, max.cutoff), FUN = length, FUN.VALUE = numeric(length = 1)))
@@ -2105,9 +2335,196 @@ weighted_colocalization <- function(seu, name, default_assay = 'SCT', marks, out
     plots
   }
   
-  ggsave(filename = paste(out, name, marks[1], marks[2], '.png', sep = '_'), units = 'in', width = 5, height = 7, dpi = 300)
+  if (num_features == 'gene_pair'){
+      ggsave(filename = paste(out, name, marks[1], marks[2], '.png', sep = '_'), units = 'in', width = 5, height = 7, dpi = 300)
+  }
+
+  if (num_features == 'gene_set'){
+    ggsave(filename = paste(out, name, gene_set_name, '.png', sep = '_'), units = 'in', width = 5, height = 7, dpi = 300)
+  }
+  
 }
 ```
+
+## Weighted co-localization of features (by cell type)
+```{r}
+seu <- m1001
+marks <- c('Cd8a', 'Cd4', 'Cd3e')
+default_assay <- 'SCT'
+num_features <- 'gene_set'
+gene_set_name <- 'NF_kappa_b'
+cell_type_assay <- 'SCDC'
+cell_types <- c('CD4 T cells', 'CD8 T cells', 'Tregs')
+gene_exp_assay = 'SCT'
+
+
+weighted_colocalization <- function(seu, name, gene_exp_assay = 'SCT', marks, num_features = c('gene_pair', 'gene_set'), gene_set_name, out, cell_type_assay = 'SCDC', cell_types){
+  
+  # calculating cell type weighting information
+  DefaultAssay(seu) <- cell_type_assay
+  cell_proportions <- FetchData(seu, vars = cell_types)
+  cell_proportions[cell_proportions == 0] <- 1e-15 # replace all zeroes with a pseudoscore
+  
+  # preparing the single-cell RNA-seq gene expression signature score
+  DefaultAssay(seu) <- gene_exp_assay
+  marks <- marks[marks %in% rownames(seu)]
+  genes <- FetchData(seu, vars = marks)
+  rnames <- rownames(genes)
+  
+  if (num_features == 'gene_pair'){
+    genes[[paste(marks[1], marks[2], sep = '_')]] <- rowSums(genes)/length(marks)
+  }
+  
+  if (num_features == 'gene_set'){
+    genes[gene_set_name] <- rowSums(genes)/length(marks)
+  }
+  
+  genes <- as.data.frame(genes[,ncol(genes)])
+  rownames(genes) <- rnames
+  colnames(genes) <- c('coexpression_score')
+  
+  # iterate through each cell type provided to create the weighted output
+  for (cell_type in cell_types){
+    
+    # preparing the weighted matrix, divide by max
+    all <- merge(genes, cell_proportions, by = 0) # merge two dataframes
+    all$weighted_coexpression1 <- all[['coexpression_score']] * all[[cell_type]] # weight by cell type
+    all$weighted_coexpression <- scale(all$weighted_coexpression1)
+    rnames2 <- all$Row.names # collecting row names
+    all <- as.data.frame(all[,c('weighted_coexpression')]) # subset data frame
+    rownames(all) <- rnames2 # set row names
+    colnames(all) <- c('weighted_coexpression') # set column names
+    
+    # heatmap parameters
+    object = seu
+    group.by = NULL
+    features = NULL
+    images = NULL
+    cols = NULL
+    image.alpha = 1
+    crop = TRUE
+    slot = "data"
+    min.cutoff = NA
+    max.cutoff = NA
+    cells.highlight = NULL 
+    cols.highlight = c("#DE2D26", "grey50")
+    facet.highlight = FALSE
+    label = FALSE
+    label.size = 5
+    label.color = "white"
+    label.box = TRUE 
+    repel = FALSE
+    ncol = NULL
+    combine = TRUE
+    pt.size.factor = 2.5
+    alpha = c(1, 1)
+    stroke = 0.25
+    interactive = FALSE
+    do.identify = FALSE
+    identify.ident = NULL
+    do.hover = FALSE
+    information = NULL
+    {
+      images <- images %||% Images(object = object, assay = DefaultAssay(object = object))
+      data <- all # change this to your input dataframe name
+      
+      if (num_features == 'gene_pair'){
+        features <- paste(marks[1], marks[2], sep = '_')
+      }
+      
+      if (num_features == 'gene_set'){
+        features <- gene_set_name
+      }
+      
+      min.cutoff <- 0
+      max.cutoff <- 6
+      check.lengths <- unique(x = vapply(X = list(features, min.cutoff, max.cutoff), FUN = length, FUN.VALUE = numeric(length = 1)))
+      data <- sapply(X = 1:ncol(x = data), FUN = function(index) {
+        data.feature <- as.vector(x = data[, index])
+        min.use <- SetQuantile(cutoff = min.cutoff[index], data.feature)
+        max.use <- SetQuantile(cutoff = max.cutoff[index], data.feature)
+        data.feature[data.feature < min.use] <- min.use
+        data.feature[data.feature > max.use] <- max.use
+        return(data.feature)
+      })
+      colnames(x = data) <- features
+      rownames(x = data) <- Cells(x = object)
+      features <- colnames(x = data)
+      colnames(x = data) <- features
+      rownames(x = data) <- colnames(x = object)
+      facet.highlight <- facet.highlight && (!is.null(x = cells.highlight) && 
+        is.list(x = cells.highlight))
+      ncols <- length(x = images)
+      plots <- vector(mode = "list", length = length(x = features) * ncols)
+      for (i in 1:ncols) {
+        plot.idx <- i
+        image.idx <- ifelse(test = facet.highlight, yes = 1, no = i)
+        image.use <- object[[images[[image.idx]]]]
+        coordinates <- GetTissueCoordinates(object = image.use)
+        highlight.use <- if (facet.highlight) {
+          cells.highlight[i]
+        }
+        else {
+          cells.highlight
+        }
+        for (j in 1:length(x = features)) {
+          cols.unset <- is.factor(x = data[, features[j]]) && is.null(x = cols)
+          if (cols.unset) {
+            cols <- hue_pal()(n = length(x = levels(x = data[, features[j]])))
+            names(x = cols) <- levels(x = data[, features[j]])
+          }
+          plot <- SingleSpatialPlot(data = cbind(coordinates, data[rownames(x = coordinates), features[j], drop = FALSE]), image = image.use, image.alpha = image.alpha,col.by = features[j], cols = cols, alpha.by = if (is.null(x = group.by)) {
+              features[j]
+            }
+            else {
+              NULL
+            }, pt.alpha = if (!is.null(x = group.by)) {
+              alpha[j]
+            }
+            else {
+              NULL
+            }, geom = if (inherits(x = image.use, what = "STARmap")) {
+              "poly"
+            }
+            else {
+              "spatial"
+            }, cells.highlight = highlight.use, cols.highlight = cols.highlight, 
+            pt.size.factor = pt.size.factor, stroke = stroke, crop = crop)
+          if (is.null(x = group.by)) {
+            plot <- plot + scale_fill_gradientn(name = features[j], colours = c('blue','white', 'red')) + theme(legend.position="top") + scale_alpha(range = alpha) + guides(alpha = 'none')
+          }
+          else if (label) {
+            plot <- LabelClusters(plot = plot, id = ifelse(test = is.null(x = cells.highlight), yes = features[j], no = "highlight"), geom = if (inherits(x = image.use, what = "STARmap")) {
+              "GeomPolygon"
+            }
+            else {
+              "GeomSpatial"
+            }, repel = repel, size = label.size, color = label.color, box = label.box, position = "nearest")
+          }
+          if (j == 1 && length(x = images) > 1 && !facet.highlight) {
+            plot <- plot + ggtitle(label = images[[image.idx]]) + theme(plot.title = element_text(hjust = 0.5))
+          }
+          plots[[plot.idx]] <- plot
+          plot.idx <- plot.idx + ncols
+          if (cols.unset) {
+            cols <- NULL
+          }
+        }
+      }
+      plots
+    }
+    
+    if (num_features == 'gene_pair'){
+        ggsave(filename = paste(out, name, cell_type, marks[1], marks[2], '.png', sep = '_'), units = 'in', width = 5, height = 7, dpi = 300)
+    }
+  
+    if (num_features == 'gene_set'){
+      ggsave(filename = paste(out, name, cell_type, gene_set_name, '.png', sep = '_'), units = 'in', width = 5, height = 7, dpi = 300)
+    }
+  }
+}
+```
+
 
 # __________________________________
 # Frequency boxplot pipeline
