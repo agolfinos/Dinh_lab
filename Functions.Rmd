@@ -2187,6 +2187,26 @@ weighted_visium_cooc_heatmap <- function(seu, seuname, meta = 'BayesSpace',  out
 
 ## Unweighted co-localization of features
 
+What does this function do? 
+This function takes a seurat object and a variety of arguments related to genes of interest for use in a co-localization analysis. It will find the average expression of those genes within each spot of your Visium seurat object. It will save a png file to your out directory that shows an average co-expression score for all the spots. 
+
+seu: A seurat object of your Visium data 
+
+name: A string; a name that is representative of the sample for file saving purposes (something like animal ID)
+
+default_assay: A string; This is the assay from your Seurat object that contains your gene expression information (if you used my preprocessing helper this should be 'SCT')
+
+marks: A character vector; This is the list of features that you want to look at co-expression of. This can either be a set of marker genes (such as for GSEA), or a pair of genes (for looking at cell-cell communication). This should be a character vector. 
+
+num_features: A string; This tells the pipeline whether you are interested in using a gene set (for GSEA or something similar), or a gene pair. 
+
+gene_set_name: A string; If you chose 'gene_set' for the num_features argument, please provide a name for the gene set you are testing. This argument is not necessary for the gene pair, as the "gene set name" will just be the name of the two genes. 
+
+out: A string; An absolute path to the output directory you would like to use. 
+
+
+Output:
+This function will save a png file with a heatmap overlay on top of the tissue H&E that shows the average  coexpression score for each spot in your visium object. 
 ```{r}
 seu <- m1001
 marks <- c('Cd8a', 'Cd4', 'Cd3e')
